@@ -12,7 +12,8 @@ relperm, `pcWG`, PVT, VE wells, VE boundary conditions and reconstruction of
 structures Stage 8 (hybrid) extends — stackable columns cut by connectivity
 and per-cell VE/fine branch points; and Stage 3: co2lab's hysteresis
 (residual trapping).
-A readable walkthrough is `../scripts/example_sloping_aquifer.jl`. The plan
+Readable walkthroughs: `../scripts/example_sloping_aquifer.jl` (Stage 2) and
+`../scripts/example_residual_trapping.jl` (Stage 3, residual trapping). The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
