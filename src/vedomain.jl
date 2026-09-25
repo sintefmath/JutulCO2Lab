@@ -34,6 +34,25 @@ function ve_average_rock(columns::VEColumns, dz::AbstractVector;
             ntg = isnothing(ntg) ? nothing : avg(ntg))
 end
 
+"""
+    ve_hydrostatic_pressure(geometry; rho_w, g = Jutul.gravity_constant)
+        -> Vector{Float64}
+
+Initial VE pressure per column: hydrostatic brine pressure at the **caprock**,
+`rho_w · g · z_top`, with `z_top` from [`ve_column_geometry`](@ref) (depth,
+positive down) and a constant brine density `rho_w`. This is co2lab's
+initial state (`exampleVEJohansen.m:83`, `sloping_aquifer.m:317`): no surface
+pressure offset, no JutulDarcy equilibration. It is the brine (reference
+phase) pressure; with no CO2 present the CO2 pressure equals it.
+
+Use this rather than the domain's cell centroids, which are mid-column on
+the `CoarseMesh` and would give a wrong pressure without any error.
+
+Returns a new vector, one value per column; `geometry` is only read.
+"""
+ve_hydrostatic_pressure(geometry; rho_w, g = Jutul.gravity_constant) =
+    rho_w * g .* geometry.z_top
+
 # Warn if kx and ky differ; VE permeability then uses kx (see ve_average_rock).
 function _warn_lateral_anisotropy(kx, ky, rtol)
     rel = abs.(kx .- ky) ./ max.(abs.(kx), abs.(ky), floatmin())

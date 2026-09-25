@@ -233,6 +233,14 @@ using MAT
             sides, unassigned = ve_boundary_sides(mesh, cols, ve.domain)
             # exposed faces of internal steps
             @test length(unassigned) == 718
+            # initial state: brine hydrostatic at the caprock, as exampleVEJohansen.m:83
+            s1 = matread(joinpath(refdir, "stage1_johansen.mat"))
+            p0 = ve_hydrostatic_pressure(ve.geometry; rho_w = 1020.0)
+            p_mrst = 1020.0 * 9.80665 .* vec(s1["z_caprock"])
+            @test maximum(abs.(p0 .- p_mrst) ./ p_mrst) < 1e-12
+            # not the mid-column centroids, which lie H/2 lower on average
+            zc = ve.domain[:cell_centroids][3, :]
+            @test all(p0 .< 1020.0 * 9.80665 .* zc)
             # fully offset faults: logical neighbour exists, no connection
             @test count(sides.across_fault) == 88
             fault_i = Set(cols.pillar[c][1] for c in sides.column[sides.across_fault])

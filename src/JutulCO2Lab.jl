@@ -38,6 +38,7 @@ export VEColumnSides, ve_column_sides
 
 include("vedomain.jl")
 export ve_average_rock, ve_domain, VEBoundarySides, ve_boundary_sides
+export ve_hydrostatic_pressure
 
 include("co2lab_fluid.jl")
 export co2lab_system, has_dissolution
