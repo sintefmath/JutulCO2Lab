@@ -18,7 +18,7 @@ removes, renames or changes the meaning of a structure (see `../CLAUDE.md`).
 | 1 | **`VEColumns`** | `vegrid.jl` | Column partition of the 3D mesh: `cells` (per column, top to bottom), `pos`, `partition` (fine cell → column), `pillar` (logical `(i, j)`) | the 3D mesh (`ve_columns`) |
 | 2 | *column geometry* (NamedTuple) | `vegrid.jl` | `(z_top, H, dz, z, dx, dy, z_cell)`: caprock depth, height, lateral extent per column; thickness, cumulative depth, centroid depth per fine cell | mesh, `VEColumns` (`ve_column_geometry`) |
 | 3 | *averaged rock* (NamedTuple) | `vedomain.jl` | `(perm, poro, ntg)` per column, thickness-weighted; perm from x only | `VEColumns`, `dz` of 2 (`ve_average_rock`) |
-| 4 | *VE domain* (NamedTuple) | `vedomain.jl` | `(domain, coarse, geometry, rock)`: the `DataDomain` on a `CoarseMesh` (with `:column_height`, caprock `:gdz`), that `CoarseMesh`, 2 and 3 | mesh, `VEColumns`, 2, 3 (`ve_domain`) |
+| 4 | *VE domain* (NamedTuple) | `vedomain.jl` | `(domain, coarse, geometry, rock)`: the `DataDomain` on a `CoarseMesh` (with `:column_height`, `:rugosity` per column, caprock `:gdz`), that `CoarseMesh`, 2 and 3 | mesh, `VEColumns`, 2, 3, caprock rugosity (`ve_domain`) |
 | 5 | **`VEColumnSides`** | `vefaces.jl` | Each column's lateral fine faces grouped by direction, with the neighbouring column (0: none) | mesh (direction tags), `VEColumns` (`ve_column_sides`) |
 | 6 | **`VEBoundarySides`** | `vedomain.jl` | Outer sides (no neighbour): direction, caprock edge depth and midpoint, area, centroid, normal, half transmissibility, fine faces, `across_fault` | 5, `VEColumns`, 4's domain (`ve_boundary_sides`, which also returns the unassigned faces) |
 | 7 | **`VEBoundaryCondition`** [force, passed as JutulDarcy's `bc`] | `vebc.jl` | co2lab's pressure BC on one open side: column, boundary pressure, transmissibility, edge-minus-caprock depth `dz`, inflow saturations | 6 (selected with `ve_select_sides`), 2 (`ve_boundary_conditions`) |
@@ -31,24 +31,25 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
-| 8 | **`CO2LabVEFluid`** | `ve_fluid.jl` | co2lab's VE fluid settings (makeVEFluid's options): residual saturations, endpoints, rugosity, reference densities and linear PVT, viscosities, pore-volume multiplier | nothing (`co2lab_ve_fluid`); supplies the constants of the variables in C |
+| 8 | **`CO2LabVEFluid`** | `ve_fluid.jl` | co2lab's VE fluid settings (makeVEFluid's fluid options): residual saturations, endpoints, reference densities and linear PVT, viscosities. Rugosity is in 4, rock compressibility in the model (20) | nothing (`co2lab_ve_fluid`); supplies the constants of the variables in C |
 
 ## C. Jutul variables and equations, in the order they are computed
 
 | # | Name | File | Role | Computed from |
 |---|---|---|---|---|
 | 9 | `ColumnHeight` [ScalarVariable] | `ve_fluid.jl` | parameter `H` | `domain[:column_height]` (4) |
+| 9b | `Rugosity` [ScalarVariable] | `ve_fluid.jl` | parameter `dh`, caprock rugosity per column | `domain[:rugosity]` (4); zero if absent |
 | 10 | **`MaxGasSaturation`** [ScalarVariable] | `co2lab_fluid.jl` | parameter `sGmax`, running maximum of converged `sG` | `sG`; constant `res_water` from 8 |
 | 11 | `GasSaturation` [ScalarVariable] | `co2lab_fluid.jl` | unknown `sG` | — |
 | 12 | `DissolvedGasRatio` [ScalarVariable] | `co2lab_fluid.jl` | unknown `rs` (dissolution on only) | — |
 | 13 | `PlumeHeights` [VectorVariables] | `ve_fluid.jl` | secondary: row 1 `h`, row 2 `h_max` | 11, 10, 9 |
-| 14 | `VESharpInterfaceRelPerm` [AbstractRelativePermeabilities] | `ve_fluid.jl` | relative permeabilities (co2lab's `sharp_interface_simple`) | 13, 9 |
+| 14 | `VESharpInterfaceRelPerm` [AbstractRelativePermeabilities] | `ve_fluid.jl` | relative permeabilities (co2lab's `sharp_interface_simple`) | 13, 9, 9b |
 | 15 | **`LinearShrinkage`** [PhaseVariables] | `co2lab_fluid.jl` | shrinkage factors `b` | pressure |
 | 16 | `BlackOilDensities` [PhaseVariables] | `co2lab_fluid.jl` | phase mass densities | 15 (and 12) |
 | 17 | `VECapillaryPressure` [AbstractCapillaryPressure] | `ve_fluid.jl` | `pcWG = Δρ·g·h` | 13, 16 |
 | 18 | `LinearViscosities` [PhaseVariables] | `ve_fluid.jl` | viscosities (used by `setup_co2lab_model`) | pressure |
 | 19 | **`ConstantViscosities`** [PhaseVariables] | `co2lab_fluid.jl` | placeholder default, replaced by 18 in `setup_co2lab_model` | — |
-| 20 | `LinearPoreVolume` [ScalarVariable] | `ve_fluid.jl` | pore volume `1 + c·(p − p_ref)` times the static pore volume | pressure, parameter `StaticFluidVolume` |
+| 20 | `LinearPoreVolume` [ScalarVariable] | `rock_compressibility.jl` | pore volume `1 + c·(p − p_ref)` times the static pore volume — co2lab's rock compressibility, set on the model by `set_co2lab_rock_compressibility!` (or `setup_co2lab_model`'s `rock_compressibility`); exchangeable for JutulDarcy's `LinearlyCompressiblePoreVolume` | pressure, parameter `StaticFluidVolume` |
 | 21 | `DissolvedCO2Mass` [ScalarVariable] | `co2lab_fluid.jl` | dissolved CO2 mass per cell | 12, 15, saturations, 20 |
 | 22 | **`DissolvedCO2Equation`** [JutulEquation] | `co2lab_fluid.jl` | dissolved-CO2 conservation with transfer term | 21, fluxes |
 
@@ -60,7 +61,7 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 | 24 | `CO2LabSystem` (alias) | `co2lab_fluid.jl` | JutulDarcy's `StandardBlackOilSystem` with formulation tag `:co2lab`; the variables of C attach to it | 23 when dissolution is on |
 | 25 | `CO2LabNoDissolutionSystem` (alias) | `co2lab_fluid.jl` | 24 without dissolved gas | 24 |
 | 26 | `CO2LabModel`, `CO2LabNoDissolutionModel` (aliases) | `co2lab_fluid.jl` | `SimulationModel`s of 24 / 25, for method dispatch | 24, 25 |
-| 27 | *co2lab model* (`MultiModel`) | `co2lab_fluid.jl` | `:Reservoir` (26, with C), one submodel per well, `:Facility` | 4, 8, well domains (`setup_co2lab_model`) |
+| 27 | *co2lab model* (`MultiModel`) | `co2lab_fluid.jl` | `:Reservoir` (26, with C), one submodel per well, `:Facility` | 4, 8, rock compressibility, well domains (`setup_co2lab_model`) |
 
 ## E. Wells and results
 

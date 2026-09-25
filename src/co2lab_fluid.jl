@@ -409,13 +409,19 @@ end
 
 """
     setup_co2lab_model(domain; wells = [], fluid = co2lab_ve_fluid(),
+                       rock_compressibility = (reference_pressure = 100e5,
+                                               compressibility = 1e-10),
                        rs_sat = nothing, transfer_rate = nothing) -> MultiModel
 
 VE reservoir model with co2lab's formulation and fluid, plus wells. `domain`
-must come from [`ve_domain`](@ref) (it needs `:column_height`). `fluid`
-([`co2lab_ve_fluid`](@ref)) gives the residual saturations, endpoints,
-rugosity, PVT and pore-volume multiplier. The configuration decides the
-unknowns (see the top of `co2lab_fluid.jl`):
+must come from [`ve_domain`](@ref) (it needs `:column_height`; its
+`:rugosity` gives the relperm's accretion layer). `fluid`
+([`co2lab_ve_fluid`](@ref)) gives the residual saturations, endpoints and
+PVT. `rock_compressibility` is passed to
+[`set_co2lab_rock_compressibility!`](@ref) — co2lab's linear pore-volume
+multiplier, with makeVEFluid's defaults; `nothing` keeps the pore volume
+constant (e.g. to use JutulDarcy's `set_rock_compressibility!` instead). The
+configuration decides the unknowns (see the top of `co2lab_fluid.jl`):
 
 - `rs_sat` and `transfer_rate` (1/s) turn rate-driven dissolution on. Both or
   neither must be given. Instantaneous dissolution is Stage 5 work and throws.
@@ -431,12 +437,14 @@ read.
 
 Returns a new `MultiModel` with submodels `:Reservoir`, one per well (named
 as the wells) and `:Facility`. The reservoir submodel has co2lab's VE relperm,
-`pcWG`, PVT and pore-volume multiplier, the parameters `:sGmax` and
-`:ColumnHeight`, and outputs `:sG`, `:sGmax`, `:PlumeHeights`,
+`pcWG`, PVT and (unless `nothing`) pore-volume multiplier, the parameters
+`:sGmax`, `:ColumnHeight` and `:Rugosity`, and outputs `:sG`, `:sGmax`, `:PlumeHeights`,
 `:CapillaryPressure` (plus `:Rs`, `:DissolvedCO2` with dissolution) besides
 JutulDarcy's defaults. The wells get the same PVT.
 """
 function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve_fluid(),
+                            rock_compressibility = (reference_pressure = 100e5,
+                                                    compressibility = 1e-10),
                             rs_sat = nothing, transfer_rate = nothing)
     fluid.res_gas > 0 && error("hysteresis (res_gas > 0: sGmax as an unknown) is " *
                                "roadmap Stage 3; not implemented yet")
@@ -453,6 +461,8 @@ function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve
     rmodel.parameters[:sGmax] = MaxGasSaturation(fluid.res_water)
     push!(rmodel.output_variables, :sG, :sGmax)
     _set_ve_fluid!(rmodel, fluid)
+    isnothing(rock_compressibility) ||
+        set_co2lab_rock_compressibility!(rmodel; rock_compressibility...)
 
     shrinkage, viscosity = _co2lab_pvt(fluid)
     for m in values(model.models)

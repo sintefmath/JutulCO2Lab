@@ -28,8 +28,8 @@ function _ve_well_vs_mrst_runs(d, ref_rate, ref_bhp, ref_src)
     g, rho_w = d["gravity"], d["rhow"]
     fluid = co2lab_ve_fluid(krmax = (1.0, 1.0), co2_rho_ref = d["rhoc"],
                             wat_rho_ref = rho_w, co2_mu_ref = d["muco2"],
-                            wat_mu_ref = d["muw"], pvMult_p_ref = d["p_ref"],
-                            pvMult_fac = d["cf_rock"])
+                            wat_mu_ref = d["muw"])
+    rc = (reference_pressure = d["p_ref"], compressibility = d["cf_rock"])
 
     bc = ve_boundary_conditions(ve, sides, ve_select_sides(sides, cols;
                                 directions = (:right,)); pressure = z -> rho_w * g * z)
@@ -41,13 +41,15 @@ function _ve_well_vs_mrst_runs(d, ref_rate, ref_bhp, ref_src)
     function run(target)
         if target isa Real
             # a CO2 source term at this rate instead of the well
-            model = setup_co2lab_model(ve.domain; fluid = fluid)
+            model = setup_co2lab_model(ve.domain; fluid = fluid,
+                                       rock_compressibility = rc)
             src(q) = [SourceTerm(col, q; fractional_flow = [0.0, 1.0])]
             f_on = setup_reservoir_forces(model; bc = bc, sources = src(target))
             f_off = setup_reservoir_forces(model; bc = bc, sources = src(0.0))
         else
             w = setup_ve_well(ve, col; name = :inj, radius = d["well"]["r"])
-            model = setup_co2lab_model(ve.domain; wells = [w], fluid = fluid)
+            model = setup_co2lab_model(ve.domain; wells = [w], fluid = fluid,
+                                       rock_compressibility = rc)
             forces(c) = setup_reservoir_forces(model; bc = bc, control = Dict(:inj => c))
             f_on = forces(co2_injector_control(target, fluid))
             f_off = forces(DisabledControl())
@@ -192,8 +194,8 @@ function _ve_bc_runs(d)
     ve, cols, sides = _ve_case(d)
     g, rhow, rhoc = d["gravity"], d["rhow"], d["rhoc"]
     fluid = co2lab_ve_fluid(krmax = (1.0, 1.0), co2_rho_ref = rhoc, wat_rho_ref = rhow,
-                            co2_mu_ref = d["muco2"], wat_mu_ref = d["muw"],
-                            pvMult_p_ref = d["p_ref"], pvMult_fac = d["cf_rock"])
+                            co2_mu_ref = d["muco2"], wat_mu_ref = d["muw"])
+    rc = (reference_pressure = d["p_ref"], compressibility = d["cf_rock"])
 
     p0 = ve_hydrostatic_pressure(ve.geometry; rho_w = rhow, g = g)
     hydro(z) = rhow * g * z
@@ -203,7 +205,8 @@ function _ve_bc_runs(d)
     dt = vec(d["dT"])[1:8]
 
     function run(bcs, wells, control)
-        model = setup_co2lab_model(ve.domain; wells = wells, fluid = fluid)
+        model = setup_co2lab_model(ve.domain; wells = wells, fluid = fluid,
+                                   rock_compressibility = rc)
         push!(model[:Reservoir].output_variables, :RelativePermeabilities,
               :PhaseViscosities, :PhaseMassDensities)
         forces = setup_reservoir_forces(model; control = control, bc = bcs)
@@ -243,7 +246,8 @@ function _ve_bc_runs(d)
     @test (total + exited[2]) / injected ≈ 1 rtol = 1e-5
 
     # dissolution: Stage 5
-    model = setup_co2lab_model(ve.domain; fluid = fluid, rs_sat = 0.03,
+    model = setup_co2lab_model(ve.domain; fluid = fluid, rock_compressibility = rc,
+                               rs_sat = 0.03,
                                transfer_rate = 1e-7)
     forces = setup_reservoir_forces(model; bc = bcs)
     case = JutulCase(model, dt[1:1], forces; parameters = setup_parameters(model),
@@ -291,15 +295,16 @@ function _ve_well_datum_runs(d, ve, col, r)
     geo, g, rhoc = ve.geometry, d["gravity"], d["rhoc"]
     fluid = co2lab_ve_fluid(krmax = (1.0, 1.0), co2_rho_ref = rhoc,
                             wat_rho_ref = d["rhow"], co2_mu_ref = d["muco2"],
-                            wat_mu_ref = d["muw"], pvMult_p_ref = d["p_ref"],
-                            pvMult_fac = d["cf_rock"])
+                            wat_mu_ref = d["muw"])
+    rc = (reference_pressure = d["p_ref"], compressibility = d["cf_rock"])
 
     p0 = ve_hydrostatic_pressure(geo; rho_w = d["rhow"], g = g)
     dt = vec(d["dT"])[1:8]
 
     function run(datum)
         w = setup_ve_well(ve, col; name = :inj, radius = r, datum = datum)
-        model = setup_co2lab_model(ve.domain; wells = [w], fluid = fluid)
+        model = setup_co2lab_model(ve.domain; wells = [w], fluid = fluid,
+                                   rock_compressibility = rc)
         ctrl = co2_injector_control(TotalRateTarget(d["injection_rate"]), fluid)
         forces = setup_reservoir_forces(model, control = Dict(:inj => ctrl))
 
@@ -767,6 +772,35 @@ end
             # the VE fluid needs column heights
             plain = reservoir_domain(mesh, permeability = 0.5Darcy, porosity = 0.25)
             @test_throws ErrorException setup_co2lab_model(plain)
+
+            # makeVEFluid options that belong to the grid or the model
+            @test_throws ArgumentError co2lab_ve_fluid(rugosity = 1.0)
+            @test_throws ArgumentError co2lab_ve_fluid(pvMult_fac = 1e-10)
+        end
+
+        @testset "rugosity (grid) and rock compressibility (model)" begin
+            # rugosity per column from the domain; zero where there is none
+            dom = reservoir_domain(mesh, permeability = 0.5Darcy, porosity = 0.25)
+            dom[:column_height, Cells()] = fill(20.0, nx)
+            dom[:rugosity, Cells()] = collect(1.0:nx) ./ 10
+            prm(d; kw...) = setup_parameters(setup_co2lab_model(d; kw...))[:Reservoir]
+            @test prm(dom)[:Rugosity] == collect(1.0:nx) ./ 10
+            @test prm(domain)[:Rugosity] == zeros(nx)
+
+            # compressible by default (makeVEFluid's values); static with nothing
+            r = setup_co2lab_model(domain)[:Reservoir]
+            @test r.secondary_variables[:FluidVolume] isa JutulCO2Lab.LinearPoreVolume
+            @test r.secondary_variables[:FluidVolume].c == 1e-10
+            r0 = setup_co2lab_model(domain; rock_compressibility = nothing)[:Reservoir]
+            @test haskey(r0.parameters, :FluidVolume)
+            @test !haskey(r0.secondary_variables, :FluidVolume)
+
+            # ...and JutulDarcy's native form can be installed instead
+            m = setup_co2lab_model(domain; rock_compressibility = nothing)
+            JutulDarcy.set_rock_compressibility!(m; reference_pressure = 100e5,
+                                                 compressibility = 1e-10)
+            fv = m[:Reservoir].secondary_variables[:FluidVolume]
+            @test fv isa JutulDarcy.LinearlyCompressiblePoreVolume
         end
 
         @testset "sGmax update: running maximum, capped at 1 - res_water" begin
@@ -925,13 +959,16 @@ end
             pvt = (co2_rho_ref = 760.0, wat_rho_ref = 1100.0,
                    co2_rho_pvt = (4.3e-9, 150e5), wat_rho_pvt = (4.3e-10, 100e5),
                    co2_mu_pvt = (2e-9, 150e5))
-            cases = [co2lab_ve_fluid(; residual = (0.0, 0.0), pvt...),
-                     co2lab_ve_fluid(; residual = (0.27, 0.20), pvt...),
-                     co2lab_ve_fluid(; residual = (0.27, 0.20), krmax = (0.9, 0.7),
-                                     rugosity = 2.0, pvt...)]
+            # (fluid, caprock rugosity dh): rugosity is a grid property here
+            cases = [(co2lab_ve_fluid(; residual = (0.0, 0.0), pvt...), 0.0),
+                     (co2lab_ve_fluid(; residual = (0.27, 0.20), pvt...), 0.0),
+                     (co2lab_ve_fluid(; residual = (0.27, 0.20), krmax = (0.9, 0.7),
+                                      pvt...), 2.0)]
+            # the dump's pore-volume multiplier: 1e-5 /bar about 100 bar
+            pv_rock = JutulCO2Lab.LinearPoreVolume(100e5, 1e-10)
             tol = Tolerance(1e-12, 1e-14)
             rep = OracleReport("VE fluid vs MRST")
-            for (c, fl) in enumerate(cases)
+            for (c, (fl, dh)) in enumerate(cases)
                 r = d["case$c"]
                 # every sample (column) of every sample set, flattened
                 sg, sgmax, p = vec(r["sg"]), vec(r["sgmax"]), vec(r["p"])
@@ -939,7 +976,7 @@ end
                 hh = JutulCO2Lab._plume_heights.(sg, sgmax, Hs, fl.res_water, fl.res_gas)
                 h, hmax = first.(hh), last.(hh)
                 kr = JutulCO2Lab._sharp_interface_relperm.(h, hmax, Hs, fl.krw, fl.krg,
-                                                           fl.rugosity)
+                                                           dh)
 
                 b(ph) = JutulCO2Lab._linear.(1.0, Ref(fl.rho_pvt[ph]), p)
                 rho = [fl.rho_ref[ph] .* b(ph) for ph in 1:2]
@@ -956,7 +993,7 @@ end
                 check!(rep, "case $c: muW", mu(1), r["muW"]; tol = tol)
                 check!(rep, "case $c: muG", mu(2), r["muG"]; tol = tol)
 
-                pvm = 1 .+ fl.pv_c .* (p .- fl.pv_p_ref)
+                pvm = 1 .+ pv_rock.c .* (p .- pv_rock.p_ref)
                 check!(rep, "case $c: pore-volume multiplier", pvm, r["pvMult"];
                        tol = tol)
             end

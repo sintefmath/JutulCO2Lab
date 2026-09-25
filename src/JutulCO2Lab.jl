@@ -41,6 +41,9 @@ include("vedomain.jl")
 export ve_average_rock, ve_domain, VEBoundarySides, ve_boundary_sides
 export ve_hydrostatic_pressure
 
+include("rock_compressibility.jl")
+export set_co2lab_rock_compressibility!
+
 include("ve_fluid.jl")
 export co2lab_ve_fluid, CO2LabVEFluid
 

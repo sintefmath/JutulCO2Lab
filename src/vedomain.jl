@@ -72,18 +72,20 @@ end
 # ------------------------------- The VE domain --------------------------------
 
 """
-    ve_domain(mesh, columns; perm_x, perm_y = nothing, poro, ntg = nothing)
-        -> NamedTuple
+    ve_domain(mesh, columns; perm_x, perm_y = nothing, poro, ntg = nothing,
+              rugosity = 0.0) -> NamedTuple
 
 Build the VE reservoir domain: a `CoarseMesh` over `mesh`, one block per
 column, with thickness-averaged rock and the gravity term taken from the
-caprock.
+caprock. `rugosity` is the caprock rugosity `dh` (m) — co2lab's makeVEFluid
+option, a property of the grid here — as a scalar or one value per column;
+the relperm loses an accretion layer `min(dh, H)` under the caprock.
 
 Returns the NamedTuple `(domain, coarse, geometry, rock)`, all new:
 - `domain`: the `DataDomain` on the `CoarseMesh` (from `reservoir_domain`),
-  with the averaged `:permeability`, `:porosity` (and `:net_to_gross`) and
-  `:column_height` per column, and `:gdz` on `Faces()` from the caprock
-  depths;
+  with the averaged `:permeability`, `:porosity` (and `:net_to_gross`),
+  `:column_height` and `:rugosity` per column, and `:gdz` on `Faces()` from
+  the caprock depths;
 - `coarse`: that `CoarseMesh` — the same object `domain` wraps;
 - `geometry`: [`ve_column_geometry`](@ref)'s result;
 - `rock`: [`ve_average_rock`](@ref)'s result.
@@ -103,7 +105,7 @@ Deliberately **not** done, and why:
   roadmap Stage 1 item 7.
 """
 function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing, poro,
-                   ntg = nothing)
+                   ntg = nothing, rugosity = 0.0)
     geometry = ve_column_geometry(mesh, columns)
     rock = ve_average_rock(columns, geometry.dz; perm_x, perm_y, poro, ntg)
 
@@ -114,6 +116,9 @@ function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing, poro,
 
     domain[:gdz, Faces()] = Jutul.compute_face_gdz(domain[:neighbors], geometry.z_top)
     domain[:column_height, Cells()] = geometry.H
+    ncol = number_of_columns(columns)
+    domain[:rugosity, Cells()] = rugosity isa Number ? fill(Float64(rugosity), ncol) :
+                                 collect(Float64, rugosity)
     return (domain = domain, coarse = coarse, geometry = geometry, rock = rock)
 end
 

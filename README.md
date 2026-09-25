@@ -99,8 +99,9 @@ src/provenance.jl    source commits + dirty state, recorded in every report
 src/vegrid.jl        VE columns on the 3D mesh: partition, trimming, column geometry
 src/vefaces.jl       face directions (MRST tags / logical indices) and column sides — topology only
 src/vedomain.jl      VE domain on a CoarseMesh: upscaled rock, caprock datum, boundary sides
+src/rock_compressibility.jl  co2lab's linear pore volume, a model setting
 src/ve_fluid.jl      co2lab's VE fluid: plume heights, sharp-interface relperm, pcWG,
-                     linear PVT and pore volume
+                     linear PVT; column height and rugosity parameters
 src/co2lab_fluid.jl  co2lab's fluid system: black-oil with a :co2lab formulation,
                      unknowns by configuration; model, state and simulator setup
 src/vewells.jl       VE wells: co2lab's well index, pressure datum option, CO2 injector
