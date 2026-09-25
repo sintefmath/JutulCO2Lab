@@ -4,19 +4,29 @@
 # Everything is derived from the 3D mesh and the VEColumns partition.
 
 """
-    ve_average_rock(columns, dz; perm_x, poro, ntg = nothing) -> NamedTuple
+    ve_average_rock(columns, dz; perm_x, perm_y = nothing, poro, ntg = nothing,
+                    anisotropy_rtol = 1e-6) -> NamedTuple
 
 Thickness-weighted column averages, exactly as MRST's `averageRock`:
-`sum(x .* dz) / sum(dz)` per column, for x-permeability, porosity and (if
+`sum(x .* dz) / sum(dz)` per column, for permeability, porosity and (if
 given) net-to-gross. `dz` is per fine cell in `columns.cells` order (from
-[`ve_column_geometry`](@ref)); `perm_x`, `poro`, `ntg` are per fine cell of the
-3D mesh. Only x-permeability is used — co2lab discards anisotropy.
+[`ve_column_geometry`](@ref)); `perm_x`, `perm_y`, `poro`, `ntg` are per fine
+cell of the 3D mesh.
+
+VE permeability is a **scalar computed from lateral permeability only**
+(researcher's decision, 2026-09-25); vertical permeability is never used.
+It is the thickness-weighted x-permeability, as co2lab. If `perm_y` is given
+and differs from `perm_x` by more than `anisotropy_rtol` (relative) in any
+cell, a warning reports how many cells and the largest ratio, and x is used
+anyway.
 
 Returns the NamedTuple `(perm, poro, ntg)` of new per-column vectors;
 `ntg` is `nothing` if not given. The arguments are only read.
 """
 function ve_average_rock(columns::VEColumns, dz::AbstractVector;
-                         perm_x, poro, ntg = nothing)
+                         perm_x, perm_y = nothing, poro, ntg = nothing,
+                         anisotropy_rtol = 1e-6)
+    isnothing(perm_y) || _warn_lateral_anisotropy(perm_x, perm_y, anisotropy_rtol)
     avg(x) = [sum(x[columns.cells[r]] .* dz[r]) / sum(dz[r])
               for r in (columns.pos[c]:(columns.pos[c+1] - 1)
                         for c in 1:number_of_columns(columns))]
@@ -24,8 +34,21 @@ function ve_average_rock(columns::VEColumns, dz::AbstractVector;
             ntg = isnothing(ntg) ? nothing : avg(ntg))
 end
 
+# Warn if kx and ky differ; VE permeability then uses kx (see ve_average_rock).
+function _warn_lateral_anisotropy(kx, ky, rtol)
+    rel = abs.(kx .- ky) ./ max.(abs.(kx), abs.(ky), floatmin())
+    n = count(>(rtol), rel)
+    n == 0 && return nothing
+    ratio = maximum(max.(kx ./ ky, ky ./ kx))
+    @warn "Lateral permeability is anisotropic in $n of $(length(kx)) cells " *
+          "(largest kx/ky or ky/kx: $(round(ratio, sigdigits = 3))); VE " *
+          "permeability uses x-permeability only"
+    return nothing
+end
+
 """
-    ve_domain(mesh, columns; perm_x, poro, ntg = nothing) -> NamedTuple
+    ve_domain(mesh, columns; perm_x, perm_y = nothing, poro, ntg = nothing)
+        -> NamedTuple
 
 Build the VE reservoir domain: a `CoarseMesh` over `mesh`, one block per
 column, with thickness-averaged rock and the gravity term taken from the
@@ -53,9 +76,10 @@ Deliberately **not** done, and why:
   else that reads centroid depths must be overridden where it is used — see
   roadmap Stage 1 item 7.
 """
-function ve_domain(mesh, columns::VEColumns; perm_x, poro, ntg = nothing)
+function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing, poro,
+                   ntg = nothing)
     geometry = ve_column_geometry(mesh, columns)
-    rock = ve_average_rock(columns, geometry.dz; perm_x, poro, ntg)
+    rock = ve_average_rock(columns, geometry.dz; perm_x, perm_y, poro, ntg)
     coarse = CoarseMesh(mesh, columns.partition)
     kw = isnothing(rock.ntg) ? (;) : (net_to_gross = rock.ntg,)
     domain = reservoir_domain(coarse; permeability = rock.perm, porosity = rock.poro,

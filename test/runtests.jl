@@ -173,8 +173,9 @@ using MAT
             mesh = ve_mesh_from_mrst(d["G3"])
             cols, _ = ve_columns(mesh)
             r3 = d["rock3D"]
-            ve = ve_domain(mesh, cols; perm_x = Float64.(r3["perm"])[:, 1],
-                           poro = vec(Float64.(r3["poro"])))
+            K = Float64.(r3["perm"])
+            ve = @test_logs ve_domain(mesh, cols; perm_x = K[:, 1], perm_y = K[:, 2],
+                                      poro = vec(Float64.(r3["poro"])))
             sides, _ = ve_boundary_sides(mesh, cols, ve.domain)
             rep = OracleReport("VE domain, Johansen")
             check!(rep, "perm", ve.rock.perm, s1["perm"]; tol = Tolerance(1e-12, 0.0))
@@ -219,8 +220,9 @@ using MAT
             @test length(agree) == 159578 && all(agree)
             # column sides: neighbours are exactly the CoarseMesh's column pairs
             r3 = d["rock3D"]
-            ve = ve_domain(mesh, cols; perm_x = Float64.(r3["perm"])[:, 1],
-                           poro = vec(Float64.(r3["poro"])))
+            K = Float64.(r3["perm"])
+            ve = @test_logs ve_domain(mesh, cols; perm_x = K[:, 1], perm_y = K[:, 2],
+                                      poro = vec(Float64.(r3["poro"])))
             cs = ve_column_sides(mesh, cols)
             Nc = ve.domain[:neighbors]
             side_pairs = Set(minmax(cs.column[i], cs.neighbour[i])
@@ -259,6 +261,11 @@ using MAT
                              for i in 1:length(cs) if cs.neighbour[i] != 0)
             @test length(side_pairs) == (nx - 1) * ny + nx * (ny - 1)
             ve = ve_domain(mesh, cols; perm_x = fill(1e-13, 18), poro = fill(0.2, 18))
+            # lateral anisotropy: warning, and the VE permeability is x's
+            kx, ky = fill(1e-13, 18), fill(2e-13, 18)
+            rock = @test_logs (:warn, r"anisotropic in 18 of 18") ve_average_rock(
+                cols, geo.dz; perm_x = kx, perm_y = ky, poro = fill(0.2, 18))
+            @test rock.perm ≈ fill(1e-13, 6)
             sides, unassigned = ve_boundary_sides(mesh, cols, ve.domain)
             @test length(sides) == 10
             @test sort(unique(round.(sides.edge_depth, digits = 6))) == [1000.0, 1015.0]
