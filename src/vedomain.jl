@@ -116,6 +116,8 @@ Lateral boundary sides of the VE columns — the counterpart of the boundary
 edges of MRST's top-surface grid. One entry per (column, side):
 
 - `column`: the column (coarse cell)
+- `direction`: lateral direction of the side, 1..4 = `:left`, `:right`,
+  `:lower`, `:upper` (Jutul's direction tags: i−, i+, j−, j+)
 - `edge_depth`: caprock depth along the side — mean depth of the two top-face
   nodes bounding it (MRST's `Gt.faces.z`, but without MRST's averaging of
   nodes across pillar offsets)
@@ -135,6 +137,7 @@ edges of MRST's top-surface grid. One entry per (column, side):
 """
 struct VEBoundarySides
     column::Vector{Int}
+    direction::Vector{Int}
     edge_depth::Vector{Float64}
     edge_midpoint::Vector{NTuple{2, Float64}}
     area::Vector{Float64}
@@ -177,7 +180,7 @@ function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
     g = _boundary_geometry(mesh)
     bdir = _boundary_directions(mesh)
     perm, cc = domain[:permeability], domain[:cell_centroids]
-    out = (column = Int[], depth = Float64[], mid = NTuple{2, Float64}[],
+    out = (column = Int[], dir = Int[], depth = Float64[], mid = NTuple{2, Float64}[],
            area = Float64[], cen = NTuple{3, Float64}[], nrm = NTuple{3, Float64}[],
            T = Float64[], faces = Vector{Int}[], fault = Bool[])
     column_at = Dict(columns.pillar[c] => c for c in 1:number_of_columns(columns))
@@ -191,15 +194,16 @@ function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
         depth, mid = _side_top_edge(g, bdir, top, d, col)
         centroid = (cc[1, col], cc[2, col], cc[3, col])
         A, C, N, t = _side_aggregate(g, fs, perm[col], centroid)
-        push!(out.column, col); push!(out.depth, depth); push!(out.mid, mid)
+        push!(out.column, col); push!(out.dir, d)
+        push!(out.depth, depth); push!(out.mid, mid)
         push!(out.area, A); push!(out.cen, C); push!(out.nrm, N)
         push!(out.T, t); push!(out.faces, fs)
         # a column exists across this side, but nothing connects to it: sealed fault
         across = _logical_neighbour_pillar(columns.pillar[col], d)
         push!(out.fault, haskey(column_at, across))
     end
-    sides = VEBoundarySides(out.column, out.depth, out.mid, out.area, out.cen, out.nrm,
-                            out.T, out.faces, out.fault)
+    sides = VEBoundarySides(out.column, out.dir, out.depth, out.mid, out.area, out.cen,
+                            out.nrm, out.T, out.faces, out.fault)
     return (sides, unassigned)
 end
 

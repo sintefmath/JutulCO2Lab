@@ -5,6 +5,112 @@ using Jutul
 using JutulDarcy
 using MAT
 
+# The VE sloping-aquifer domain of an MRST dump (3D grid G3 and rock).
+function _ve_case(d)
+    mesh = ve_mesh_from_mrst(d["G3"])
+    cols, _ = ve_columns(mesh)
+    ve = ve_domain(mesh, cols; perm_x = vec(d["rock"]["perm"]),
+                   poro = vec(d["rock"]["poro"]))
+    sides, _ = ve_boundary_sides(mesh, cols, ve.domain)
+    return ve, cols, sides
+end
+
+# ve_bc.mat: sides, boundary pressures and transmissibilities against co2lab's
+# open boundary, and the boundary fluxes against co2lab's on sampled states.
+function _ve_bc_vs_mrst(d)
+    ve, cols, sides = _ve_case(d)
+    ix = ve_select_sides(sides, cols)
+    g = d["gravity"]
+    # explicit map, our side -> MRST's boundary face, by caprock-edge midpoint
+    fc = d["face_centroid"]
+    dist(s, r) = hypot(sides.edge_midpoint[s][1] - fc[r, 1],
+                       sides.edge_midpoint[s][2] - fc[r, 2])
+    perm = [argmin([dist(s, r) for r in axes(fc, 1)]) for s in ix]
+    @test length(ix) == size(fc, 1) && allunique(perm)
+    @test maximum(dist(s, r) for (s, r) in zip(ix, perm)) < 1e-9
+    own = ve_boundary_conditions(ve, sides, ix; pressure = z -> 1050 * g * z)
+    bcs = ve_boundary_conditions(ve, sides, ix; pressure = z -> 1050 * g * z,
+                                 trans = vec(d["T"])[perm])
+    rep = OracleReport("VE boundary conditions vs MRST co2lab")
+    exact = Tolerance(0.0, 0.0)
+    check!(rep, "column", [b.cell for b in bcs], d["face_cell"]; perm = perm,
+           tol = exact)
+    check!(rep, "edge depth", sides.edge_depth[ix], d["face_z"]; perm = perm,
+           tol = Tolerance(1e-12, 1e-9))
+    check!(rep, "boundary pressure", [b.pressure for b in bcs], d["bc_value"];
+           perm = perm, tol = Tolerance(1e-12, 1e-6))
+    # our half transmissibility, from the 3D grid (Stage 1 geometry)
+    check!(rep, "half transmissibility", [b.trans for b in own], d["T"];
+           perm = perm, tol = Tolerance(5e-3, 0.0))
+    r = d["samples"]
+    for (ph, p, mob, rho, q) in ((1, "pW", "mobW", "rhoW", "qResW"),
+                                  (2, "pG", "mobG", "rhoG", "qResG"))
+        flux = [JutulCO2Lab._ve_bc_volume_flux(b, r[p][b.cell, s], r[mob][b.cell, s],
+                    r[rho][b.cell, s], r["mobW"][b.cell, s] + r["mobG"][b.cell, s],
+                    b.sat[ph], g) for b in bcs, s in axes(r["p"], 2)]
+        check!(rep, "boundary flux, phase $ph", vec(flux), vec(r[q][perm, :]);
+               tol = Tolerance(1e-11, 1e-20))
+    end
+    passed(rep) || display(rep)
+    @test passed(rep)
+    # the samples exercise inflow and outflow of brine and outflow of CO2
+    @test any(<(0), r["qResW"]) && any(>(0), r["qResW"]) && any(<(0), r["qResG"])
+end
+
+# Model level: hydrostatic equilibrium stays at rest with every side open;
+# with injection, CO2 in place + exited + in the wellbore = injected.
+function _ve_bc_runs(d)
+    ve, cols, sides = _ve_case(d)
+    g, rhow, rhoc = d["gravity"], d["rhow"], d["rhoc"]
+    fluid = co2lab_ve_fluid(krmax = (1.0, 1.0), co2_rho_ref = rhoc, wat_rho_ref = rhow,
+                            co2_mu_ref = d["muco2"], wat_mu_ref = d["muw"],
+                            pvMult_p_ref = d["p_ref"], pvMult_fac = d["cf_rock"])
+    p0 = ve_hydrostatic_pressure(ve.geometry; rho_w = rhow, g = g)
+    hydro(z) = rhow * g * z
+    all_open = ve_boundary_conditions(ve, sides, ve_select_sides(sides, cols);
+                                      pressure = hydro)
+    dt = vec(d["dT"])[1:8]
+    function run(bcs, wells, control)
+        model = setup_co2lab_model(ve.domain; wells = wells, fluid = fluid)
+        push!(model[:Reservoir].output_variables, :RelativePermeabilities,
+              :PhaseViscosities, :PhaseMassDensities)
+        forces = setup_reservoir_forces(model; control = control, bc = bcs)
+        case = JutulCase(model, dt, forces; parameters = setup_parameters(model),
+                         state0 = setup_co2lab_state(model; pressure = p0))
+        sim, cfg = setup_co2lab_simulator(case; info_level = -1,
+                                          output_substates = true)
+        return simulate_reservoir(case; simulator = sim, config = cfg).result
+    end
+    rest = run(all_open, [], nothing)
+    @test maximum(abs.(rest.states[end][:Reservoir][:Pressure] .- p0)) < 1e-6
+    @test maximum(rest.states[end][:Reservoir][:sG]) == 0.0
+    # injection, open updip end only (co2lab's cross-sectional setup)
+    right = ve_select_sides(sides, cols; directions = (:right,))
+    bcs = ve_boundary_conditions(ve, sides, right; pressure = hydro)
+    @test [b.cell for b in bcs] == [Int(d["bc"]["cell"])]
+    w = setup_ve_well(ve, Int(d["well"]["cells"]); name = :inj)
+    ctrl = co2_injector_control(TotalRateTarget(d["injection_rate"]), fluid)
+    res = run(bcs, [w], Dict(:inj => ctrl))
+    sub, dts, _ = Jutul.expand_to_ministeps(res)
+    rate(s) = s[:Facility][:TotalSurfaceMassRate][1]
+    injected = sum(rate(s) * t for (s, t) in zip(sub, dts))
+    # exited mass, (brine, CO2), sub-step by sub-step
+    exited = sum(vec(sum(ve_boundary_mass_fluxes(bcs, s[:Reservoir]), dims = 2)) * t
+                 for (s, t) in zip(sub, dts))
+    last = res.states[end]
+    total = sum(last[:Reservoir][:TotalMasses][2, :]) + last[:inj][:TotalMasses][2, 1]
+    # brine is pushed out; the CO2 has not reached the boundary yet
+    @test exited[1] > 0
+    @test (total + exited[2]) / injected ≈ 1 rtol = 1e-5
+    # dissolution: Stage 5
+    model = setup_co2lab_model(ve.domain; fluid = fluid, rs_sat = 0.03,
+                               transfer_rate = 1e-7)
+    forces = setup_reservoir_forces(model; bc = bcs)
+    case = JutulCase(model, dt[1:1], forces; parameters = setup_parameters(model),
+                     state0 = setup_co2lab_state(model; pressure = p0))
+    @test_throws ErrorException simulate_reservoir(case; info_level = -1)
+end
+
 # Sloping aquifer (sloping_aquifer.mat): geometry and well index against co2lab,
 # and the well datum options on a short run.
 function _ve_wells_vs_mrst(d)
@@ -262,6 +368,15 @@ end
             check!(rep, "boundary sides", length(sides), n_bnd_edges; tol = exact)
             passed(rep) || display(rep)
             @test passed(rep)
+            # opening sides: sealed fault sides only on request
+            n_fault = count(sides.across_fault)
+            @test length(ve_select_sides(sides, cols)) == length(sides) - n_fault
+            @test length(ve_select_sides(sides, cols; include_across_fault = true)) ==
+                  length(sides)
+            right = ve_select_sides(sides, cols; directions = (:right,), j = 1:20)
+            @test all(sides.direction[right] .== 2)
+            @test all(cols.pillar[c][2] <= 20 for c in sides.column[right])
+            @test_throws ArgumentError ve_select_sides(sides, cols; directions = (:top,))
         end
     end
 
@@ -542,6 +657,21 @@ end
         end
     end
 
+
+    @testset "VE boundary conditions (Stage 2 item 5)" begin
+        f = joinpath(refdir, "ve_bc.mat")
+        if !isfile(f)
+            @info "Skipping: $f not generated (scripts/mrst_dump_ve_bc.m)"
+        else
+            _ve_bc_vs_mrst(matread(f))
+        end
+        f = joinpath(refdir, "sloping_aquifer.mat")
+        if !isfile(f)
+            @info "Skipping: $f not generated (scripts/mrst_dump_sloping_aquifer.m)"
+        else
+            _ve_bc_runs(matread(f))
+        end
+    end
 
     @testset "VE fluid vs MRST co2lab (Stage 2 items 1, 3)" begin
         f = joinpath(refdir, "ve_fluid.mat")

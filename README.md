@@ -7,9 +7,9 @@ storage simulator on top of [Jutul](https://github.com/sintefmath/Jutul.jl) /
 What exists: the environment, the oracle harness, the VE domain (Stage 1:
 columns, geometry, rock, caprock datum, boundary sides — all derived from the
 3D grid and verified against MRST), and Stage 2 items 0–4: co2lab's fluid
-system, VE relperm, `pcWG`, PVT and VE wells, running end to end on co2lab's
-sloping aquifer (`../scripts/stage2_sloping_aquifer.jl`). Boundary conditions
-and reconstruction are still to come. The plan lives in
+system, VE relperm, `pcWG`, PVT, VE wells and VE boundary conditions (items
+0–5), running end to end on co2lab's sloping aquifer
+(`../scripts/stage2_sloping_aquifer.jl`). Reconstruction is still to come. The plan lives in
 `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
@@ -104,8 +104,10 @@ src/ve_fluid.jl      co2lab's VE fluid: plume heights, sharp-interface relperm, 
 src/co2lab_fluid.jl  co2lab's fluid system: black-oil with a :co2lab formulation,
                      unknowns by configuration; model, state and simulator setup
 src/vewells.jl       VE wells: co2lab's well index, pressure datum option, CO2 injector
-test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid and wells
-                     (vs MRST), toolchain smoke test
+src/vebc.jl          VE boundary conditions: co2lab's pressure BC as a force, side
+                     selection, exited mass
+test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, wells and
+                     boundary conditions (vs MRST), toolchain smoke test
 ../scripts/          MRST/Octave reference dumps, prototypes, gate scripts
 ```
 
