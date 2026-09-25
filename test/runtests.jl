@@ -15,11 +15,12 @@ function _ve_case(d)
     return ve, cols, sides
 end
 
-# mrst_ref_{rate,bhp}.mat (scripts/stage2_well_check.jl): co2lab's sloping
-# aquifer run by MRST on Julia's geometry, same report steps, tight
-# tolerances. Julia's run must agree to well below the measured differences'
-# order (BHP 1e-5, rate 3e-4, pressure 5e-6, sG 1.3e-5; roadmap item 7).
-function _ve_well_vs_mrst_runs(d, ref_rate, ref_bhp)
+# mrst_ref_{rate,bhp,src}.mat (scripts/stage2_mrst_comparison.jl): co2lab's
+# sloping aquifer run by MRST on Julia's geometry, same report steps, tight
+# tolerances. With a source term instead of the well, Julia matches to solver
+# precision (measured 5e-10); with the well, to the wellbore-storage
+# difference (measured BHP 1e-5, rate 3e-4, pressure 5e-6, sG 1.3e-5).
+function _ve_well_vs_mrst_runs(d, ref_rate, ref_bhp, ref_src)
     ve, cols, sides = _ve_case(d)
     g, rho_w = d["gravity"], d["rhow"]
     fluid = co2lab_ve_fluid(krmax = (1.0, 1.0), co2_rho_ref = d["rhoc"],
@@ -32,11 +33,19 @@ function _ve_well_vs_mrst_runs(d, ref_rate, ref_bhp)
     col, dt = Int(d["well"]["cells"]), vec(d["dT"])
     on = vec(d["step_control"]) .== 1
     function run(target)
-        w = setup_ve_well(ve, col; name = :inj, radius = d["well"]["r"])
-        model = setup_co2lab_model(ve.domain; wells = [w], fluid = fluid)
-        forces(c) = setup_reservoir_forces(model; bc = bc, control = Dict(:inj => c))
-        f_on = forces(co2_injector_control(target, fluid))
-        f_off = forces(DisabledControl())
+        if target isa Real
+            # a CO2 source term at this rate instead of the well
+            model = setup_co2lab_model(ve.domain; fluid = fluid)
+            src(q) = [SourceTerm(col, q; fractional_flow = [0.0, 1.0])]
+            f_on = setup_reservoir_forces(model; bc = bc, sources = src(target))
+            f_off = setup_reservoir_forces(model; bc = bc, sources = src(0.0))
+        else
+            w = setup_ve_well(ve, col; name = :inj, radius = d["well"]["r"])
+            model = setup_co2lab_model(ve.domain; wells = [w], fluid = fluid)
+            forces(c) = setup_reservoir_forces(model; bc = bc, control = Dict(:inj => c))
+            f_on = forces(co2_injector_control(target, fluid))
+            f_off = forces(DisabledControl())
+        end
         case = JutulCase(model, dt, [i ? f_on : f_off for i in on];
                          state0 = setup_co2lab_state(model; pressure = p0),
                          parameters = setup_parameters(model))
@@ -50,6 +59,11 @@ function _ve_well_vs_mrst_runs(d, ref_rate, ref_bhp)
     end
     rep = OracleReport("well model: Julia vs MRST runs, sloping aquifer")
     field(res, k) = reduce(hcat, [s[k] for s in res.states])
+    res = run(d["injection_rate"])
+    check!(rep, "source term: pressure", field(res, :Pressure), ref_src["pressure"];
+           tol = Tolerance(1e-8, 0.0))
+    check!(rep, "source term: sG", field(res, :sG), ref_src["sG"];
+           tol = Tolerance(0.0, 1e-8))
     for (name, ref, target) in
             (("rate", ref_rate, TotalRateTarget(d["injection_rate"])),
              ("bhp", ref_bhp, BottomHolePressureTarget(p0[col] + 5e5)))
@@ -763,11 +777,11 @@ end
         end
     end
 
-    @testset "well model vs MRST runs (Stage 2 item 7)" begin
+    @testset "flow and well model vs MRST runs (Stage 2 item 7)" begin
         fs = [joinpath(refdir, f) for f in ("sloping_aquifer.mat", "mrst_ref_rate.mat",
-                                            "mrst_ref_bhp.mat")]
+                                            "mrst_ref_bhp.mat", "mrst_ref_src.mat")]
         if !all(isfile, fs)
-            @info "Skipping: MRST runs not generated (scripts/stage2_well_check.jl)"
+            @info "Skipping: MRST runs not generated (scripts/stage2_mrst_comparison.jl)"
         else
             _ve_well_vs_mrst_runs(matread.(fs)...)
         end
