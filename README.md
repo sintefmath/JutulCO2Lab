@@ -6,9 +6,11 @@ storage simulator on top of [Jutul](https://github.com/sintefmath/Jutul.jl) /
 
 What exists: the environment, the oracle harness, the VE domain (Stage 1:
 columns, geometry, rock, caprock datum, boundary sides — all derived from the
-3D grid and verified against MRST), and Stage 2 items 0–6: co2lab's fluid
-system, VE relperm, `pcWG`, PVT, VE wells, VE boundary conditions and
-reconstruction of 3D states, running end to end on co2lab's sloping aquifer.
+3D grid and verified against MRST), and Stage 2: co2lab's fluid system, VE
+relperm, `pcWG`, PVT, VE wells, VE boundary conditions and reconstruction of
+3D states, running end to end on co2lab's sloping aquifer, plus the
+structures Stage 8 (hybrid) extends — stackable columns cut by connectivity
+and per-cell VE/fine branch points.
 A readable walkthrough is `../scripts/example_sloping_aquifer.jl`. The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.

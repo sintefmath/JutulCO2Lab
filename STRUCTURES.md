@@ -15,11 +15,11 @@ removes, renames or changes the meaning of a structure (see `../CLAUDE.md`).
 
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
-| 1 | **`VEColumns`** | `vegrid.jl` | Column partition of the 3D mesh: `cells` (per column, top to bottom), `pos`, `partition` (fine cell → column), `pillar` (logical `(i, j)`) | the 3D mesh (`ve_columns`) |
+| 1 | **`VEColumns`** | `vegrid.jl` | Column partition of the 3D mesh: `cells` (per column, top to bottom), `pos`, `partition` (fine cell → column), `pillar` (logical `(i, j)`; not unique when stacked). A column is a vertically connected stretch of one pillar — in pure VE usually the whole pillar; pillars are cut where consecutive cells share no (unsealed) face | the 3D mesh (`ve_columns`, with `below_holes = :discard` or `:stack`) |
 | 2 | *column geometry* (NamedTuple) | `vegrid.jl` | `(z_top, H, dz, z, dx, dy, z_cell)`: caprock depth, height, lateral extent per column; thickness, cumulative depth, centroid depth per fine cell | mesh, `VEColumns` (`ve_column_geometry`) |
 | 3 | *averaged rock* (NamedTuple) | `vedomain.jl` | `(perm, poro, ntg)` per column, thickness-weighted; perm from x only | `VEColumns`, `dz` of 2 (`ve_average_rock`) |
-| 4 | *VE domain* (NamedTuple) | `vedomain.jl` | `(domain, coarse, geometry, rock)`: the `DataDomain` on a `CoarseMesh` (with `:column_height`, `:rugosity` per column, caprock `:gdz`), that `CoarseMesh`, 2 and 3 | mesh, `VEColumns`, 2, 3, caprock rugosity (`ve_domain`) |
-| 5 | **`VEColumnSides`** | `vefaces.jl` | Each column's lateral fine faces grouped by direction, with the neighbouring column (0: none) | mesh (direction tags), `VEColumns` (`ve_column_sides`) |
+| 4 | *VE domain* (NamedTuple) | `vedomain.jl` | `(domain, coarse, geometry, rock)`: the `DataDomain` on a `CoarseMesh` (with `:column_height`, `:rugosity`, `:is_ve` (all true until Stage 8), `:pillar_columns` (columns in the pillar) per column, caprock `:gdz`; `:transmissibilities` when stacked, sealing faces between stacked columns), that `CoarseMesh`, 2 and 3 | mesh, `VEColumns`, 2, 3, caprock rugosity (`ve_domain`) |
+| 5 | **`VEColumnSides`** | `vefaces.jl` | Each column's lateral fine faces grouped by direction and neighbouring column: one entry per (column, direction, neighbour) — one coarse face seen from one side — or an outer side (neighbour 0) when the side has no neighbour; `exposed_faces`: boundary fine faces on sides that have a neighbour (no-flow) | mesh (direction tags), `VEColumns` (`ve_column_sides`) |
 | 6 | **`VEBoundarySides`** | `vedomain.jl` | Outer sides (no neighbour): direction, caprock edge depth and midpoint, area, centroid, normal, half transmissibility, fine faces, `across_fault` | 5, `VEColumns`, 4's domain (`ve_boundary_sides`, which also returns the unassigned faces) |
 | 7 | **`VEBoundaryCondition`** [force, passed as JutulDarcy's `bc`] | `vebc.jl` | co2lab's pressure BC on one open side: column, boundary pressure, transmissibility, edge-minus-caprock depth `dz`, inflow saturations | 6 (selected with `ve_select_sides`), 2 (`ve_boundary_conditions`) |
 
@@ -42,11 +42,11 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 | 10 | **`MaxGasSaturation`** [ScalarVariable] | `co2lab_fluid.jl` | parameter `sGmax`, running maximum of converged `sG` | `sG`; constant `res_water` from 8 |
 | 11 | `GasSaturation` [ScalarVariable] | `co2lab_fluid.jl` | unknown `sG` | — |
 | 12 | `DissolvedGasRatio` [ScalarVariable] | `co2lab_fluid.jl` | unknown `rs` (dissolution on only) | — |
-| 13 | `PlumeHeights` [VectorVariables] | `ve_fluid.jl` | secondary: row 1 `h`, row 2 `h_max` | 11, 10, 9 |
-| 14 | `VESharpInterfaceRelPerm` [AbstractRelativePermeabilities] | `ve_fluid.jl` | relative permeabilities (co2lab's `sharp_interface_simple`) | 13, 9, 9b |
+| 13 | `PlumeHeights` [VectorVariables] | `ve_fluid.jl` | secondary: row 1 `h`, row 2 `h_max`; field `is_ve` (`nothing` = all VE; 0 in fine cells) | 11, 10, 9 |
+| 14 | `VESharpInterfaceRelPerm` [AbstractRelativePermeabilities] | `ve_fluid.jl` | relative permeabilities (co2lab's `sharp_interface_simple`); fields `is_ve` and `fine` (3D relperm for fine cells, Stage 8) | 13, 9, 9b |
 | 15 | **`LinearShrinkage`** [PhaseVariables] | `co2lab_fluid.jl` | shrinkage factors `b` | pressure |
 | 16 | `BlackOilDensities` [PhaseVariables] | `co2lab_fluid.jl` | phase mass densities | 15 (and 12) |
-| 17 | `VECapillaryPressure` [AbstractCapillaryPressure] | `ve_fluid.jl` | `pcWG = Δρ·g·h` | 13, 16 |
+| 17 | `VECapillaryPressure` [AbstractCapillaryPressure] | `ve_fluid.jl` | `pcWG = Δρ·g·h`; field `is_ve` (fine cells: Stage 8) | 13, 16 |
 | 18 | `LinearViscosities` [PhaseVariables] | `ve_fluid.jl` | viscosities (used by `setup_co2lab_model`) | pressure |
 | 19 | **`ConstantViscosities`** [PhaseVariables] | `co2lab_fluid.jl` | placeholder default, replaced by 18 in `setup_co2lab_model` | — |
 | 20 | `LinearPoreVolume` [ScalarVariable] | `rock_compressibility.jl` | pore volume `1 + c·(p − p_ref)` times the static pore volume — co2lab's rock compressibility, set on the model by `set_co2lab_rock_compressibility!` (or `setup_co2lab_model`'s `rock_compressibility`); exchangeable for JutulDarcy's `LinearlyCompressiblePoreVolume` | pressure, parameter `StaticFluidVolume` |

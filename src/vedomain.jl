@@ -81,11 +81,21 @@ caprock. `rugosity` is the caprock rugosity `dh` (m) — co2lab's makeVEFluid
 option, a property of the grid here — as a scalar or one value per column;
 the relperm loses an accretion layer `min(dh, H)` under the caprock.
 
+Stacked columns (`ve_columns(...; below_holes = :stack)`) are built fully:
+coarse faces between stacked columns of one pillar (sealed by construction)
+get zero transmissibility, and a warning is given if the columns fall apart
+into unconnected pieces (model them separately instead). Such a domain
+cannot be simulated before roadmap Stage 8 ([`setup_co2lab_model`](@ref)
+rejects it).
+
 Returns the NamedTuple `(domain, coarse, geometry, rock)`, all new:
 - `domain`: the `DataDomain` on the `CoarseMesh` (from `reservoir_domain`),
   with the averaged `:permeability`, `:porosity` (and `:net_to_gross`),
-  `:column_height` and `:rugosity` per column, and `:gdz` on `Faces()` from
-  the caprock depths;
+  `:column_height` and `:rugosity` per column, `:is_ve` (all true: fine
+  cells are Stage 8) and `:pillar_columns` (number of columns in the
+  column's pillar; 1 unless stacked), and `:gdz` on `Faces()` from the
+  caprock depths; `:transmissibilities` only if stacked columns need sealed
+  faces;
 - `coarse`: that `CoarseMesh` — the same object `domain` wraps;
 - `geometry`: [`ve_column_geometry`](@ref)'s result;
 - `rock`: [`ve_average_rock`](@ref)'s result.
@@ -119,7 +129,43 @@ function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing, poro,
     ncol = number_of_columns(columns)
     domain[:rugosity, Cells()] = rugosity isa Number ? fill(Float64(rugosity), ncol) :
                                  collect(Float64, rugosity)
+    domain[:is_ve, Cells()] = fill(true, ncol)
+    domain[:pillar_columns, Cells()] = _pillar_columns(columns)
+
+    any(>(1), domain[:pillar_columns]) && _seal_stacked!(domain, columns)
     return (domain = domain, coarse = coarse, geometry = geometry, rock = rock)
+end
+
+# Number of columns in each column's pillar.
+function _pillar_columns(columns::VEColumns)
+    n = Dict{Tuple{Int, Int}, Int}()
+    foreach(p -> n[p] = get(n, p, 0) + 1, columns.pillar)
+    return [n[p] for p in columns.pillar]
+end
+
+"""
+    _seal_stacked!(domain, columns)
+
+Zero the transmissibility of coarse faces between stacked columns of one
+pillar, and warn if the columns fall apart into unconnected pieces.
+
+Modifies: `domain` (sets `:transmissibilities` on `Faces()`). `columns` is only
+read.
+"""
+function _seal_stacked!(domain, columns)
+    N = domain[:neighbors]
+    T = JutulDarcy.reservoir_transmissibility(domain)
+    for f in axes(N, 2)
+        columns.pillar[N[1, f]] == columns.pillar[N[2, f]] && (T[f] = 0.0)
+    end
+    domain[:transmissibilities, Faces()] = T
+
+    g = SimpleGraph(number_of_columns(columns))
+    foreach(f -> T[f] > 0 && add_edge!(g, N[1, f], N[2, f]), axes(N, 2))
+    n = length(connected_components(g))
+    n > 1 && @warn "The stacked columns fall apart into $n unconnected pieces; " *
+                   "model them separately"
+    return domain
 end
 
 # ------------------------------- Boundary sides -------------------------------
@@ -143,9 +189,10 @@ edges of MRST's top-surface grid. One entry per (column, side):
   the side, `k·A·(c·n)/|c|²` — the same formula family as the `CoarseMesh`'s
   interior transmissibilities
 - `fine_faces`: boundary-face indices in the 3D mesh
-- `across_fault`: a column exists at the logical neighbour position, but no
-  fine face connects to it — a fault with complete offset (Johansen: 88 sides,
-  along its main fault and one more). Such a side is an outer side, as in
+- `across_fault`: a column exists at the logical neighbour position (at any
+  depth), but no fine face connects to it — a fault with complete offset
+  (Johansen: 88 sides, along its main fault and one more). Such a side is an
+  outer side, as in
   MRST's top-surface grid, but physically sealed: give it a boundary
   condition only deliberately (MRST's Johansen example keeps its main fault
   sealing, `makeJohansenVEgrid.m:143-147`).
@@ -178,7 +225,12 @@ caprock step), the exposed part of that side consists of boundary faces of
 the 3D grid, but the side is not an outer boundary: MRST's top-surface grid
 has an interior edge there (on Johansen: 173 such cases; the remaining 456
 sides are exactly MRST's 456 boundary edges). Such faces are returned in
-`unassigned`; they stay no-flow, as in MRST.
+`unassigned`; they stay no-flow, as in MRST. The same holds for a stacked
+column's side at the depth of a shale missing from the grid.
+
+`across_fault` is set where the logical neighbour pillar holds any column,
+at any depth: across a fault with complete offset the columns usually do not
+overlap in depth.
 
 The edge of a side is where the column's top face meets the top cell's
 boundary faces on that side: exactly two shared nodes. `mesh`, `columns` and
@@ -199,14 +251,11 @@ function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
            area = Float64[], cen = NTuple{3, Float64}[], nrm = NTuple{3, Float64}[],
            T = Float64[], faces = Vector{Int}[], fault = Bool[])
 
-    column_at = Dict(columns.pillar[c] => c for c in 1:number_of_columns(columns))
-    unassigned = Int[]
+    occupied = Set(columns.pillar)
 
     for s in 1:length(cs)
+        cs.neighbour[s] == 0 || continue
         col, fs = cs.column[s], cs.boundary_faces[s]
-        if cs.neighbour[s] != 0
-            append!(unassigned, fs); continue
-        end
 
         d, top = cs.direction[s], first(column_cells(columns, col))
         depth, mid = _side_top_edge(g, bdir, top, d, col)
@@ -220,12 +269,12 @@ function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
 
         # a column exists across this side, but nothing connects to it: sealed fault
         across = _logical_neighbour_pillar(columns.pillar[col], d)
-        push!(out.fault, haskey(column_at, across))
+        push!(out.fault, across in occupied)
     end
 
     sides = VEBoundarySides(out.column, out.dir, out.depth, out.mid, out.area, out.cen,
                             out.nrm, out.T, out.faces, out.fault)
-    return (sides, unassigned)
+    return (sides, copy(cs.exposed_faces))
 end
 
 # Logical (i, j) of the neighbouring pillar in lateral direction d (1..4 =

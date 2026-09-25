@@ -6,24 +6,31 @@
 # the column partition and the per-column data VE needs, from the 3D mesh
 # alone.
 #
-# Column identification follows MRST's topSurfaceGrid/identify_column_cells
-# (co2lab-common/grid/topSurfaceGrid.m:735-779): purely logical. Cells are
-# grouped by (i, j) pillar and ordered by k — no geometric sort.
+# A column is a vertically connected stretch of one pillar — in pure VE
+# usually the whole pillar (analysis/ve-meshing/isve-branch-proposal.md).
+# Cells are grouped by (i, j) pillar and ordered by k, as MRST's
+# topSurfaceGrid/identify_column_cells (co2lab-common/grid/topSurfaceGrid.m:
+# 735-779) — no geometric sort. Unlike co2lab, a pillar is cut where two
+# consecutive cells share no face (or only a sealed one), not at every gap in
+# k: a pinched-out layer does not cut (analysis/co2lab-issues.org).
 
 # ------------------------------ Column partition ------------------------------
 
 """
     VEColumns
 
-Column partition of a 3D mesh.
+Column partition of a 3D mesh. A column is a vertically connected stretch of
+one pillar; with `below_holes = :stack` ([`ve_columns`](@ref)) a pillar can
+hold several.
 
 - `cells`: fine cells of all columns, concatenated, each column top→bottom
 - `pos`: column `c` is `cells[pos[c]:pos[c+1]-1]`
 - `partition`: fine cell → column, as `CoarseMesh(mesh, partition)` expects
-- `pillar`: logical `(i, j)` of each column
+- `pillar`: logical `(i, j)` of each column (not unique when stacked)
 
-Columns are numbered in increasing pillar order (`i + nx*(j-1)`), which is the
-order MRST gives the cells of its top-surface grid.
+Columns are numbered in increasing pillar order (`i + nx*(j-1)`), top to bottom
+within a pillar — with one column per pillar the order MRST gives the cells
+of its top-surface grid.
 """
 struct VEColumns
     cells::Vector{Int}
@@ -77,14 +84,27 @@ end
 # ---------------------------- Columns and trimming ----------------------------
 
 """
-    ve_columns(mesh; discard_below_holes = true) -> (columns, discarded)
+    ve_columns(mesh; below_holes = :discard, sealed_faces = (), is_ve = nothing)
+        -> (columns, discarded)
 
 Identify the VE columns of a 3D `mesh` with logical `(i, j, k)` indices.
 
-Cells are grouped by `(i, j)` and ordered by `k` (top→bottom; `k` is assumed
-to increase downwards, as in MRST). With `discard_below_holes = true`, every
-cell below the first gap in `k` within a column is discarded — MRST's default,
-on the grounds that VE is only valid above an impermeable layer.
+Cells are grouped by `(i, j)` pillar and ordered by `k` (top→bottom; `k` is
+assumed to increase downwards, as in MRST). A pillar is cut wherever two
+consecutive cells are *disconnected*: they share no interior face, or only
+faces listed in `sealed_faces` (interior face indices of `mesh`). A gap in `k`
+whose cells still share a face (a pinch-out) does not cut. Below a cut:
+
+- `below_holes = :discard` — co2lab's treatment (`topSurfaceGrid`'s
+  `discard_below_holes`): every cell below the pillar's first cut is
+  discarded; one column per pillar.
+- `below_holes = :stack` — each connected stretch is its own column. Such
+  columns connect laterally through partial faces, which need the transition
+  flux of roadmap Stage 8: the domain can be built, but `setup_co2lab_model`
+  rejects it.
+
+`is_ve` (one `Bool` per cell of `mesh`, `nothing` = all VE) marks fine 3D
+cells, which are roadmap Stage 8: any `false` is rejected for now.
 
 Returns `(columns, discarded)`: a new `VEColumns` of the cells kept (cell
 indices into `mesh`), and the discarded cells as a sorted `Vector{Int}` of
@@ -94,42 +114,102 @@ If any cells are discarded, the partition still refers to `mesh`'s cell
 numbering and does **not** cover every cell, so it cannot be passed to
 `CoarseMesh` as-is; use [`ve_trim`](@ref) first.
 """
-function ve_columns(mesh; discard_below_holes::Bool = true)
+function ve_columns(mesh; below_holes::Symbol = :discard, sealed_faces = (),
+                    is_ve = nothing)
+    _check_all_ve(is_ve, number_of_cells(mesh))
+    below_holes in (:discard, :stack) ||
+        throw(ArgumentError("below_holes must be :discard or :stack, got $below_holes"))
+
     nc = number_of_cells(mesh)
     ijk = [cell_ijk(mesh, c) for c in 1:nc]
-    nx, ny, _ = grid_dims_ijk(mesh)
-    pillars = Dict{Int, Vector{Int}}()
-    for c in 1:nc
-        i, j, _ = ijk[c]
-        push!(get!(pillars, i + nx*(j - 1), Int[]), c)
-    end
+    below = _connected_below(mesh, ijk, sealed_faces)
 
-    cells = Int[]
-    pos = [1]
-    pillar = Tuple{Int, Int}[]
-    discarded = Int[]
-    for key in sort!(collect(keys(pillars)))
-        col = sort!(pillars[key], by = c -> ijk[c][3])
-        nkeep = length(col)
-        if discard_below_holes
-            for m in 2:length(col)
-                if ijk[col[m]][3] != ijk[col[m-1]][3] + 1
-                    nkeep = m - 1
-                    break
-                end
-            end
-            append!(discarded, col[(nkeep+1):end])
+    cells, pos, pillar, discarded = Int[], [1], Tuple{Int, Int}[], Int[]
+    for col in _pillar_cells(mesh, ijk)
+        stretches = _connected_stretches(col, below)
+        if below_holes == :discard
+            foreach(r -> append!(discarded, col[r]), stretches[2:end])
+            stretches = stretches[1:1]
         end
-        append!(cells, col[1:nkeep])
-        push!(pos, pos[end] + nkeep)
-        push!(pillar, ijk[col[1]][1:2])
+
+        for r in stretches
+            append!(cells, col[r])
+            push!(pos, pos[end] + length(r))
+            push!(pillar, ijk[col[1]][1:2])
+        end
     end
 
     partition = zeros(Int, nc)
-    for col in 1:(length(pos) - 1), m in pos[col]:(pos[col+1] - 1)
-        partition[cells[m]] = col
+    for c in 1:(length(pos) - 1), m in pos[c]:(pos[c+1] - 1)
+        partition[cells[m]] = c
     end
     return (VEColumns(cells, pos, partition, pillar), sort!(discarded))
+end
+
+# Reject fine 3D cells (is_ve false) until roadmap Stage 8.
+function _check_all_ve(is_ve, nc)
+    isnothing(is_ve) && return nothing
+    length(is_ve) == nc || throw(ArgumentError("is_ve: one value per cell expected"))
+    all(is_ve) || throw(ArgumentError("fine 3D cells (is_ve false) need the hybrid " *
+                                      "model of roadmap Stage 8; not implemented yet"))
+    return nothing
+end
+
+"""
+    _pillar_cells(mesh, ijk) -> Vector{Vector{Int}}
+
+The cells of each pillar that has any, sorted by `k`, pillars in increasing
+order `i + nx*(j-1)`.
+"""
+function _pillar_cells(mesh, ijk)
+    nx = grid_dims_ijk(mesh)[1]
+    pillars = Dict{Int, Vector{Int}}()
+    for c in eachindex(ijk)
+        i, j, _ = ijk[c]
+        push!(get!(pillars, i + nx*(j - 1), Int[]), c)
+    end
+    keys_sorted = sort!(collect(keys(pillars)))
+    return [sort!(pillars[key], by = c -> ijk[c][3]) for key in keys_sorted]
+end
+
+"""
+    _connected_below(mesh, ijk, sealed_faces) -> Vector{Int}
+
+For every cell, the cell below it in its pillar that it shares an unsealed
+interior face with (0 if none). Throws if a cell connects to two cells below.
+"""
+function _connected_below(mesh, ijk, sealed_faces)
+    sealed = Set{Int}(sealed_faces)
+    below = zeros(Int, length(ijk))
+    for f in 1:number_of_faces(mesh)
+        f in sealed && continue
+        l, r = mesh.faces.neighbors[f]
+        ijk[l][1:2] == ijk[r][1:2] || continue
+
+        up, down = ijk[l][3] < ijk[r][3] ? (l, r) : (r, l)
+        below[up] in (0, down) ||
+            error("cell $up connects to two cells below it ($(below[up]), $down)")
+        below[up] = down
+    end
+    return below
+end
+
+"""
+    _connected_stretches(col, below) -> Vector{UnitRange{Int}}
+
+Split the sorted cells `col` of one pillar where consecutive cells are not
+connected; returns index ranges into `col`, top to bottom.
+"""
+function _connected_stretches(col, below)
+    out, first = UnitRange{Int}[], 1
+    for m in 2:length(col)
+        if below[col[m-1]] != col[m]
+            push!(out, first:(m - 1))
+            first = m
+        end
+    end
+    push!(out, first:length(col))
+    return out
 end
 
 """

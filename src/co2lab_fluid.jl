@@ -427,6 +427,8 @@ configuration decides the unknowns (see the top of `co2lab_fluid.jl`):
   neither must be given. Instantaneous dissolution is Stage 5 work and throws.
 - hysteresis follows co2lab: on when `fluid.res_gas > 0` — Stage 3 work,
   throws for now.
+- stacked columns (`ve_columns(...; below_holes = :stack)`, `domain`'s
+  `:pillar_columns` above 1) need the transition flux of Stage 8: throws.
 
 With dissolution on, the wellbores use JutulDarcy's equilibrium formulation
 of the same fluid, while the reservoir uses co2lab's (the dissolved-CO2 law
@@ -448,6 +450,9 @@ function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve
                             rs_sat = nothing, transfer_rate = nothing)
     fluid.res_gas > 0 && error("hysteresis (res_gas > 0: sGmax as an unknown) is " *
                                "roadmap Stage 3; not implemented yet")
+    haskey(domain, :pillar_columns) && any(>(1), domain[:pillar_columns]) &&
+        error("stacked columns connect through partial faces, which need the " *
+              "transition flux of roadmap Stage 8; not implemented yet")
     isnothing(rs_sat) == isnothing(transfer_rate) ||
         error("rate-driven dissolution needs both `rs_sat` and `transfer_rate`")
     if !isnothing(rs_sat) && !(0 < transfer_rate < Inf)

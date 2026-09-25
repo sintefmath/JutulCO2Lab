@@ -165,11 +165,34 @@ function Jutul.default_parameter_values(data_domain, model, ::Rugosity, symb)
     return zeros(Jutul.number_of_cells(Jutul.physical_representation(data_domain)))
 end
 
-"Plume heights per column: row 1 `h`, row 2 `h_max` (m)."
-struct PlumeHeights <: Jutul.VectorVariables
+# ------------------------ VE / fine-cell branch points ------------------------
+#
+# The three VE variables below branch per cell on `is_ve` (`nothing` = all VE;
+# else one Bool per cell), so that roadmap Stage 8 (hybrid: fine 3D cells)
+# adds the fine side without reshaping them
+# (analysis/ve-meshing/isve-branch-proposal.md). With `nothing` the branch is
+# compiled away. Saturation regions, when they come, are a separate `regions`
+# field in JutulDarcy's form, not part of this flag.
+
+"Is cell `i` a VE column? Always for `is_ve = nothing`."
+_is_ve(::Nothing, i) = true
+_is_ve(is_ve::AbstractVector{Bool}, i) = is_ve[i]
+
+# Fine-cell sides of the relperm and capillary pressure: roadmap Stage 8.
+_fine_relperm(fine, i) = error("fine 3D cells (relperm) are roadmap Stage 8")
+_fine_capillary_pressure(i) = error("fine 3D cells (capillary pressure) are " *
+                                    "roadmap Stage 8")
+
+"""
+Plume heights per column: row 1 `h`, row 2 `h_max` (m); zero in fine cells
+(`is_ve`, see above), where nothing reads them.
+"""
+struct PlumeHeights{V} <: Jutul.VectorVariables
     res_water::Float64
     res_gas::Float64
+    is_ve::V
 end
+PlumeHeights(rw, rg; is_ve = nothing) = PlumeHeights(Float64(rw), Float64(rg), is_ve)
 Jutul.values_per_entity(model, ::PlumeHeights) = 2
 
 # Uses sGmax_eff = max(min(sGmax, 1 − rw), sG): the stored sGmax is only
@@ -181,35 +204,63 @@ Jutul.values_per_entity(model, ::PlumeHeights) = 2
                                                ColumnHeight, ix)
     rw, rg = v.res_water, v.res_gas
     for i in ix
+        if !_is_ve(v.is_ve, i)
+            hh[1, i], hh[2, i] = zero(eltype(hh)), zero(eltype(hh))
+            continue
+        end
+
         smax = max(min(sGmax[i], 1 - rw), sG[i])
         hh[1, i], hh[2, i] = _plume_heights(sG[i], smax, ColumnHeight[i], rw, rg)
     end
 end
 
-"co2lab's `'sharp_interface_simple'` relperm; phases (brine, CO2)."
-struct VESharpInterfaceRelPerm <: JutulDarcy.AbstractRelativePermeabilities
+"""
+co2lab's `'sharp_interface_simple'` relperm; phases (brine, CO2). In fine cells
+(`is_ve`) the 3D relperm `fine` — roadmap Stage 8, `nothing` until then.
+"""
+struct VESharpInterfaceRelPerm{V, F} <: JutulDarcy.AbstractRelativePermeabilities
     krw::Float64
     krg::Float64
+    is_ve::V
+    fine::F
 end
+VESharpInterfaceRelPerm(krw, krg; is_ve = nothing, fine = nothing) =
+    VESharpInterfaceRelPerm(Float64(krw), Float64(krg), is_ve, fine)
 
 # Modifies: `kr` (relative permeabilities).
 @jutul_secondary function update_ve_relperm!(kr, v::VESharpInterfaceRelPerm, model,
                                             PlumeHeights, ColumnHeight, Rugosity, ix)
     for i in ix
+        if !_is_ve(v.is_ve, i)
+            kr[1, i], kr[2, i] = _fine_relperm(v.fine, i)
+            continue
+        end
+
         h, h_max = PlumeHeights[1, i], PlumeHeights[2, i]
         kr[1, i], kr[2, i] = _sharp_interface_relperm(h, h_max, ColumnHeight[i],
                                                       v.krw, v.krg, Rugosity[i])
     end
 end
 
-"`pcWG = (ρ_brine − ρ_CO2)·g·h`, added to the brine pressure for CO2."
-struct VECapillaryPressure <: JutulDarcy.AbstractCapillaryPressure end
+"""
+`pcWG = (ρ_brine − ρ_CO2)·g·h`, added to the brine pressure for CO2. Fine cells
+(`is_ve`): roadmap Stage 8.
+"""
+struct VECapillaryPressure{V} <: JutulDarcy.AbstractCapillaryPressure
+    is_ve::V
+end
+VECapillaryPressure(; is_ve = nothing) = VECapillaryPressure(is_ve)
 
 # Modifies: `pc` (capillary pressure, one row: CO2 relative to brine).
 @jutul_secondary function update_ve_pc!(pc, v::VECapillaryPressure, model, PlumeHeights,
                                        PhaseMassDensities, ix)
     g = Jutul.gravity_constant
     for i in ix
+        if !_is_ve(v.is_ve, i)
+            pc[1, i] = _fine_capillary_pressure(i)
+            continue
+        end
+
         pc[1, i] = (PhaseMassDensities[1, i] - PhaseMassDensities[2, i]) * g *
                    PlumeHeights[1, i]
     end
@@ -250,9 +301,13 @@ function _set_ve_fluid!(model, fluid::CO2LabVEFluid)
     prm[:ColumnHeight] = ColumnHeight()
     prm[:Rugosity] = Rugosity()
 
-    S[:PlumeHeights] = PlumeHeights(fluid.res_water, fluid.res_gas)
-    S[:RelativePermeabilities] = VESharpInterfaceRelPerm(fluid.krw, fluid.krg)
-    S[:CapillaryPressure] = VECapillaryPressure()
+    # per-cell VE flag; `nothing` (branch compiled away) when all cells are VE
+    d = model.data_domain
+    is_ve = haskey(d, :is_ve) && !all(d[:is_ve]) ? collect(Bool, d[:is_ve]) : nothing
+
+    S[:PlumeHeights] = PlumeHeights(fluid.res_water, fluid.res_gas; is_ve)
+    S[:RelativePermeabilities] = VESharpInterfaceRelPerm(fluid.krw, fluid.krg; is_ve)
+    S[:CapillaryPressure] = VECapillaryPressure(; is_ve)
 
     push!(model.output_variables, :PlumeHeights, :CapillaryPressure)
     unique!(model.output_variables)

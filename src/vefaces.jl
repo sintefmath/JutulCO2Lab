@@ -17,10 +17,10 @@
 #   different sides do.
 #
 # A column side is the upscaled counterpart of a column: all fine faces of
-# the column's cells with the same lateral direction. Two sides are
-# neighbours if any of their fine faces is shared; each side has at most one
-# neighbour (asserted — true for corner-point grids, whose faults run along
-# pillars).
+# the column's cells with the same lateral direction, split by the column on
+# the other side. With stacked columns (ve_columns' `below_holes = :stack`) a
+# side can face several columns at different depths; each (column, direction,
+# neighbour) is one coarse face of the CoarseMesh, seen from one side.
 
 # ------------------------------ Face directions -------------------------------
 
@@ -186,15 +186,20 @@ end
 """
     VEColumnSides
 
-The lateral sides of every column, one entry per side that has any fine face:
+The lateral sides of every column, split by neighbour: one entry per
+(column, direction, neighbouring column) that shares fine faces, and one
+outer-side entry (neighbour 0) per (column, direction) that has fine faces
+but no neighbour at all.
 
 - `column`, `direction` (1..4 = left, right, lower, upper: logical i−, i+, j−, j+)
 - `neighbour`: the column on the other side, or 0 — an outer boundary side
 - `interior_faces`: fine interior faces shared with `neighbour` (together they
-  are the `CoarseMesh`'s coarse face between the two columns)
-- `boundary_faces`: fine boundary faces on this side — for a side with a
-  neighbour, the exposed parts (e.g. above a lower neighbour), which stay
-  no-flow
+  are the `CoarseMesh`'s coarse face between the two columns); empty for an
+  outer side
+- `boundary_faces`: an outer side's fine boundary faces; empty otherwise
+- `exposed_faces` (one list for all entries): fine boundary faces on sides
+  that *do* have a neighbour — e.g. above a lower neighbour, or at the depth
+  of a shale missing from the grid between stacked columns. They stay no-flow.
 """
 struct VEColumnSides
     column::Vector{Int}
@@ -202,6 +207,7 @@ struct VEColumnSides
     neighbour::Vector{Int}
     interior_faces::Vector{Vector{Int}}
     boundary_faces::Vector{Vector{Int}}
+    exposed_faces::Vector{Int}
 end
 
 Base.length(s::VEColumnSides) = length(s.column)
@@ -210,19 +216,20 @@ Base.length(s::VEColumnSides) = length(s.column)
     ve_column_sides(mesh, columns) -> VEColumnSides
 
 Group the lateral fine faces of every column into sides by direction, and
-find each side's neighbouring column from the faces' cells. Throws if a side
-has fine faces towards more than one other column. `mesh` must carry face
-directions ([`ve_mesh_from_mrst`](@ref), [`ve_trim`](@ref)) and every cell
-must belong to a column. `mesh` and `columns` are only read.
+split each side by the column on the other side of its faces. `mesh` must
+carry face directions ([`ve_mesh_from_mrst`](@ref), [`ve_trim`](@ref)) and
+every cell must belong to a column. Faces between stacked columns of one
+pillar are skipped: such columns are disconnected there by construction
+([`ve_columns`](@ref)). `mesh` and `columns` are only read.
 
-Returns a new [`VEColumnSides`](@ref): one entry per (column, lateral
-direction) that has any fine face, ordered by column and then direction
-(left, right, lower, upper); face indices refer to `mesh`.
+Returns a new [`VEColumnSides`](@ref): entries ordered by column, direction
+(left, right, lower, upper) and neighbour; `exposed_faces` in the same
+column and direction order; face indices refer to `mesh`.
 """
 function ve_column_sides(mesh, columns::VEColumns)
     bdir = _boundary_directions(mesh)
     ijk = [cell_ijk(mesh, c) for c in 1:number_of_cells(mesh)]
-    out = VEColumnSides(Int[], Int8[], Int[], Vector{Int}[], Vector{Int}[])
+    out = VEColumnSides(Int[], Int8[], Int[], Vector{Int}[], Vector{Int}[], Int[])
 
     for col in 1:number_of_columns(columns)
         acc = [(nbrs = Int[], int = Int[], bnd = Int[]) for _ in 1:4]
@@ -232,19 +239,33 @@ function ve_column_sides(mesh, columns::VEColumns)
         end
 
         for d in 1:4
-            a = acc[d]
-            isempty(a.int) && isempty(a.bnd) && continue
-
-            nb = unique(a.nbrs)
-            length(nb) <= 1 ||
-                error("column $col, $(_DIRECTIONS[d]) side: faces towards columns " *
-                      "$nb; expected at most one neighbouring column")
-
-            push!(out.column, col); push!(out.direction, d)
-            push!(out.neighbour, isempty(nb) ? 0 : nb[1])
-            push!(out.interior_faces, a.int); push!(out.boundary_faces, a.bnd)
+            _push_sides!(out, col, d, acc[d])
         end
     end
+    return out
+end
+
+"""
+    _push_sides!(out, col, d, a)
+
+Add column `col`'s side in direction `d`, from its accumulated faces `a`: one
+entry per neighbour, or one outer side if there is none.
+
+Modifies: `out` (all its vectors). `a` is only read.
+"""
+function _push_sides!(out, col, d, a)
+    isempty(a.int) && isempty(a.bnd) && return out
+    if isempty(a.int)
+        push!(out.column, col); push!(out.direction, d); push!(out.neighbour, 0)
+        push!(out.interior_faces, Int[]); push!(out.boundary_faces, a.bnd)
+        return out
+    end
+
+    for nb in sort!(unique(a.nbrs))
+        push!(out.column, col); push!(out.direction, d); push!(out.neighbour, nb)
+        push!(out.interior_faces, a.int[a.nbrs .== nb]); push!(out.boundary_faces, Int[])
+    end
+    append!(out.exposed_faces, a.bnd)
     return out
 end
 
@@ -262,12 +283,10 @@ function _collect_side_faces!(acc, mesh, columns, ijk, bdir, c)
         d, o = _interior_face_direction(mesh, ijk, c, f)
         oc = columns.partition[o]
         oc == 0 && error("cell $o is in no column; trim the mesh first (ve_trim)")
-        if oc == col
-            d in (_TOP, _BOTTOM) || error("lateral face $f inside column $col")
-            continue
-        end
+        # vertical faces: inside the column, or towards a stacked column (sealed)
+        d in (_TOP, _BOTTOM) && continue
+        oc == col && error("lateral face $f inside column $col")
 
-        d in (_TOP, _BOTTOM) && error("vertical face $f between columns $col and $oc")
         push!(acc[d].int, f); push!(acc[d].nbrs, oc)
     end
 

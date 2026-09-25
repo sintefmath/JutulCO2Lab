@@ -5,6 +5,23 @@ using Jutul
 using JutulDarcy
 using MAT
 
+# --------------------- Helpers: small corner-point grids -----------------------
+
+# An nx x 1 x nz corner-point grid built by Jutul, 100 m cells in x; layer k of
+# pillar i spans depths top(i, k)..top(i, k + 1).
+function _cp_mesh(nx, nz, top; actnum = fill(true, nx, 1, nz))
+    coord = Float64[]
+    for j in 0:1, i in 0:nx
+        append!(coord, [i * 100.0, j * 100.0, 0.0, i * 100.0, j * 100.0, 2000.0])
+    end
+
+    zc = [top((ii + 1) ÷ 2, k + s) for k in 1:nz for s in (0, 1)
+          for jj in 1:2 for ii in 1:2nx]
+    grid = Dict("cartDims" => [nx, 1, nz], "COORD" => coord, "ZCORN" => zc,
+                "ACTNUM" => actnum)
+    return JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+end
+
 # --------------- Helpers: comparisons with MRST dumps and runs ----------------
 
 # The VE sloping-aquifer domain of an MRST dump (3D grid G3 and rock).
@@ -467,7 +484,7 @@ end
         end
     end
 
-    @testset "VE columns: discard_below_holes vs MRST" begin
+    @testset "VE columns: holes vs MRST" begin
         f = joinpath(refdir, "holes_case.mat")
         if !isfile(f)
             @info "Skipping: $f not generated"
@@ -476,10 +493,13 @@ end
             mesh = ve_mesh_from_mrst(d["G_in"])
 
             rep = OracleReport("VE columns, holes case")
-            ck, dk = ve_columns(mesh; discard_below_holes = false)
-            check!(rep, "discard=false: discarded", length(dk), 0; tol = exact)
-            check!(rep, "discard=false: columns.cells", ck.cells,
+            # :stack keeps MRST's discard=false cells, split at the 4 holes
+            ck, dk = ve_columns(mesh; below_holes = :stack)
+            check!(rep, ":stack: discarded", length(dk), 0; tol = exact)
+            check!(rep, ":stack: columns.cells", ck.cells,
                    iv(d["keep"]["columns_cells"]); tol = exact)
+            check!(rep, ":stack: columns", number_of_columns(ck),
+                   length(iv(d["keep"]["columnPos"])) - 1 + 4; tol = exact)
 
             _, disc = ve_columns(mesh)
             # MRST lists discarded cells in column-major matrix order; compare as sets
@@ -675,6 +695,83 @@ end
         @test dir((3, 4, 5), (4, 4, 9)) == 2                    # i+, across a fault
     end
 
+    @testset "stacked columns and connectivity (Stage 2 item 8)" begin
+        layered(i, k) = 1000.0 + 10.0 * (k - 1)
+        nc(m) = number_of_cells(m)
+        pillar_ks(m, cols) = [[cell_ijk(m, c)[3] for c in column_cells(cols, col)]
+                              for col in 1:number_of_columns(cols)]
+
+        # a pinched-out layer in pillar 1 (zero thickness): its cells above and
+        # below share a face, so no cut (co2lab would discard k = 3 there)
+        pinched(i, k) = i == 1 && k >= 3 ? layered(i, k - 1) : layered(i, k)
+        m = _cp_mesh(3, 3, pinched)
+        cols, disc = ve_columns(m)
+        @test isempty(disc) && pillar_ks(m, cols) == [[1, 3], [1, 2, 3], [1, 2, 3]]
+
+        # a sealed face cuts: pillar 1 split between k = 1 and 2
+        m = _cp_mesh(3, 3, layered)
+        f = only(f for f in 1:number_of_faces(m) if
+                 sort([cell_ijk(m, c) for c in m.faces.neighbors[f]]) ==
+                 [(1, 1, 1), (1, 1, 2)])
+        cols, disc = ve_columns(m; sealed_faces = [f])
+        @test pillar_ks(m, cols) == [[1], [1, 2, 3], [1, 2, 3]] && length(disc) == 2
+        cols, disc = ve_columns(m; sealed_faces = [f], below_holes = :stack)
+        @test pillar_ks(m, cols)[1:2] == [[1], [2, 3]] && isempty(disc)
+
+        # ...and the coarse face between the two stacked columns is sealed
+        ve = ve_domain(m, cols; perm_x = fill(1e-13, nc(m)), poro = fill(0.2, nc(m)))
+        N, T = ve.domain[:neighbors], ve.domain[:transmissibilities]
+        @test [T[f] for f in axes(N, 2) if Set(N[:, f]) == Set([1, 2])] == [0.0]
+        @test count(>(0), T) == size(N, 2) - 1
+
+        # a shale missing from the grid in pillars 1-2 (k = 2), ending before 3
+        full = _cp_mesh(3, 3, layered)
+        shale = [c for c in 1:nc(full) if cell_ijk(full, c) in ((1, 1, 2), (2, 1, 2))]
+        m = ve_trim(full, shale)
+
+        cols, disc = ve_columns(m)
+        @test pillar_ks(m, cols) == [[1], [1], [1, 2, 3]] && length(disc) == 2
+
+        cols, disc = ve_columns(m; below_holes = :stack)
+        @test pillar_ks(m, cols) == [[1], [3], [1], [3], [1, 2, 3]] && isempty(disc)
+        @test cols.pillar == [(1, 1), (1, 1), (2, 1), (2, 1), (3, 1)]
+
+        # column 5 (pillar 3) faces both stacked columns of pillar 2 on its left;
+        # its left face at shale depth is exposed (no-flow), not an outer side
+        cs = ve_column_sides(m, cols)
+        left5 = findall(i -> cs.column[i] == 5 && cs.direction[i] == 1, 1:length(cs))
+        @test cs.neighbour[left5] == [3, 4]
+        bdir = JutulCO2Lab._boundary_directions(m)
+        e = only(cs.exposed_faces)
+        @test bdir[e] == 1 && cell_ijk(m, m.boundary_faces.neighbors[e]) == (3, 1, 2)
+        ve = @test_logs ve_domain(m, cols; perm_x = fill(1e-13, nc(m)),
+                                  poro = fill(0.2, nc(m)))
+        @test ve.domain[:pillar_columns] == [2, 2, 2, 2, 1]
+        @test all(ve.domain[:is_ve])
+        @test Set(Set(ve.domain[:neighbors][:, f]) for f in 1:4) ==
+              Set(Set.([[1, 3], [2, 4], [3, 5], [4, 5]]))
+
+        sides, unassigned = ve_boundary_sides(m, cols, ve.domain)
+        @test unassigned == cs.exposed_faces && !any(sides.across_fault)
+        @test_throws ErrorException setup_co2lab_model(ve.domain)
+
+        # layers that never communicate: warning
+        cut = _cp_mesh(2, 3, layered; actnum = reshape([true, true, false, false,
+                                                        true, true], 2, 1, 3))
+        cols, _ = ve_columns(cut; below_holes = :stack)
+        @test_logs (:warn, r"2 unconnected pieces") ve_domain(
+            cut, cols; perm_x = fill(1e-13, 4), poro = fill(0.2, 4))
+
+        # fine 3D cells are Stage 8; below_holes must be a known mode
+        @test_throws ArgumentError ve_columns(m; is_ve = [true; fill(false, nc(m) - 1)])
+        @test first(ve_columns(m; is_ve = fill(true, nc(m)))).pos == [1, 2, 3, 6]
+        @test_throws ArgumentError ve_columns(m; below_holes = :bridge)
+
+        # VE/fine branch points: compiled away for all-VE domains
+        @test JutulCO2Lab._is_ve(nothing, 7)
+        @test !JutulCO2Lab._is_ve([true, false], 2)
+    end
+
     # Proves the toolchain end-to-end: local Jutul + JutulDarcy assemble,
     # linearise and solve. Stock immiscible physics, no VE.
     @testset "toolchain smoke test" begin
@@ -801,6 +898,12 @@ end
                                                  compressibility = 1e-10)
             fv = m[:Reservoir].secondary_variables[:FluidVolume]
             @test fv isa JutulDarcy.LinearlyCompressiblePoreVolume
+
+            # VE/fine branch points: no per-cell flag when every cell is VE
+            S = r.secondary_variables
+            @test S[:PlumeHeights].is_ve === nothing
+            @test S[:RelativePermeabilities].is_ve === nothing
+            @test S[:CapillaryPressure].is_ve === nothing
         end
 
         @testset "sGmax update: running maximum, capped at 1 - res_water" begin
