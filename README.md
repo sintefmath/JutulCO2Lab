@@ -6,11 +6,11 @@ storage simulator on top of [Jutul](https://github.com/sintefmath/Jutul.jl) /
 
 What exists: the environment, the oracle harness, the VE domain (Stage 1:
 columns, geometry, rock, caprock datum, boundary sides — all derived from the
-3D grid and verified against MRST), and Stage 2 items 0–4: co2lab's fluid
-system, VE relperm, `pcWG`, PVT, VE wells and VE boundary conditions (items
-0–5), running end to end on co2lab's sloping aquifer
-(`../scripts/stage2_sloping_aquifer.jl`). Reconstruction is still to come. The plan lives in
-`../analysis/roadmap.org`; the evidence behind it in
+3D grid and verified against MRST), and Stage 2 items 0–6: co2lab's fluid
+system, VE relperm, `pcWG`, PVT, VE wells, VE boundary conditions and
+reconstruction of 3D states, running end to end on co2lab's sloping aquifer.
+A readable walkthrough is `../scripts/example_sloping_aquifer.jl`. The plan
+lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
 ## Environment
@@ -106,8 +106,10 @@ src/co2lab_fluid.jl  co2lab's fluid system: black-oil with a :co2lab formulation
 src/vewells.jl       VE wells: co2lab's well index, pressure datum option, CO2 injector
 src/vebc.jl          VE boundary conditions: co2lab's pressure BC as a force, side
                      selection, exited mass
-test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, wells and
-                     boundary conditions (vs MRST), toolchain smoke test
+src/vereconstruct.jl 3D states from VE states: saturation from plume heights,
+                     hydrostatic pressure
+test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, wells,
+                     boundary conditions and reconstruction (vs MRST), toolchain smoke test
 ../scripts/          MRST/Octave reference dumps, prototypes, gate scripts
 ```
 

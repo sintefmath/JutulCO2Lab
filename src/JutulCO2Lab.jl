@@ -11,8 +11,8 @@ Contents: the oracle harness (`JutulCO2Lab.Oracle`) — every acceptance gate
 in the roadmap is a numerical comparison against MRST-co2lab on identical
 input; the VE grid and domain (Stage 1); co2lab's fluid system (black-oil
 with a `:co2lab` formulation, Stage 2 item 0); co2lab's VE relperm, `pcWG`
-and PVT (items 1, 3); VE wells (item 4); VE boundary conditions (item 5).
-Reconstruction is still to come.
+and PVT (items 1, 3); VE wells (item 4); VE boundary conditions (item 5);
+reconstruction of 3D states (item 6).
 """
 module JutulCO2Lab
 
@@ -54,5 +54,8 @@ export ve_well_index, setup_ve_well, co2_injector_control
 include("vebc.jl")
 export VEBoundaryCondition, ve_select_sides, ve_boundary_conditions
 export ve_boundary_mass_fluxes
+
+include("vereconstruct.jl")
+export ve_reconstruct
 
 end # module

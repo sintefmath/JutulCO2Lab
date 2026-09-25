@@ -172,9 +172,11 @@ Per-column and per-fine-cell VE geometry, from the 3D mesh alone:
   bottom face relative to the caprock (MRST's `Gt.columns.z`)
 - `dx`, `dy`: per column, the x and y extent of the bounding box of the top
   cell's top face nodes (MRST's `cellDims(Gt)`, used for the well index)
+- `z_cell`: per fine cell (in `columns.cells` order), depth of the cell
+  centroid (MRST's `G.cells.centroids(:, 3)`, used for 3D pressure)
 
-All six are new `Vector{Float64}`s, returned as the NamedTuple
-`(z_top, H, dz, z, dx, dy)`.
+All seven are new `Vector{Float64}`s, returned as the NamedTuple
+`(z_top, H, dz, z, dx, dy, z_cell)`.
 
 A cell's top and bottom faces are found by topology, as MRST's face tags 5
 and 6: interior faces from the logical indices of the two cells, boundary
@@ -203,7 +205,8 @@ function ve_column_geometry(mesh, columns::VEColumns)
         z_top[col] = ztop_cell[top]
         dx[col], dy[col] = _top_face_xy_extent(mesh, ijk, bdir, top)
     end
-    return (z_top = z_top, H = H, dz = dz, z = z, dx = dx, dy = dy)
+    z_cell = [geo.cell_centroids[3, c] for c in columns.cells]
+    return (z_top = z_top, H = H, dz = dz, z = z, dx = dx, dy = dy, z_cell = z_cell)
 end
 
 """

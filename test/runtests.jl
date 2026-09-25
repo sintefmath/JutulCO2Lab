@@ -15,6 +15,39 @@ function _ve_case(d)
     return ve, cols, sides
 end
 
+# ve_reconstruction.mat: co2lab's VEstates23D on sampled states, three fluid
+# cases; and, per column, reconstructed CO2 volume = VE CO2 volume.
+function _ve_reconstruction_vs_mrst(d)
+    ve, cols, _ = _ve_case(d)
+    pv3 = vec(d["rock"]["poro"]) .* tpfv_geometry(ve.coarse.parent).volumes
+    pv_ve = ve.domain[:volumes] .* ve.domain[:porosity]
+    rep = OracleReport("VE reconstruction vs MRST co2lab")
+    for (c, res) in enumerate(((0.0, 0.0), (0.2, 0.0), (0.2, 0.15)))
+        fl = co2lab_ve_fluid(residual = res, co2_rho_ref = 700, wat_rho_ref = 1050,
+                             wat_rho_pvt = (4.3e-10, 100e5))
+        r = d["case$c"]
+        for k in axes(r["p"], 2)
+            st = Dict(:Pressure => r["p"][:, k], :sG => r["sg"][:, k],
+                      :sGmax => r["sgmax"][:, k])
+            o = ve_reconstruct(st, ve, cols, fl)
+            check!(rep, "case $c, state $k: pressure", o.pressure, r["p3D"][:, k];
+                   tol = Tolerance(1e-14, 0.0))
+            check!(rep, "case $c, state $k: sG", o.sG, r["s3D"][:, k];
+                   tol = Tolerance(0.0, 1e-12))
+            check!(rep, "case $c, state $k: sGmax", o.sGmax, r["smax3D"][:, k];
+                   tol = Tolerance(0.0, 1e-12))
+            # without residual CO2 the plume holds all of the column's CO2
+            res[2] == 0 || continue
+            v3 = [sum(pv3[column_cells(cols, j)] .* o.sG[column_cells(cols, j)])
+                  for j in 1:number_of_columns(cols)]
+            check!(rep, "case $c, state $k: CO2 volume per column", v3,
+                   pv_ve .* r["sg"][:, k]; tol = Tolerance(1e-11, 1e-9))
+        end
+    end
+    passed(rep) || display(rep)
+    @test passed(rep)
+end
+
 # ve_bc.mat: sides, boundary pressures and transmissibilities against co2lab's
 # open boundary, and the boundary fluxes against co2lab's on sampled states.
 function _ve_bc_vs_mrst(d)
@@ -670,6 +703,25 @@ end
             @info "Skipping: $f not generated (scripts/mrst_dump_sloping_aquifer.m)"
         else
             _ve_bc_runs(matread(f))
+        end
+    end
+
+    @testset "VE reconstruction (Stage 2 item 6)" begin
+        # one column of three cells, bottoms at 2, 5, 10 m below the caprock
+        zb = [2.0, 5.0, 10.0]
+        @test JutulCO2Lab._fill_degree(3.5, zb) == (1, 0.5)
+        @test JutulCO2Lab._fill_degree(5.0, zb) == (2, 0.0)   # edge counts as full
+        @test JutulCO2Lab._fill_degree(-1.0, zb) == (0, 0.0)
+        @test JutulCO2Lab._fill_degree(12.0, zb) == (3, 0.0)
+        # plume to 3.5 m, residual zone to 7.5 m: rw = 0.2, rg = 0.1
+        s, smax = JutulCO2Lab._column_saturations(zb, 3.5, 7.5, 0.2, 0.1)
+        @test s ≈ [0.8, 0.5 * 0.8 + 0.5 * 0.1, 0.5 * 0.1]
+        @test smax ≈ [0.8, 0.8, 0.5 * 0.8]
+        f = joinpath(refdir, "ve_reconstruction.mat")
+        if !isfile(f)
+            @info "Skipping: $f not generated (scripts/mrst_dump_ve_reconstruction.m)"
+        else
+            _ve_reconstruction_vs_mrst(matread(f))
         end
     end
 
