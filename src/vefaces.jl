@@ -70,10 +70,13 @@ Direction of every boundary face, from the mesh's `:direction` entity tags
 function _boundary_directions(mesh)
     dirs = zeros(Int8, length(mesh.boundary_faces.neighbors))
     for (k, name) in enumerate(_DIRECTIONS)
-        faces = Jutul.get_mesh_entity_tag(mesh, BoundaryFaces(), :direction, name; throw = false)
+        faces = Jutul.get_mesh_entity_tag(mesh, BoundaryFaces(), :direction, name;
+                                          throw = false)
         ismissing(faces) || (dirs[faces] .= k)
     end
-    any(==(0), dirs) && error("mesh has boundary faces without a :direction tag (Jutul corner-point grids and ve_mesh_from_mrst / ve_trim provide them)")
+    any(==(0), dirs) &&
+        error("mesh has boundary faces without a :direction tag (Jutul corner-point " *
+              "grids and ve_mesh_from_mrst / ve_trim provide them)")
     return dirs
 end
 
@@ -86,9 +89,11 @@ Modifies: `mesh` (its entity tags, group `:direction` on `BoundaryFaces()`).
 `dirs` is only read.
 """
 function _set_boundary_directions!(mesh, dirs)
-    length(dirs) == length(mesh.boundary_faces.neighbors) || error("one direction per boundary face expected")
+    length(dirs) == length(mesh.boundary_faces.neighbors) ||
+        error("one direction per boundary face expected")
     for (k, name) in enumerate(_DIRECTIONS)
-        Jutul.set_mesh_entity_tag!(mesh, BoundaryFaces(), :direction, name, findall(==(k), dirs))
+        faces = findall(==(k), dirs)
+        Jutul.set_mesh_entity_tag!(mesh, BoundaryFaces(), :direction, name, faces)
     end
     return mesh
 end
@@ -111,10 +116,13 @@ function _mrst_boundary_directions(G, mesh)
         (N[f, 1] == 0 || N[f, 2] == 0) && (tag[f] = Int8(cf[p, 2]))
     end
     bfaces = [f for f in 1:size(N, 1) if N[f, 1] == 0 || N[f, 2] == 0]
-    length(bfaces) == length(mesh.boundary_faces.neighbors) || error("boundary face count differs from the MRST grid")
+    length(bfaces) == length(mesh.boundary_faces.neighbors) ||
+        error("boundary face count differs from the MRST grid")
     for (k, f) in enumerate(bfaces)
+        # same cell (the non-zero neighbour) and same node set
+        mrst_nodes = fnodes[npos[f]:(npos[f+1] - 1)]
         same = mesh.boundary_faces.neighbors[k] == N[f, 1] + N[f, 2] &&
-               sort(collect(mesh.boundary_faces.faces_to_nodes[k])) == sort(fnodes[npos[f]:(npos[f+1] - 1)])
+               sort(collect(mesh.boundary_faces.faces_to_nodes[k])) == sort(mrst_nodes)
         same || error("boundary face $k of the mesh is not MRST face $f")
     end
     return tag[bfaces]
@@ -138,18 +146,23 @@ function _trimmed_boundary_directions(old, keep, new)
         l, r = old.faces.neighbors[f]
         active[l] == active[r] && continue
         c, o = active[l] ? (l, r) : (r, l)
-        push!(dirs, _logical_direction(ijk(c), ijk(o))); push!(cells, c); push!(nodes, collect(old.faces.faces_to_nodes[f]))
+        push!(dirs, _logical_direction(ijk(c), ijk(o)))
+        push!(cells, c); push!(nodes, collect(old.faces.faces_to_nodes[f]))
     end
     olddirs = _boundary_directions(old)
     for bf in eachindex(olddirs)
         c = old.boundary_faces.neighbors[bf]
         active[c] || continue
-        push!(dirs, olddirs[bf]); push!(cells, c); push!(nodes, collect(old.boundary_faces.faces_to_nodes[bf]))
+        push!(dirs, olddirs[bf])
+        push!(cells, c); push!(nodes, collect(old.boundary_faces.faces_to_nodes[bf]))
     end
-    length(dirs) == length(new.boundary_faces.neighbors) || error("unexpected boundary face count after trimming")
+    length(dirs) == length(new.boundary_faces.neighbors) ||
+        error("unexpected boundary face count after trimming")
     for k in eachindex(dirs)
+        # same (renumbered) cell, same node coordinates — nodes are renumbered too
+        new_pts = new.node_points[collect(new.boundary_faces.faces_to_nodes[k])]
         same = new.boundary_faces.neighbors[k] == renum[cells[k]] &&
-               sort(new.node_points[collect(new.boundary_faces.faces_to_nodes[k])]) == sort(old.node_points[nodes[k]])
+               sort(new_pts) == sort(old.node_points[nodes[k]])
         same || error("boundary face $k after trimming does not match the expected face")
     end
     return dirs
@@ -188,6 +201,10 @@ find each side's neighbouring column from the faces' cells. Throws if a side
 has fine faces towards more than one other column. `mesh` must carry face
 directions ([`ve_mesh_from_mrst`](@ref), [`ve_trim`](@ref)) and every cell
 must belong to a column. `mesh` and `columns` are only read.
+
+Returns a new [`VEColumnSides`](@ref): one entry per (column, lateral
+direction) that has any fine face, ordered by column and then direction
+(left, right, lower, upper); face indices refer to `mesh`.
 """
 function ve_column_sides(mesh, columns::VEColumns)
     bdir = _boundary_directions(mesh)
@@ -202,9 +219,11 @@ function ve_column_sides(mesh, columns::VEColumns)
             a = acc[d]
             isempty(a.int) && isempty(a.bnd) && continue
             nb = unique(a.nbrs)
-            length(nb) <= 1 || error("column $col, $(_DIRECTIONS[d]) side: faces towards columns $nb; " *
-                                     "expected at most one neighbouring column")
-            push!(out.column, col); push!(out.direction, d); push!(out.neighbour, isempty(nb) ? 0 : nb[1])
+            length(nb) <= 1 ||
+                error("column $col, $(_DIRECTIONS[d]) side: faces towards columns " *
+                      "$nb; expected at most one neighbouring column")
+            push!(out.column, col); push!(out.direction, d)
+            push!(out.neighbour, isempty(nb) ? 0 : nb[1])
             push!(out.interior_faces, a.int); push!(out.boundary_faces, a.bnd)
         end
     end

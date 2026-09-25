@@ -40,7 +40,8 @@ include("vedomain.jl")
 export ve_average_rock, ve_domain, VEBoundarySides, ve_boundary_sides
 
 include("co2lab_fluid.jl")
-export co2lab_system, has_dissolution, setup_co2lab_model, setup_co2lab_state, setup_co2lab_simulator
+export co2lab_system, has_dissolution
+export setup_co2lab_model, setup_co2lab_state, setup_co2lab_simulator
 export LinearShrinkage, ConstantViscosities, MaxGasSaturation, DissolvedCO2Equation
 
 end # module

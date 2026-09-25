@@ -11,11 +11,17 @@ Thickness-weighted column averages, exactly as MRST's `averageRock`:
 given) net-to-gross. `dz` is per fine cell in `columns.cells` order (from
 [`ve_column_geometry`](@ref)); `perm_x`, `poro`, `ntg` are per fine cell of the
 3D mesh. Only x-permeability is used — co2lab discards anisotropy.
+
+Returns the NamedTuple `(perm, poro, ntg)` of new per-column vectors;
+`ntg` is `nothing` if not given. The arguments are only read.
 """
-function ve_average_rock(columns::VEColumns, dz::AbstractVector; perm_x, poro, ntg = nothing)
+function ve_average_rock(columns::VEColumns, dz::AbstractVector;
+                         perm_x, poro, ntg = nothing)
     avg(x) = [sum(x[columns.cells[r]] .* dz[r]) / sum(dz[r])
-              for r in (columns.pos[c]:(columns.pos[c+1] - 1) for c in 1:number_of_columns(columns))]
-    return (perm = avg(perm_x), poro = avg(poro), ntg = isnothing(ntg) ? nothing : avg(ntg))
+              for r in (columns.pos[c]:(columns.pos[c+1] - 1)
+                        for c in 1:number_of_columns(columns))]
+    return (perm = avg(perm_x), poro = avg(poro),
+            ntg = isnothing(ntg) ? nothing : avg(ntg))
 end
 
 """
@@ -25,7 +31,14 @@ Build the VE reservoir domain: a `CoarseMesh` over `mesh`, one block per
 column, with thickness-averaged rock and the gravity term taken from the
 caprock.
 
-Returns `(domain, coarse, geometry, rock)`.
+Returns the NamedTuple `(domain, coarse, geometry, rock)`, all new:
+- `domain`: the `DataDomain` on the `CoarseMesh` (from `reservoir_domain`),
+  with the averaged `:permeability`, `:porosity` (and `:net_to_gross`) per
+  column and `:gdz` on `Faces()` from the caprock depths;
+- `coarse`: that `CoarseMesh` — the same object `domain` wraps;
+- `geometry`: [`ve_column_geometry`](@ref)'s result;
+- `rock`: [`ve_average_rock`](@ref)'s result.
+`mesh` and `columns` are only read.
 
 Deliberately **not** done, and why:
 
@@ -45,7 +58,8 @@ function ve_domain(mesh, columns::VEColumns; perm_x, poro, ntg = nothing)
     rock = ve_average_rock(columns, geometry.dz; perm_x, poro, ntg)
     coarse = CoarseMesh(mesh, columns.partition)
     kw = isnothing(rock.ntg) ? (;) : (net_to_gross = rock.ntg,)
-    domain = reservoir_domain(coarse; permeability = rock.perm, porosity = rock.poro, kw...)
+    domain = reservoir_domain(coarse; permeability = rock.perm, porosity = rock.poro,
+                              kw...)
     domain[:gdz, Faces()] = Jutul.compute_face_gdz(domain[:neighbors], geometry.z_top)
     return (domain = domain, coarse = coarse, geometry = geometry, rock = rock)
 end
@@ -106,15 +120,21 @@ sides are exactly MRST's 456 boundary edges). Such faces are returned in
 The edge of a side is where the column's top face meets the top cell's
 boundary faces on that side: exactly two shared nodes. `mesh`, `columns` and
 `domain` are only read.
+
+Returns `(sides, unassigned)`:
+- `sides`: a new [`VEBoundarySides`](@ref), one entry per outer side, ordered
+  by column and, within a column, by direction (left, right, lower, upper);
+- `unassigned`: `Vector{Int}` of boundary-face indices of `mesh` on sides that
+  do have a neighbour (exposed fragments; no-flow), in the same order.
 """
 function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
     cs = ve_column_sides(mesh, columns)
     g = _boundary_geometry(mesh)
     bdir = _boundary_directions(mesh)
     perm, cc = domain[:permeability], domain[:cell_centroids]
-    out = (column = Int[], depth = Float64[], mid = NTuple{2, Float64}[], area = Float64[],
-           cen = NTuple{3, Float64}[], nrm = NTuple{3, Float64}[], T = Float64[], faces = Vector{Int}[],
-           fault = Bool[])
+    out = (column = Int[], depth = Float64[], mid = NTuple{2, Float64}[],
+           area = Float64[], cen = NTuple{3, Float64}[], nrm = NTuple{3, Float64}[],
+           T = Float64[], faces = Vector{Int}[], fault = Bool[])
     column_at = Dict(columns.pillar[c] => c for c in 1:number_of_columns(columns))
     unassigned = Int[]
     for s in 1:length(cs)
@@ -122,13 +142,19 @@ function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
         if cs.neighbour[s] != 0
             append!(unassigned, fs); continue
         end
-        depth, mid = _side_top_edge(g, bdir, first(column_cells(columns, col)), cs.direction[s], col)
-        A, C, N, t = _side_aggregate(g, fs, perm[col], (cc[1, col], cc[2, col], cc[3, col]))
+        d, top = cs.direction[s], first(column_cells(columns, col))
+        depth, mid = _side_top_edge(g, bdir, top, d, col)
+        centroid = (cc[1, col], cc[2, col], cc[3, col])
+        A, C, N, t = _side_aggregate(g, fs, perm[col], centroid)
         push!(out.column, col); push!(out.depth, depth); push!(out.mid, mid)
-        push!(out.area, A); push!(out.cen, C); push!(out.nrm, N); push!(out.T, t); push!(out.faces, fs)
-        push!(out.fault, haskey(column_at, _logical_neighbour_pillar(columns.pillar[col], cs.direction[s])))
+        push!(out.area, A); push!(out.cen, C); push!(out.nrm, N)
+        push!(out.T, t); push!(out.faces, fs)
+        # a column exists across this side, but nothing connects to it: sealed fault
+        across = _logical_neighbour_pillar(columns.pillar[col], d)
+        push!(out.fault, haskey(column_at, across))
     end
-    sides = VEBoundarySides(out.column, out.depth, out.mid, out.area, out.cen, out.nrm, out.T, out.faces, out.fault)
+    sides = VEBoundarySides(out.column, out.depth, out.mid, out.area, out.cen, out.nrm,
+                            out.T, out.faces, out.fault)
     return (sides, unassigned)
 end
 
@@ -139,8 +165,9 @@ _logical_neighbour_pillar(ij, d) = ij .+ ((-1, 0), (1, 0), (0, -1), (0, 1))[d]
 # Boundary-face geometry of the 3D mesh, bundled for the helpers below.
 function _boundary_geometry(mesh::UnstructuredMesh)
     geo = tpfv_geometry(mesh)
-    return (bn = geo.boundary_normals, bc = geo.boundary_centroids, ba = geo.boundary_areas,
-            c2f = mesh.boundary_faces.cells_to_faces, nodes = mesh.boundary_faces.faces_to_nodes,
+    bf = mesh.boundary_faces
+    return (bn = geo.boundary_normals, bc = geo.boundary_centroids,
+            ba = geo.boundary_areas, c2f = bf.cells_to_faces, nodes = bf.faces_to_nodes,
             X = mesh.node_points)
 end
 
@@ -153,13 +180,17 @@ mean depth and (x, y) midpoint.
 """
 function _side_top_edge(g, bdir, top, d, col)
     tops = [f for f in g.c2f[top] if bdir[f] == _TOP]
-    length(tops) == 1 || error("column $col: top cell $top has $(length(tops)) top boundary faces, expected 1")
+    length(tops) == 1 ||
+        error("column $col: top cell $top has $(length(tops)) top boundary faces, " *
+              "expected 1")
     side_nodes = Set{Int}()
     for f in g.c2f[top]
         bdir[f] == d && union!(side_nodes, g.nodes[f])
     end
     shared = [n for n in g.nodes[tops[1]] if n in side_nodes]
-    length(shared) == 2 || error("column $col, $(_DIRECTIONS[d]) side: top edge has $(length(shared)) nodes, expected 2")
+    length(shared) == 2 ||
+        error("column $col, $(_DIRECTIONS[d]) side: top edge has " *
+              "$(length(shared)) nodes, expected 2")
     Xa, Xb = g.X[shared[1]], g.X[shared[2]]
     return ((Xa[3] + Xb[3]) / 2, ((Xa[1] + Xb[1]) / 2, (Xa[2] + Xb[2]) / 2))
 end

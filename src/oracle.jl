@@ -62,6 +62,8 @@ on the MATLAB side is fine (and is what large Johansen dumps will need).
 MATLAB stores everything as `Float64` and column-major; scalars arrive as
 1×1 matrices. This function leaves that as-is rather than second-guessing
 each field — squeeze/`only` at the call site where the expected shape is known.
+
+Returns a new [`MrstDump`](@ref) wrapping the file's contents.
 """
 function read_mrst_dump(path::AbstractString)
     isfile(path) || throw(ArgumentError("no such MRST dump: $path"))
@@ -205,6 +207,24 @@ function check!(report::OracleReport, name::AbstractString, julia, mrst;
         return res
     end
 
+    maxabs, maxrel, ok, nonfinite = _compare(a, b, tol)
+    if nonfinite > 0
+        nf = "$nonfinite non-finite entries"
+        note = isempty(note) ? nf : "$note; $nf"
+    end
+    res = CheckResult(String(name), length(a), maxabs, maxrel, tol, ok, String(note))
+    push!(report.results, res)
+    return res
+end
+
+"""
+    _compare(a, b, tol) -> (maxabs, maxrel, ok, nonfinite)
+
+Elementwise comparison of equal-length vectors `a` (Julia) and `b` (MRST):
+largest absolute and relative difference over the finite pairs, whether every
+pair is within `tol`, and the number of non-finite pairs (each one a failure).
+"""
+function _compare(a, b, tol::Tolerance)
     maxabs = 0.0
     maxrel = 0.0
     ok = true
@@ -218,15 +238,11 @@ function check!(report::OracleReport, name::AbstractString, julia, mrst;
         end
         d = abs(ai - bi)
         maxabs = max(maxabs, d)
+        # relative to the MRST value, guarded against division by zero
         maxrel = max(maxrel, d / max(abs(bi), eps()))
         ok &= d <= tol.atol + tol.rtol * abs(bi)
     end
-    if nonfinite > 0
-        note = isempty(note) ? "$nonfinite non-finite entries" : "$note; $nonfinite non-finite entries"
-    end
-    res = CheckResult(String(name), length(a), maxabs, maxrel, tol, ok, String(note))
-    push!(report.results, res)
-    return res
+    return (maxabs, maxrel, ok, nonfinite)
 end
 
 _flatten(x::Number) = [Float64(x)]

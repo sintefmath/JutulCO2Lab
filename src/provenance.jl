@@ -104,6 +104,7 @@ function _warn_dirty(infos)
     for s in infos
         s.dirty === true &&
             @warn "$(s.name) checkout has uncommitted changes to tracked files; " *
-                  "this report cannot be reproduced from commit $(s.commit) alone" dir = s.dir
+                  "this report cannot be reproduced from commit $(s.commit) alone" dir =
+                  s.dir
     end
 end

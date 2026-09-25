@@ -30,7 +30,20 @@ struct VEColumns
     pillar::Vector{Tuple{Int, Int}}
 end
 
+"""
+    number_of_columns(columns) -> Int
+
+Number of columns in `columns`.
+"""
 number_of_columns(c::VEColumns) = length(c.pos) - 1
+
+"""
+    column_cells(columns, col) -> view
+
+The fine cells of column `col`, top to bottom, as indices into the mesh the
+columns were built on. Returns a **view** into `columns.cells`, not a copy:
+writing to it would change `columns`.
+"""
 column_cells(c::VEColumns, col::Integer) = view(c.cells, c.pos[col]:(c.pos[col+1]-1))
 
 """
@@ -41,6 +54,11 @@ logical indices (`cartDims`, `cells.indexMap`), which Jutul's own
 `UnstructuredMesh(::MRSTWrapMesh)` conversion drops, and the direction of
 every boundary face (MRST's face tags, stored as entity tags — see
 `vefaces.jl`). Depth is positive down, as in MRST.
+
+Returns a new `UnstructuredMesh`: MRST's cells in MRST's order, its interior
+and boundary faces each in MRST's face order, `structure = cartDims`,
+`cell_map = cells.indexMap`, `z_is_depth = true`, and a `:direction` tag on
+every boundary face. `G` is only read.
 """
 function ve_mesh_from_mrst(G::AbstractDict)
     cd = Int.(vec(G["cartDims"]))
@@ -62,10 +80,13 @@ to increase downwards, as in MRST). With `discard_below_holes = true`, every
 cell below the first gap in `k` within a column is discarded — MRST's default,
 on the grounds that VE is only valid above an impermeable layer.
 
-Returns the `VEColumns` of the cells kept, and the discarded cells (indices
-into `mesh`). If any cells are discarded, the partition still refers to
-`mesh`'s cell numbering and does **not** cover every cell, so it cannot be
-passed to `CoarseMesh` as-is; use [`ve_trim`](@ref) first.
+Returns `(columns, discarded)`: a new `VEColumns` of the cells kept (cell
+indices into `mesh`), and the discarded cells as a sorted `Vector{Int}` of
+indices into `mesh` (empty if nothing is discarded). `mesh` is only read.
+
+If any cells are discarded, the partition still refers to `mesh`'s cell
+numbering and does **not** cover every cell, so it cannot be passed to
+`CoarseMesh` as-is; use [`ve_trim`](@ref) first.
 """
 function ve_columns(mesh; discard_below_holes::Bool = true)
     nc = number_of_cells(mesh)
@@ -109,6 +130,17 @@ end
 Remove `discarded` cells from `mesh`, keeping logical indices and boundary
 face directions correct. `mesh` is only read.
 
+Returns a new `UnstructuredMesh` with:
+- the kept cells, renumbered 1…n in their original order;
+- `cell_map` composed with the parent's, so `cell_ijk` still gives each
+  cell's original logical index; `structure` and `z_is_depth` unchanged;
+- interior faces between two kept cells unchanged; faces between a kept and
+  a discarded cell turned into boundary faces; only the nodes still used;
+- a `:direction` tag on every boundary face (the new ones from the logical
+  indices of the two original cells).
+
+If `discarded` is empty it returns **`mesh` itself**, not a copy.
+
 Works around `Jutul.extract_submesh` setting the submesh's `cell_map` to the
 parent's *local* cell numbers rather than composing it with the parent's own
 `cell_map` (`Jutul/src/meshes/unstructured/utils.jl`, fixed upstream in
@@ -118,10 +150,12 @@ inactive cells.
 function ve_trim(mesh::UnstructuredMesh, discarded)
     isempty(discarded) && return mesh
     keep = setdiff(1:number_of_cells(mesh), discarded)
-    parent_map = isnothing(mesh.cell_map) ? collect(1:number_of_cells(mesh)) : mesh.cell_map
+    nc = number_of_cells(mesh)
+    parent_map = isnothing(mesh.cell_map) ? collect(1:nc) : mesh.cell_map
     trimmed = extract_submesh(mesh, keep; cell_map = parent_map[keep],
                               z_is_depth = mesh.z_is_depth)
-    return _set_boundary_directions!(trimmed, _trimmed_boundary_directions(mesh, keep, trimmed))
+    dirs = _trimmed_boundary_directions(mesh, keep, trimmed)
+    return _set_boundary_directions!(trimmed, dirs)
 end
 
 """
@@ -136,6 +170,9 @@ Per-column and per-fine-cell VE geometry, from the 3D mesh alone:
   centroids of its bottom and top faces (MRST's `Gt.columns.dz`)
 - `z`: per fine cell, cumulative `dz` down the column — depth of the cell's
   bottom face relative to the caprock (MRST's `Gt.columns.z`)
+
+All four are new `Vector{Float64}`s, returned as the NamedTuple
+`(z_top, H, dz, z)`.
 
 A cell's top and bottom faces are found by topology, as MRST's face tags 5
 and 6: interior faces from the logical indices of the two cells, boundary
@@ -183,6 +220,7 @@ function _cell_top_bottom_depth(mesh, geo, ijk, bdir, c)
         bdir[f] == _BOTTOM && push!(bot, geo.boundary_centroids[3, f])
     end
     length(top) == 1 && length(bot) == 1 ||
-        error("cell $c: expected one top and one bottom face, found $(length(top)) and $(length(bot))")
+        error("cell $c: expected one top and one bottom face, " *
+              "found $(length(top)) and $(length(bot))")
     return (top[1], bot[1])
 end
