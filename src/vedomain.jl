@@ -75,8 +75,9 @@ caprock.
 
 Returns the NamedTuple `(domain, coarse, geometry, rock)`, all new:
 - `domain`: the `DataDomain` on the `CoarseMesh` (from `reservoir_domain`),
-  with the averaged `:permeability`, `:porosity` (and `:net_to_gross`) per
-  column and `:gdz` on `Faces()` from the caprock depths;
+  with the averaged `:permeability`, `:porosity` (and `:net_to_gross`) and
+  `:column_height` per column, and `:gdz` on `Faces()` from the caprock
+  depths;
 - `coarse`: that `CoarseMesh` — the same object `domain` wraps;
 - `geometry`: [`ve_column_geometry`](@ref)'s result;
 - `rock`: [`ve_average_rock`](@ref)'s result.
@@ -104,6 +105,7 @@ function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing, poro,
     domain = reservoir_domain(coarse; permeability = rock.perm, porosity = rock.poro,
                               kw...)
     domain[:gdz, Faces()] = Jutul.compute_face_gdz(domain[:neighbors], geometry.z_top)
+    domain[:column_height, Cells()] = geometry.H
     return (domain = domain, coarse = coarse, geometry = geometry, rock = rock)
 end
 

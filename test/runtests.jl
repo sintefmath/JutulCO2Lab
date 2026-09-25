@@ -343,16 +343,23 @@ using MAT
             mesh.node_points[k] = x .+ (0.0, 0.0, 1000.0 + 0.02 * x[1])
         end
         domain = reservoir_domain(mesh, permeability = 0.5Darcy, porosity = 0.25)
+        # one-layer columns: VE column height = cell height
+        domain[:column_height, Cells()] = fill(20.0, nx)
         inj = setup_well(domain, [nx - 3]; name = :inj)
-        p0 = [1020.0 * 9.81 * c[3] for c in eachcol(domain[:cell_centroids])]
-        q_in = 1e4 / day
+        p0 = [1100.0 * 9.80665 * c[3] for c in eachcol(domain[:cell_centroids])]
+        fluid = co2lab_ve_fluid(wat_rho_pvt = (4.3e-10, 100e5),
+                                co2_rho_pvt = (4.3e-9, 100e5))
+        rho_co2 = fluid.rho_ref[2]
+        # same CO2 mass as 1e4 m³/day at 1.87 kg/m³; "surface" volumes are at the
+        # reference density (760 kg/m³) in co2lab's convention
+        q_in = 1e4 * 1.87 / 760.0 / day
         n_on, n_off = 10, 10
         dt = fill(10.0day, n_on + n_off)
 
         function run(; kw...)
-            model = setup_co2lab_model(domain; wells = [inj], kw...)
+            model = setup_co2lab_model(domain; wells = [inj], fluid = fluid, kw...)
             state0 = setup_co2lab_state(model; pressure = p0)
-            on = InjectorControl(TotalRateTarget(q_in), [0.0, 1.0], density = 1.87)
+            on = InjectorControl(TotalRateTarget(q_in), [0.0, 1.0], density = rho_co2)
             f_on = setup_reservoir_forces(model, control = Dict(:inj => on))
             off = DisabledControl()
             f_off = setup_reservoir_forces(model, control = Dict(:inj => off))
@@ -362,15 +369,20 @@ using MAT
             sim, cfg = setup_co2lab_simulator(case; info_level = -1)
             return model, simulate_reservoir(case; simulator = sim, config = cfg).states
         end
-        injected = n_on * 10day * q_in * 1.87
+        injected = n_on * 10day * q_in * rho_co2
         co2_mass(s) = sum(s[:TotalMasses][2, :])
 
         @testset "configuration errors" begin
             # hysteresis: Stage 3; dissolution needs a rate; instantaneous: Stage 5
-            @test_throws ErrorException setup_co2lab_model(domain; hysteresis = true)
-            @test_throws ErrorException setup_co2lab_model(domain; rs_sat = 25.0)
-            @test_throws ErrorException setup_co2lab_model(domain; rs_sat = 25.0,
+            hyst = co2lab_ve_fluid(residual = (0.2, 0.2))
+            @test_throws ErrorException setup_co2lab_model(domain; fluid = hyst)
+            @test_throws ErrorException setup_co2lab_model(domain; rs_sat = 0.03)
+            @test_throws ErrorException setup_co2lab_model(domain; rs_sat = 0.03,
                                                            transfer_rate = Inf)
+            @test_throws ErrorException co2lab_ve_fluid(co2_rho_pvt = (1, 2, 3, 4))
+            # the VE fluid needs column heights
+            plain = reservoir_domain(mesh, permeability = 0.5Darcy, porosity = 0.25)
+            @test_throws ErrorException setup_co2lab_model(plain)
         end
 
         @testset "sGmax update: running maximum, capped at 1 - res_water" begin
@@ -390,12 +402,29 @@ using MAT
             @test Jutul.matrix_layout(r.context) isa Jutul.BlockMajorLayout
             @test length(st) == length(dt)
             @test abs(co2_mass(st[end]) - injected) / injected < 1e-3
+            # sGmax is updated after every converged sub-step, so it can exceed the
+            # largest reported sG; it is never below it and never decreases
             runmax = accumulate((a, b) -> max.(a, b), [s[:sG] for s in st])
-            @test all(s[:sGmax] ≈ m for (s, m) in zip(st, runmax))
+            @test all(all(s[:sGmax] .>= m .- 1e-12) for (s, m) in zip(st, runmax))
+            @test all(all(b[:sGmax] .>= a[:sGmax]) for (a, b) in zip(st, st[2:end]))
+            # the model's VE variables are the co2lab formulas (Stage 2 items 1, 3)
+            fs = st[end]
+            hh = JutulCO2Lab._plume_heights.(fs[:sG], fs[:sGmax], 20.0, 0.0, 0.0)
+            @test fs[:PlumeHeights][1, :] ≈ first.(hh)
+            @test fs[:PlumeHeights][2, :] ≈ last.(hh)
+            # densities from the output pressure with co2lab's PVT (no dissolution)
+            rho(ph) = fluid.rho_ref[ph] .*
+                      JutulCO2Lab._linear.(1.0, Ref(fluid.rho_pvt[ph]), fs[:Pressure])
+            @test fs[:CapillaryPressure][1, :] ≈
+                  (rho(1) .- rho(2)) .* 9.80665 .* fs[:PlumeHeights][1, :]
+            @test maximum(fs[:CapillaryPressure]) > 0
+            # closed box: 0.5 % of the pore volume injected at c_t ≈ 5e-10/Pa raises
+            # p by ≈ 100 bar; guard against runaway cases (1000s of bar)
+            @test maximum(fs[:Pressure]) < 3 * maximum(p0)
         end
 
         @testset "dissolution on (rate-driven): unknowns p, sG, rs" begin
-            rs_sat = 25.0
+            rs_sat = 0.03
             model, st = run(rs_sat = rs_sat, transfer_rate = 1 / (60day))
             r = model[:Reservoir]
             @test collect(keys(r.primary_variables)) == [:Pressure, :sG, :Rs]
@@ -415,6 +444,60 @@ using MAT
             # dissolution continues after shut-in
             @test dis_frac(st[end]) > dis_frac(st[n_on])
         end
+    end
+
+
+    @testset "VE fluid vs MRST co2lab (Stage 2 items 1, 3)" begin
+        f = joinpath(refdir, "ve_fluid.mat")
+        if !isfile(f)
+            @info "Skipping: $f not generated (scripts/mrst_dump_ve_fluid.m)"
+        else
+            d = matread(f)
+            H = vec(d["H"]); g = d["gravity"]
+            pvt = (co2_rho_ref = 760.0, wat_rho_ref = 1100.0,
+                   co2_rho_pvt = (4.3e-9, 150e5), wat_rho_pvt = (4.3e-10, 100e5),
+                   co2_mu_pvt = (2e-9, 150e5))
+            cases = [co2lab_ve_fluid(; residual = (0.0, 0.0), pvt...),
+                     co2lab_ve_fluid(; residual = (0.27, 0.20), pvt...),
+                     co2lab_ve_fluid(; residual = (0.27, 0.20), krmax = (0.9, 0.7),
+                                     rugosity = 2.0, pvt...)]
+            tol = Tolerance(1e-12, 1e-14)
+            rep = OracleReport("VE fluid vs MRST")
+            for (c, fl) in enumerate(cases)
+                r = d["case$c"]
+                # every sample (column) of every sample set, flattened
+                sg, sgmax, p = vec(r["sg"]), vec(r["sgmax"]), vec(r["p"])
+                Hs = repeat(H, size(r["sg"], 2))
+                hh = JutulCO2Lab._plume_heights.(sg, sgmax, Hs, fl.res_water, fl.res_gas)
+                h, hmax = first.(hh), last.(hh)
+                kr = JutulCO2Lab._sharp_interface_relperm.(h, hmax, Hs, fl.krw, fl.krg,
+                                                           fl.rugosity)
+                b(ph) = JutulCO2Lab._linear.(1.0, Ref(fl.rho_pvt[ph]), p)
+                rho = [fl.rho_ref[ph] .* b(ph) for ph in 1:2]
+                mu(ph) = JutulCO2Lab._linear.(fl.mu_ref[ph], Ref(fl.mu_pvt[ph]), p)
+                check!(rep, "case $c: h", h, r["h"]; tol = tol)
+                check!(rep, "case $c: h_max", hmax, r["hmax"]; tol = tol)
+                check!(rep, "case $c: krW", first.(kr), r["krW"]; tol = tol)
+                check!(rep, "case $c: krG", last.(kr), r["krG"]; tol = tol)
+                check!(rep, "case $c: pcWG", (rho[1] .- rho[2]) .* g .* h, r["pcWG"];
+                       tol = Tolerance(1e-12, 1e-9))
+                check!(rep, "case $c: bW", b(1), r["bW"]; tol = tol)
+                check!(rep, "case $c: bG", b(2), r["bG"]; tol = tol)
+                check!(rep, "case $c: muW", mu(1), r["muW"]; tol = tol)
+                check!(rep, "case $c: muG", mu(2), r["muG"]; tol = tol)
+                pvm = 1 .+ fl.pv_c .* (p .- fl.pv_p_ref)
+                check!(rep, "case $c: pore-volume multiplier", pvm, r["pvMult"];
+                       tol = tol)
+            end
+            passed(rep) || display(rep)
+            @test passed(rep)
+        end
+        # JutulDarcy adds pc to the non-reference phase: CO2 = brine + pcWG
+        sys = co2lab_system()
+        @test JutulDarcy.get_reference_phase_index(sys) == 1
+        pc = [2.0e5 5.0e5]                         # one row, cells 1 and 2
+        @test JutulDarcy.capillary_gradient(pc, 1, 2, 2, 1) == 3.0e5   # CO2
+        @test JutulDarcy.capillary_gradient(pc, 1, 2, 1, 1) == 0.0     # brine
     end
 
 end

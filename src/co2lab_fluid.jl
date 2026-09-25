@@ -24,12 +24,10 @@
 # does not affect the flow (roadmap Stage 2 item 2); the trapping inventory
 # needs it later.
 #
-# Still placeholders, replaced by later roadmap items: the PVT (linear
-# shrinkage, constant viscosities — co2lab's linearised PVT to be matched),
-# the relperm (JutulDarcy's default, not co2lab's height-based VE relperm —
-# Stage 2 item 1), the transfer rate (linear relaxation with a smoothed onset,
-# not co2lab's computeDissolutionTransfer — Stage 5), and instantaneous
-# dissolution (Stage 5).
+# co2lab's VE relperm, pcWG and PVT are in ve_fluid.jl (Stage 2 items 1, 3).
+# Still placeholders: the transfer rate (linear relaxation with a smoothed
+# onset, not co2lab's computeDissolutionTransfer — Stage 5), and
+# instantaneous dissolution (Stage 5).
 #
 # Note: docstrings cannot be attached to @jutul_secondary definitions; their
 # "Modifies:" lines are comments instead.
@@ -176,12 +174,13 @@ end
 
 # ------------------------------------------------------------------ derived quantities
 
-"b = b_ref (1 + c (p - p_ref)) per phase; b = reservoir density / surface density."
+"b = b_ref (1 + c (p − p_ref)) per phase; b = reservoir density / surface density."
 struct LinearShrinkage <: PhaseVariables
     b_ref::NTuple{2, Float64}
     c::NTuple{2, Float64}
-    p_ref::Float64
+    p_ref::NTuple{2, Float64}
 end
+LinearShrinkage(b_ref, c, p_ref::Real) = LinearShrinkage(b_ref, c, (p_ref, p_ref))
 struct BlackOilDensities <: PhaseVariables end
 struct ConstantViscosities <: PhaseVariables
     mu::NTuple{2, Float64}
@@ -231,7 +230,7 @@ end
 @jutul_secondary function update_linear_shrinkage!(b, v::LinearShrinkage, model,
                                                   Pressure, ix)
     for i in ix, ph in 1:2
-        b[ph, i] = v.b_ref[ph] * (1 + v.c[ph] * (Pressure[i] - v.p_ref))
+        b[ph, i] = v.b_ref[ph] * (1 + v.c[ph] * (Pressure[i] - v.p_ref[ph]))
     end
 end
 
@@ -401,76 +400,84 @@ end
 # ------------------------------------------------------- model, state, simulator
 
 """
-    setup_co2lab_model(domain; wells = [], reference_densities = (1020.0, 1.87),
-                       rs_sat = nothing, transfer_rate = nothing,
-                       hysteresis = false, res_water = 0.0,
-                       shrinkage = nothing, viscosity = nothing) -> MultiModel
+    setup_co2lab_model(domain; wells = [], fluid = co2lab_ve_fluid(),
+                       rs_sat = nothing, transfer_rate = nothing) -> MultiModel
 
-Reservoir model with co2lab's formulation, plus wells. The configuration
-decides the unknowns (see the top of `co2lab_fluid.jl`):
+VE reservoir model with co2lab's formulation and fluid, plus wells. `domain`
+must come from [`ve_domain`](@ref) (it needs `:column_height`). `fluid`
+([`co2lab_ve_fluid`](@ref)) gives the residual saturations, endpoints,
+rugosity, PVT and pore-volume multiplier. The configuration decides the
+unknowns (see the top of `co2lab_fluid.jl`):
 
 - `rs_sat` and `transfer_rate` (1/s) turn rate-driven dissolution on. Both or
   neither must be given. Instantaneous dissolution is Stage 5 work and throws.
-- `hysteresis = true` (co2lab: `res_gas > 0`) is Stage 3 work and throws.
-- `res_water` caps `sGmax` at `1 - res_water`.
-- `shrinkage` / `viscosity` replace the placeholder PVT
-  (`LinearShrinkage`, `ConstantViscosities`), in the reservoir and the wells.
+- hysteresis follows co2lab: on when `fluid.res_gas > 0` — Stage 3 work,
+  throws for now.
 
 With dissolution on, the wellbores use JutulDarcy's equilibrium formulation
 of the same fluid, while the reservoir uses co2lab's (the dissolved-CO2 law
 is not defined on well segments). `setup_reservoir_model`'s own
 `wells_systems` argument cannot do this — it is ignored (JutulDarcy.jl #284)
-— so the model is assembled here. `domain` and `wells` are only read.
+— so the model is assembled here. `domain`, `wells` and `fluid` are only
+read.
 
 Returns a new `MultiModel` with submodels `:Reservoir`, one per well (named
-as the wells) and `:Facility`. The reservoir submodel has the parameter
-`:sGmax` and outputs `:sG`, `:sGmax` (plus `:Rs`, `:DissolvedCO2` with
-dissolution) besides JutulDarcy's defaults.
+as the wells) and `:Facility`. The reservoir submodel has co2lab's VE relperm,
+`pcWG`, PVT and pore-volume multiplier, the parameters `:sGmax` and
+`:ColumnHeight`, and outputs `:sG`, `:sGmax`, `:PlumeHeights`,
+`:CapillaryPressure` (plus `:Rs`, `:DissolvedCO2` with dissolution) besides
+JutulDarcy's defaults. The wells get the same PVT.
 """
-function setup_co2lab_model(domain; wells = [], reference_densities = (1020.0, 1.87),
-                            rs_sat = nothing, transfer_rate = nothing,
-                            hysteresis::Bool = false, res_water = 0.0,
-                            shrinkage = nothing, viscosity = nothing)
-    hysteresis && error("hysteresis (res_gas > 0: sGmax as an unknown) is roadmap " *
-                        "Stage 3; not implemented yet")
+function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve_fluid(),
+                            rs_sat = nothing, transfer_rate = nothing)
+    fluid.res_gas > 0 && error("hysteresis (res_gas > 0: sGmax as an unknown) is " *
+                               "roadmap Stage 3; not implemented yet")
     isnothing(rs_sat) == isnothing(transfer_rate) ||
         error("rate-driven dissolution needs both `rs_sat` and `transfer_rate`")
-    dissolution = !isnothing(rs_sat)
-    if dissolution && !(0 < transfer_rate < Inf)
+    if !isnothing(rs_sat) && !(0 < transfer_rate < Inf)
         error("instantaneous dissolution (co2lab's dis_rate = 0 or Inf) is roadmap " *
               "Stage 5; not implemented yet")
     end
-    sys = co2lab_system(reference_densities = reference_densities, rs_sat = rs_sat)
-    if dissolution
-        sys_well = co2lab_system(reference_densities = reference_densities,
-                                 rs_sat = rs_sat, formulation = :varswitch)
-        full = setup_reservoir_model(domain, sys_well; wells = wells)
-        rmodel = setup_reservoir_model(domain, sys)[:Reservoir]
-        flow = rmodel.domain.discretizations.mass_flow
-        rmodel.equations[:dissolved_co2] = DissolvedCO2Equation(flow, transfer_rate)
-        push!(rmodel.output_variables, :Rs, :DissolvedCO2)
-        # the wells and facility from `full`, the reservoir with co2lab's formulation
-        models = (; (k => (k == :Reservoir ? rmodel : full.models[k])
-                     for k in keys(full.models))...)
-        model = MultiModel(models; cross_terms = full.cross_terms, groups = full.groups,
-                           context = full.context, reduction = full.reduction)
-    else
-        model = setup_reservoir_model(domain, sys; wells = wells)
-    end
+    model = _co2lab_multimodel(domain, wells, fluid.rho_ref, rs_sat, transfer_rate)
     rmodel = model[:Reservoir]
-    rmodel.parameters[:sGmax] = MaxGasSaturation(res_water)
+    rmodel.parameters[:sGmax] = MaxGasSaturation(fluid.res_water)
     push!(rmodel.output_variables, :sG, :sGmax)
-    unique!(rmodel.output_variables)
+    _set_ve_fluid!(rmodel, fluid)
+    shrinkage, viscosity = _co2lab_pvt(fluid)
     for m in values(model.models)
         S = m.secondary_variables
         haskey(S, :ShrinkageFactors) || continue
         # the wellbores' equilibrium formulation starts from JutulDarcy's
         # three-phase deck tables; give every submodel the same PVT
-        S[:ShrinkageFactors]   = isnothing(shrinkage) ? _default_shrinkage() : shrinkage
+        S[:ShrinkageFactors] = shrinkage
         S[:PhaseMassDensities] = BlackOilDensities()
-        S[:PhaseViscosities]   = isnothing(viscosity) ? _default_viscosity() : viscosity
+        S[:PhaseViscosities] = viscosity
     end
     return model
+end
+
+"""
+    _co2lab_multimodel(domain, wells, rho_ref, rs_sat, transfer_rate) -> MultiModel
+
+The reservoir (co2lab's formulation; with dissolution also the dissolved-CO2
+law) and the wells (with dissolution on JutulDarcy's equilibrium
+formulation). Arguments are only read.
+"""
+function _co2lab_multimodel(domain, wells, rho_ref, rs_sat, transfer_rate)
+    sys = co2lab_system(reference_densities = rho_ref, rs_sat = rs_sat)
+    isnothing(rs_sat) && return setup_reservoir_model(domain, sys; wells = wells)
+    sys_well = co2lab_system(reference_densities = rho_ref, rs_sat = rs_sat,
+                             formulation = :varswitch)
+    full = setup_reservoir_model(domain, sys_well; wells = wells)
+    rmodel = setup_reservoir_model(domain, sys)[:Reservoir]
+    flow = rmodel.domain.discretizations.mass_flow
+    rmodel.equations[:dissolved_co2] = DissolvedCO2Equation(flow, transfer_rate)
+    push!(rmodel.output_variables, :Rs, :DissolvedCO2)
+    # the wells and facility from `full`, the reservoir with co2lab's formulation
+    models = (; (k => (k == :Reservoir ? rmodel : full.models[k])
+                 for k in keys(full.models))...)
+    return MultiModel(models; cross_terms = full.cross_terms, groups = full.groups,
+                      context = full.context, reduction = full.reduction)
 end
 
 """
