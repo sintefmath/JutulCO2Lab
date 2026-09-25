@@ -113,6 +113,8 @@ test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, we
 ../scripts/          MRST/Octave reference dumps, prototypes, gate scripts
 ```
 
+All types and returned objects, in order of dependency: `STRUCTURES.md`.
+
 ## Open decisions
 
 Tracked in `../analysis/STATUS.md`.
