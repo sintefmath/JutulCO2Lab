@@ -170,9 +170,11 @@ Per-column and per-fine-cell VE geometry, from the 3D mesh alone:
   centroids of its bottom and top faces (MRST's `Gt.columns.dz`)
 - `z`: per fine cell, cumulative `dz` down the column — depth of the cell's
   bottom face relative to the caprock (MRST's `Gt.columns.z`)
+- `dx`, `dy`: per column, the x and y extent of the bounding box of the top
+  cell's top face nodes (MRST's `cellDims(Gt)`, used for the well index)
 
-All four are new `Vector{Float64}`s, returned as the NamedTuple
-`(z_top, H, dz, z)`.
+All six are new `Vector{Float64}`s, returned as the NamedTuple
+`(z_top, H, dz, z, dx, dy)`.
 
 A cell's top and bottom faces are found by topology, as MRST's face tags 5
 and 6: interior faces from the logical indices of the two cells, boundary
@@ -192,15 +194,16 @@ function ve_column_geometry(mesh, columns::VEColumns)
     ncol = number_of_columns(columns)
     dz = [zbot_cell[c] - ztop_cell[c] for c in columns.cells]
     z = similar(dz)
-    H = zeros(ncol)
-    z_top = zeros(ncol)
+    H, z_top, dx, dy = zeros(ncol), zeros(ncol), zeros(ncol), zeros(ncol)
     for col in 1:ncol
         r = columns.pos[col]:(columns.pos[col+1] - 1)
         z[r] = cumsum(dz[r])
         H[col] = sum(dz[r])
-        z_top[col] = ztop_cell[columns.cells[first(r)]]
+        top = columns.cells[first(r)]
+        z_top[col] = ztop_cell[top]
+        dx[col], dy[col] = _top_face_xy_extent(mesh, ijk, bdir, top)
     end
-    return (z_top = z_top, H = H, dz = dz, z = z)
+    return (z_top = z_top, H = H, dz = dz, z = z, dx = dx, dy = dy)
 end
 
 """
@@ -223,4 +226,27 @@ function _cell_top_bottom_depth(mesh, geo, ijk, bdir, c)
         error("cell $c: expected one top and one bottom face, " *
               "found $(length(top)) and $(length(bot))")
     return (top[1], bot[1])
+end
+
+"""
+    _top_face_xy_extent(mesh, ijk, bdir, c) -> (dx, dy)
+
+x and y extent of the bounding box of the nodes of cell `c`'s top face.
+"""
+function _top_face_xy_extent(mesh, ijk, bdir, c)
+    for f in mesh.boundary_faces.cells_to_faces[c]
+        bdir[f] == _TOP && return _xy_extent(mesh, mesh.boundary_faces.faces_to_nodes[f])
+    end
+    for f in mesh.faces.cells_to_faces[c]
+        d, _ = _interior_face_direction(mesh, ijk, c, f)
+        d == _TOP && return _xy_extent(mesh, mesh.faces.faces_to_nodes[f])
+    end
+    error("cell $c: no top face")
+end
+
+# x and y extent of the bounding box of the given nodes
+function _xy_extent(mesh, nodes)
+    x = [mesh.node_points[n][1] for n in nodes]
+    y = [mesh.node_points[n][2] for n in nodes]
+    return (maximum(x) - minimum(x), maximum(y) - minimum(y))
 end

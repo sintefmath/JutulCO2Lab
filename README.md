@@ -4,10 +4,14 @@ Exploratory reimplementation of MRST-co2lab's vertical-equilibrium (VE) CO2
 storage simulator on top of [Jutul](https://github.com/sintefmath/Jutul.jl) /
 [JutulDarcy](https://github.com/sintefmath/JutulDarcy.jl).
 
-**No VE physics is implemented yet.** What exists is the environment, the
-oracle harness, and the first Stage 1 pieces (VE columns and column geometry
-derived from the 3D grid, verified exactly against MRST). The plan lives in `../analysis/roadmap.org`; the
-evidence behind it in `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
+What exists: the environment, the oracle harness, the VE domain (Stage 1:
+columns, geometry, rock, caprock datum, boundary sides — all derived from the
+3D grid and verified against MRST), and Stage 2 items 0–4: co2lab's fluid
+system, VE relperm, `pcWG`, PVT and VE wells, running end to end on co2lab's
+sloping aquifer (`../scripts/stage2_sloping_aquifer.jl`). Boundary conditions
+and reconstruction are still to come. The plan lives in
+`../analysis/roadmap.org`; the evidence behind it in
+`../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
 ## Environment
 
@@ -38,8 +42,8 @@ Record-only: nothing fails on provenance. `source_provenance()` gives the same
 information on demand.
 
 ```
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
-julia --project=. -e 'using Pkg; Pkg.test()'
+../scripts/julia --project=. -e 'using Pkg; Pkg.instantiate()'
+../scripts/julia --project=. -e 'using Pkg; Pkg.test()'
 ```
 
 The test suite ends with a **toolchain smoke test** that assembles and solves a
@@ -95,9 +99,13 @@ src/provenance.jl    source commits + dirty state, recorded in every report
 src/vegrid.jl        VE columns on the 3D mesh: partition, trimming, column geometry
 src/vefaces.jl       face directions (MRST tags / logical indices) and column sides — topology only
 src/vedomain.jl      VE domain on a CoarseMesh: upscaled rock, caprock datum, boundary sides
+src/ve_fluid.jl      co2lab's VE fluid: plume heights, sharp-interface relperm, pcWG,
+                     linear PVT and pore volume
 src/co2lab_fluid.jl  co2lab's fluid system: black-oil with a :co2lab formulation,
                      unknowns by configuration; model, state and simulator setup
-test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, toolchain smoke test
+src/vewells.jl       VE wells: co2lab's well index, pressure datum option, CO2 injector
+test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid and wells
+                     (vs MRST), toolchain smoke test
 ../scripts/          MRST/Octave reference dumps, prototypes, gate scripts
 ```
 

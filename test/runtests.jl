@@ -5,6 +5,76 @@ using Jutul
 using JutulDarcy
 using MAT
 
+# Sloping aquifer (sloping_aquifer.mat): geometry and well index against co2lab,
+# and the well datum options on a short run.
+function _ve_wells_vs_mrst(d)
+    mesh = ve_mesh_from_mrst(d["G3"])
+    cols, _ = ve_columns(mesh)
+    ve = ve_domain(mesh, cols; perm_x = vec(d["rock"]["perm"]),
+                   poro = vec(d["rock"]["poro"]))
+    geo = ve.geometry
+    rep = OracleReport("VE wells vs MRST co2lab")
+    geomtol = Tolerance(1e-12, 1e-9)
+    check!(rep, "caprock depth", geo.z_top, d["Gt_z"]; tol = geomtol)
+    check!(rep, "H", geo.H, d["Gt_H"]; tol = geomtol)
+    check!(rep, "dx (cellDims)", geo.dx, d["Gt_dx"]; tol = geomtol)
+    check!(rep, "dy (cellDims)", geo.dy, d["Gt_dy"]; tol = geomtol)
+    col, r = Int(d["well"]["cells"]), d["well"]["r"]
+    last = Int(d["well_tpf"]["last_cell"])
+    witol = Tolerance(1e-12, 1e-24)
+    wi(c, ip) = ve_well_index(ve, c; radius = r, inner_product = ip)
+    check!(rep, "WI, ip_simple", wi(col, :ip_simple), d["well"]["WI"]; tol = witol)
+    check!(rep, "WI, ip_tpf", wi(col, :ip_tpf), d["well_tpf"]["WI"]; tol = witol)
+    check!(rep, "WI, last column, ip_simple", wi(last, :ip_simple),
+           d["well_tpf"]["last_WI_simple"]; tol = witol)
+    check!(rep, "WI, last column, ip_tpf", wi(last, :ip_tpf),
+           d["well_tpf"]["last_WI_tpf"]; tol = witol)
+    passed(rep) || display(rep)
+    @test passed(rep)
+    _ve_well_datum_runs(d, ve, col, r)
+end
+
+# Rate-controlled injection with the datum at the caprock and at the bottom:
+# the same flow, BHPs differing by the CO2 column rho_CO2·g·H.
+function _ve_well_datum_runs(d, ve, col, r)
+    geo, g, rhoc = ve.geometry, d["gravity"], d["rhoc"]
+    fluid = co2lab_ve_fluid(krmax = (1.0, 1.0), co2_rho_ref = rhoc,
+                            wat_rho_ref = d["rhow"], co2_mu_ref = d["muco2"],
+                            wat_mu_ref = d["muw"], pvMult_p_ref = d["p_ref"],
+                            pvMult_fac = d["cf_rock"])
+    p0 = ve_hydrostatic_pressure(geo; rho_w = d["rhow"], g = g)
+    dt = vec(d["dT"])[1:8]
+    function run(datum)
+        w = setup_ve_well(ve, col; name = :inj, radius = r, datum = datum)
+        model = setup_co2lab_model(ve.domain; wells = [w], fluid = fluid)
+        ctrl = co2_injector_control(TotalRateTarget(d["injection_rate"]), fluid)
+        forces = setup_reservoir_forces(model, control = Dict(:inj => ctrl))
+        prm = setup_parameters(model)
+        # open-boundary stand-in (item 5): large end-column pore volumes
+        prm[:Reservoir][:StaticFluidVolume][[1, end]] .*= 1e4
+        case = JutulCase(model, dt, forces; parameters = prm,
+                         state0 = setup_co2lab_state(model; pressure = p0))
+        sim, cfg = setup_co2lab_simulator(case; info_level = -1, tol_cnv = 1e-9,
+                                          tol_mb = 1e-12, max_nonlinear_iterations = 50)
+        res = simulate_reservoir(case; simulator = sim, config = cfg)
+        return prm[:inj][:PerforationGravityDifference][1], res
+    end
+    gdz_c, res_c = run(:caprock)
+    gdz_b, res_b = run(:bottom)
+    @test gdz_c == 0.0
+    @test gdz_b ≈ -g * geo.H[col]
+    sc, sb = res_c.states[end], res_b.states[end]
+    @test maximum(sc[:sG]) > 0.01                  # CO2 has entered
+    @test maximum(abs.(sc[:sG] .- sb[:sG])) < 1e-8
+    @test maximum(abs.(sc[:Pressure] .- sb[:Pressure])) < 1e-2
+    @test res_b.wells[:inj][:bhp][end] - res_c.wells[:inj][:bhp][end] ≈
+          rhoc * g * geo.H[col] rtol = 1e-9
+    # CO2 injected = CO2 in the aquifer + CO2 in the wellbore (its storage)
+    injected = sum(res_c.wells[:inj][:mass_rate] .* dt)
+    in_well = res_c.result.states[end][:inj][:TotalMasses][2, 1]
+    @test sum(sc[:TotalMasses][2, :]) + in_well ≈ injected rtol = 1e-9
+end
+
 @testset "JutulCO2Lab" begin
 
     @testset "Oracle" begin
@@ -443,6 +513,32 @@ using MAT
             dis_frac(s) = sum(s[:DissolvedCO2]) / co2_mass(s)
             # dissolution continues after shut-in
             @test dis_frac(st[end]) > dis_frac(st[n_on])
+        end
+    end
+
+
+    @testset "VE wells (Stage 2 item 4)" begin
+        wc = JutulCO2Lab._mrst_well_constant
+        @test wc(10.0, 10.0, :ip_tpf) == 0.14
+        @test wc(10.0, 10.0, :ip_simple) == 0.292
+        # aspect ratio 2.5 rounds up, as MATLAB's round; 6 interpolates 5-8
+        @test wc(25.0, 10.0, :ip_simple) == 0.262
+        @test wc(10.0, 60.0, :ip_simple) ≈ 0.244 + (0.231 - 0.244) / 3
+        @test_throws ArgumentError wc(1.0, 1.0, :ip_rt)
+        geo1 = (z_top = [1000.0], H = [20.0])
+        @test JutulCO2Lab._well_datum_depth(geo1, 1, :bottom) == 1020.0
+        @test_throws ArgumentError JutulCO2Lab._well_datum_depth(geo1, 1, :top)
+        fl = co2lab_ve_fluid(co2_rho_ref = 700)
+        c = co2_injector_control(TotalRateTarget(1.0), fl)
+        @test c.injection_mixture == [0.0, 1.0]
+        @test c.mixture_density == 700.0
+        @test c.phases == ((2, 1.0),)
+
+        f = joinpath(refdir, "sloping_aquifer.mat")
+        if !isfile(f)
+            @info "Skipping: $f not generated (scripts/mrst_dump_sloping_aquifer.m)"
+        else
+            _ve_wells_vs_mrst(matread(f))
         end
     end
 

@@ -10,8 +10,9 @@ Exploratory. See `../analysis/roadmap.org` for the staged plan and
 Contents: the oracle harness (`JutulCO2Lab.Oracle`) — every acceptance gate
 in the roadmap is a numerical comparison against MRST-co2lab on identical
 input; the VE grid and domain (Stage 1); co2lab's fluid system (black-oil
-with a `:co2lab` formulation, Stage 2 item 0). VE constitutive functions,
-boundary conditions and reconstruction are still to come.
+with a `:co2lab` formulation, Stage 2 item 0); co2lab's VE relperm, `pcWG`
+and PVT (items 1, 3); VE wells (item 4). Boundary conditions and
+reconstruction are still to come.
 """
 module JutulCO2Lab
 
@@ -46,5 +47,8 @@ include("co2lab_fluid.jl")
 export co2lab_system, has_dissolution
 export setup_co2lab_model, setup_co2lab_state, setup_co2lab_simulator
 export LinearShrinkage, ConstantViscosities, MaxGasSaturation, DissolvedCO2Equation
+
+include("vewells.jl")
+export ve_well_index, setup_ve_well, co2_injector_control
 
 end # module
