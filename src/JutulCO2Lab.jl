@@ -4,7 +4,7 @@
 Reimplementation of MRST-co2lab's vertical-equilibrium (VE) CO2 storage
 simulator on top of Jutul/JutulDarcy.
 
-Exploratory. See `../analysis/ve-meshing/roadmap.md` for the staged plan and
+Exploratory. See `../analysis/roadmap.org` for the staged plan and
 `../analysis/ve-meshing/hybrid-ve-feasibility.md` for the evidence base.
 
 Contents: the oracle harness (`JutulCO2Lab.Oracle`) — every acceptance gate

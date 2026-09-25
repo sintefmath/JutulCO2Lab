@@ -6,7 +6,7 @@ storage simulator on top of [Jutul](https://github.com/sintefmath/Jutul.jl) /
 
 **No VE physics is implemented yet.** What exists is the environment, the
 oracle harness, and the first Stage 1 pieces (VE columns and column geometry
-derived from the 3D grid, verified exactly against MRST). The plan lives in `../analysis/ve-meshing/roadmap.md`; the
+derived from the 3D grid, verified exactly against MRST). The plan lives in `../analysis/roadmap.org`; the
 evidence behind it in `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
 ## Environment
