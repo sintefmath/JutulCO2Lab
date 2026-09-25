@@ -9,8 +9,11 @@
 #   the filled fraction of that; with residual CO2 (rg > 0) the zone between
 #   h and h_max holds rg. The fill of a column is MRST's fillDegree.m.
 #
-# Dissolved CO2 (VEstates23D's rs) is Stage 5; capillary-fringe fluids
-# (cap_fringe_h2s) are Stage 4.
+# - dissolved CO2 (VEstates23D, rs part): the column's rs fills the brine from
+#   the caprock down — saturated (dis_max) down to the depth where the brine
+#   volume above holds the column's fraction rs/dis_max of it, none below.
+#
+# Capillary-fringe fluids (cap_fringe_h2s) are Stage 5.
 
 # ------------------------------ Filling a column ------------------------------
 
@@ -62,25 +65,56 @@ function _column_saturations(zb, h, h_max, rw, rg)
     return (s, smax)
 end
 
+"""
+    _column_dissolved(zb, dz, brine, frac) -> Vector
+
+Fraction of `dis_max` dissolved in each cell of one column (cumulative
+cell-bottom depths `zb`, thicknesses `dz`, brine volume per unit height
+`brine` = porosity × brine saturation) when the column holds the fraction
+`frac` of its saturated amount: co2lab's `VEstates23D` finds the depth `h` at
+which the brine above holds `frac` of the column's brine (Newton on
+`integrateVertically`) and saturates everything above it. The integral is
+piecewise linear, so `h` is found exactly here; with no brine at all, `h` is
+co2lab's initial guess `frac·H`. Returns a new vector, top cell first.
+"""
+function _column_dissolved(zb, dz, brine, frac)
+    target = frac * sum(brine .* dz)
+    h = frac * zb[end]
+    top, acc = 0.0, 0.0
+    for k in eachindex(zb)
+        v = brine[k] * dz[k]
+        if v > 0 && acc + v >= target
+            h = top + (target - acc) / brine[k]
+            break
+        end
+        acc += v
+        top = zb[k]
+    end
+    return first(_column_saturations(zb, h, h, 0.0, 0.0))
+end
+
 # ------------------------------- Reconstruction -------------------------------
 
 """
-    ve_reconstruct(state, ve, columns, fluid) -> NamedTuple
+    ve_reconstruct(state, ve, columns, fluid; poro3D = nothing) -> NamedTuple
 
 Fine-scale state on the 3D grid from a VE reservoir state, as co2lab's
 `VEstates23D` for its sharp-interface fluid. `state` needs `:Pressure`,
-`:sG` and `:sGmax` (a reservoir output state, or the `:Reservoir` entry of a
-full state); `ve` is [`ve_domain`](@ref)'s NamedTuple, `columns` the columns it
-was built on, `fluid` the [`co2lab_ve_fluid`](@ref) of the run.
+`:sG`, `:sGmax` and, with dissolution, `:Rs` (a reservoir output state, or
+the `:Reservoir` entry of a full state); `ve` is [`ve_domain`](@ref)'s
+NamedTuple, `columns` the columns it was built on, `fluid` the
+[`co2lab_ve_fluid`](@ref) of the run. `poro3D` (per 3D cell) weights the brine
+volume for the dissolved CO2; `nothing` means uniform, as co2lab's default.
 
-Returns the NamedTuple `(pressure, sG, sGmax)` of new `Vector{Float64}`s, one
-value per cell of the 3D mesh, in the mesh's cell order: brine pressure
-extended hydrostatically from the caprock (Pa), CO2 saturation and maximum
-CO2 saturation. The plume heights are recomputed from `sG` and `sGmax`
-(co2lab's `upscaledSat2height`). Dissolved CO2 is not reconstructed
-(Stage 5). Arguments are only read.
+Returns the NamedTuple `(pressure, sG, sGmax, rs)` of new `Vector{Float64}`s,
+one value per cell of the 3D mesh, in the mesh's cell order: brine pressure
+extended hydrostatically from the caprock (Pa), CO2 saturation, maximum CO2
+saturation, and dissolved CO2 ratio (`rs`; `nothing` without dissolution).
+The plume heights are recomputed from `sG` and `sGmax` (co2lab's
+`upscaledSat2height`). Arguments are only read.
 """
-function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid)
+function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid;
+                        poro3D = nothing)
     geo, rw, rg = ve.geometry, fluid.res_water, fluid.res_gas
     p, sG, sGmax = state[:Pressure], state[:sG], state[:sGmax]
     nc = length(columns.cells)
@@ -99,5 +133,17 @@ function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid)
         g = Jutul.gravity_constant
         out.pressure[cells] = p[col] .+ rho_w * g .* (geo.z_cell[r] .- geo.z_top[col])
     end
-    return out
+    fluid.dissolution && haskey(state, :Rs) || return (; out..., rs = nothing)
+
+    # dissolved CO2 from the top of the column's brine down
+    poro = isnothing(poro3D) ? ones(nc) : poro3D[columns.cells]
+    rs = zeros(nc)
+    for col in 1:number_of_columns(columns)
+        r = columns.pos[col]:(columns.pos[col+1] - 1)
+        brine = poro[r] .* (1 .- out.sG[columns.cells[r]])
+        f = _column_dissolved(view(geo.z, r), view(geo.dz, r), brine,
+                              state[:Rs][col] / fluid.dis_max)
+        rs[columns.cells[r]] = f .* fluid.dis_max
+    end
+    return (; out..., rs = rs)
 end

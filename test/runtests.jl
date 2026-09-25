@@ -111,7 +111,8 @@ function _ve_well_vs_mrst_runs(d, ref_rate, ref_bhp, ref_src)
         end
 
         case = JutulCase(model, dt, [i ? f_on : f_off for i in on];
-                         state0 = setup_co2lab_state(model; pressure = p0),
+                         state0 = setup_co2lab_state(model; pressure = p0,
+                                                     forces = f_on),
                          parameters = setup_parameters(model))
 
         sim, cfg = setup_co2lab_simulator(case; info_level = -1, timesteps = :none,
@@ -259,14 +260,15 @@ function _ve_bc_runs(d)
 
     dt = vec(d["dT"])[1:8]
 
-    function run(bcs, wells, control)
-        model = setup_co2lab_model(ve.domain; wells = wells, fluid = fluid,
+    function run(bcs, wells, control; fl = fluid)
+        model = setup_co2lab_model(ve.domain; wells = wells, fluid = fl,
                                    rock_compressibility = rc)
         push!(model[:Reservoir].output_variables, :RelativePermeabilities,
-              :PhaseViscosities, :PhaseMassDensities)
+              :PhaseViscosities, :PhaseMassDensities, :ShrinkageFactors)
         forces = setup_reservoir_forces(model; control = control, bc = bcs)
         case = JutulCase(model, dt, forces; parameters = setup_parameters(model),
-                         state0 = setup_co2lab_state(model; pressure = p0))
+                         state0 = setup_co2lab_state(model; pressure = p0,
+                                                     forces = forces))
         sim, cfg = setup_co2lab_simulator(case; info_level = -1,
                                           output_substates = true)
         return simulate_reservoir(case; simulator = sim, config = cfg).result
@@ -293,21 +295,33 @@ function _ve_bc_runs(d)
     exited = sum(vec(sum(ve_boundary_mass_fluxes(bcs, s[:Reservoir]), dims = 2)) * t
                  for (s, t) in zip(sub, dts))
 
+    # the wellbore starts filled with CO2 and stays so: count the reservoir only
     last = res.states[end]
-    total = sum(last[:Reservoir][:TotalMasses][2, :]) + last[:inj][:TotalMasses][2, 1]
+    total = sum(last[:Reservoir][:TotalMasses][2, :])
 
     # brine is pushed out; the CO2 has not reached the boundary yet
     @test exited[1] > 0
     @test (total + exited[2]) / injected ≈ 1 rtol = 1e-5
 
-    # dissolution: Stage 5
-    model = setup_co2lab_model(ve.domain; fluid = fluid, rock_compressibility = rc,
-                               rs_sat = 0.03,
-                               transfer_rate = 1e-7)
-    forces = setup_reservoir_forces(model; bc = bcs)
-    case = JutulCase(model, dt[1:1], forces; parameters = setup_parameters(model),
-                     state0 = setup_co2lab_state(model; pressure = p0))
-    @test_throws ErrorException simulate_reservoir(case; info_level = -1)
+    # with dissolution (Stage 4 item 5): CO2 is conserved when brine carries
+    # its dissolved CO2 across (the default); co2lab's booking has no
+    # dissolved part in the exiting CO2
+    fl_dis = co2lab_ve_fluid(krmax = (1.0, 1.0), co2_rho_ref = rhoc, wat_rho_ref = rhow,
+                             co2_mu_ref = d["muco2"], wat_mu_ref = d["muw"],
+                             dissolution = true, dis_rate = 3e-11, dis_max = 0.05)
+    for mode in (:carry, :co2lab)
+        bcs_d = ve_boundary_conditions(ve, sides, right; pressure = hydro,
+                                       dissolved = mode)
+        res = run(bcs_d, [w], Dict(:inj => ctrl); fl = fl_dis)
+        sub, dts, _ = Jutul.expand_to_ministeps(res)
+        q = [ve_boundary_mass_fluxes(bcs_d, s[:Reservoir]) for s in sub]
+        injected = sum(rate(s) * t for (s, t) in zip(sub, dts))
+        exited_co2 = sum(sum(qk[2, :]) * t for (qk, t) in zip(q, dts))
+        last = res.states[end]
+        total = sum(last[:Reservoir][:TotalMasses][2, :])
+        @test (total + exited_co2) / injected ≈ 1 rtol = 1e-5
+        mode == :co2lab && @test all(qk -> all(iszero, qk[3, :]), q)
+    end
 end
 
 # Sloping aquifer (sloping_aquifer.mat): geometry and well index against co2lab,
@@ -896,15 +910,24 @@ end
         co2_mass(s) = sum(s[:TotalMasses][2, :])
 
         @testset "configuration errors" begin
-            # hysteresis with dissolution, and instantaneous dissolution: Stage 5;
-            # dissolution needs a rate
-            hyst = co2lab_ve_fluid(residual = (0.2, 0.2))
-            @test_throws ErrorException setup_co2lab_model(domain; fluid = hyst,
-                                                           rs_sat = 0.03,
-                                                           transfer_rate = 1e-6)
-            @test_throws ErrorException setup_co2lab_model(domain; rs_sat = 0.03)
-            @test_throws ErrorException setup_co2lab_model(domain; rs_sat = 0.03,
-                                                           transfer_rate = Inf)
+            # unknowns by configuration (Stage 4): hysteresis with rate-driven
+            # dissolution couples the two equations; instantaneous dissolution
+            # (dis_rate 0 or Inf) has co2lab's switching unknown instead of sG, Rs
+            hd = co2lab_ve_fluid(residual = (0.2, 0.2), dissolution = true,
+                                 dis_rate = 1e-8)
+            r = setup_co2lab_model(domain; fluid = hd)[:Reservoir]
+            @test collect(keys(r.primary_variables)) == [:Pressure, :sG, :Rs, :sGmax]
+            @test r.equations[:hysteresis].dissolution === r.equations[:dissolved_co2]
+            for rate in (0.0, Inf)
+                inst = co2lab_ve_fluid(residual = (0.2, 0.2), dissolution = true,
+                                       dis_rate = rate)
+                @test instantaneous_dissolution(inst)
+                r = setup_co2lab_model(domain; fluid = inst)[:Reservoir]
+                @test collect(keys(r.primary_variables)) == [:Pressure, :CO2X, :sGmax]
+                @test !haskey(r.equations, :dissolved_co2)
+                @test r.equations[:hysteresis].dissolution isa
+                      JutulCO2Lab.InstantDissolution
+            end
             @test_throws ErrorException co2lab_ve_fluid(co2_rho_pvt = (1, 2, 3, 4))
 
             # the VE fluid needs column heights
@@ -966,7 +989,8 @@ end
             hh = states[end][:PlumeHeights]
             zone = findall(i -> hh[2, i] - hh[1, i] > 0.1, axes(hh, 2))
             @test !isempty(zone)
-            s_res = [0.8 * hh[1, i] / 20 + 0.2 * (hh[2, i] - hh[1, i]) / 20 for i in zone]
+            s_res = [(0.8 * hh[1, i] + 0.2 * (hh[2, i] - hh[1, i])) / 20
+                     for i in zone]
             @test sG[zone, end] ≈ s_res
             @test co2_mass(states[end]) ≈ injected rtol = 1e-3
         end
@@ -1016,7 +1040,10 @@ end
 
         @testset "dissolution on (rate-driven): unknowns p, sG, rs" begin
             rs_sat = 0.03
-            model, st = run(rs_sat = rs_sat, transfer_rate = 1 / (60day))
+            dfl = co2lab_ve_fluid(wat_rho_pvt = (4.3e-10, 100e5),
+                                  co2_rho_pvt = (4.3e-9, 100e5), dissolution = true,
+                                  dis_rate = 2e-8, dis_max = rs_sat)
+            model, st = run(fluid = dfl)
             r = model[:Reservoir]
             @test collect(keys(r.primary_variables)) == [:Pressure, :sG, :Rs]
             @test haskey(r.equations, :dissolved_co2)

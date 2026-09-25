@@ -27,7 +27,9 @@
                       co2_rho_ref = 760.0, wat_rho_ref = 1100.0,
                       co2_rho_pvt = nothing, wat_rho_pvt = nothing,
                       co2_mu_ref = 6e-5, wat_mu_ref = 8e-4,
-                      co2_mu_pvt = nothing, wat_mu_pvt = nothing) -> CO2LabVEFluid
+                      co2_mu_pvt = nothing, wat_mu_pvt = nothing,
+                      dissolution = false, dis_rate = 0.0, dis_max = 0.03)
+        -> CO2LabVEFluid
 
 co2lab's VE fluid for the `'sharp_interface_simple'` relperm model, with
 `makeVEFluid`'s option names and defaults, so an MRST case translates one to
@@ -39,6 +41,11 @@ one:
 - `*_rho_pvt`, `*_mu_pvt`: `nothing` (constant) or `(c, p_ref)` for
   `ref·(1 + c·(p − p_ref))`. co2lab's third option, a sampled EOS table (and
   its default for CO2 density), is not supported.
+- `dissolution`, `dis_rate`, `dis_max`: CO2 dissolution into brine, with
+  `dis_max` the saturated dissolved-CO2 ratio `rs` (surface volume of CO2 per
+  surface volume of brine). `dis_rate = 0` or `Inf`: instantaneous (brine
+  saturated wherever CO2 is present); otherwise rate-driven, with co2lab's
+  transfer rule (`computeDissolutionTransfer`).
 
 makeVEFluid's other options are not fluid properties and go elsewhere:
 - `rugosity` → [`ve_domain`](@ref)`(...; rugosity)`, per column;
@@ -54,6 +61,7 @@ function co2lab_ve_fluid(; residual = (0.0, 0.0), krmax = (-1.0, -1.0),
                            co2_rho_pvt = nothing, wat_rho_pvt = nothing,
                            co2_mu_ref = 6e-5, wat_mu_ref = 8e-4,
                            co2_mu_pvt = nothing, wat_mu_pvt = nothing,
+                           dissolution::Bool = false, dis_rate = 0.0, dis_max = 0.03,
                            rugosity = nothing, pvMult_p_ref = nothing,
                            pvMult_fac = nothing)
     _refuse_moved_options(rugosity, pvMult_p_ref, pvMult_fac)
@@ -66,7 +74,8 @@ function co2lab_ve_fluid(; residual = (0.0, 0.0), krmax = (-1.0, -1.0),
                          (Float64(wat_rho_ref), Float64(co2_rho_ref)),
                          (lin(wat_rho_pvt), lin(co2_rho_pvt)),
                          (Float64(wat_mu_ref), Float64(co2_mu_ref)),
-                         (lin(wat_mu_pvt), lin(co2_mu_pvt)))
+                         (lin(wat_mu_pvt), lin(co2_mu_pvt)),
+                         dissolution, Float64(dis_rate), Float64(dis_max))
 end
 
 # makeVEFluid options that belong to the grid or the model, not the fluid
@@ -87,7 +96,8 @@ end
 
 Settings of co2lab's VE fluid; build with [`co2lab_ve_fluid`](@ref). Phase
 order in all tuples: (brine, CO2). `rho_pvt`/`mu_pvt` hold `(c, p_ref)` per
-phase, `(0.0, 0.0)` for a constant property.
+phase, `(0.0, 0.0)` for a constant property. `dissolution`, `dis_rate`,
+`dis_max` as makeVEFluid's options.
 """
 struct CO2LabVEFluid
     res_water::Float64
@@ -98,7 +108,19 @@ struct CO2LabVEFluid
     rho_pvt::NTuple{2, NTuple{2, Float64}}
     mu_ref::NTuple{2, Float64}
     mu_pvt::NTuple{2, NTuple{2, Float64}}
+    dissolution::Bool
+    dis_rate::Float64
+    dis_max::Float64
 end
+
+"""
+    instantaneous_dissolution(fluid) -> Bool
+
+Whether `fluid` has dissolution with co2lab's instantaneous mode (`dis_rate`
+0 or `Inf`).
+"""
+instantaneous_dissolution(f::CO2LabVEFluid) =
+    f.dissolution && (f.dis_rate == 0 || isinf(f.dis_rate))
 
 # `nothing` → constant; (c, p_ref) → linear; a 4-entry table spec is refused.
 function _linear_pvt(spec)
@@ -111,6 +133,19 @@ end
 
 # ---------------------------------- Formulas ----------------------------------
 
+# Clamps with MRST's tie rule (ADI.m, max/min): against a constant, a tie keeps
+# the variable and its derivative; between two variables, a tie keeps the
+# second. Julia's max(x, 0) and min(u, v) break ties the other way, which only
+# changes derivatives at exact ties — but a cell that has just switched to
+# saturated sits at sG = 0 exactly, and there a lost derivative makes Newton
+# overshoot (instantaneous dissolution cycled without these).
+"`max(x, c)` for a constant `c`; a tie keeps `x`."
+_max_c(x, c) = x < c ? zero(x) + c : x
+"`min(x, c)` for a constant `c`; a tie keeps `x`."
+_min_c(x, c) = x > c ? zero(x) + c : x
+"`min(u, v)` of two variables; a tie keeps `v`."
+_min_v(u, v) = u < v ? u : v
+
 """
     _plume_heights(sG, sGmax, H, rw, rg) -> (h, h_max)
 
@@ -121,7 +156,7 @@ co2lab's `upscaledSat2height` for a vertically homogeneous column
 function _plume_heights(sG, sGmax, H, rw, rg)
     h_max = sGmax * H / (1 - rw)
     h = (H * sG - h_max * rg) / (1 - rg - rw)
-    return (min(max(h, zero(h)), H), h_max)
+    return (_min_c(_max_c(h, 0.0), H), h_max)
 end
 
 """
@@ -134,8 +169,8 @@ zone between `h` and `h_max`.
 """
 function _sharp_interface_relperm(h, h_max, H, krw, krg, dh)
     lost = min(dh, H)
-    krG = max(h - lost, zero(h)) * krg / H
-    krW = (H - max(h_max, lost) + max(h_max - max(h, lost), zero(h)) * krw) / H
+    krG = _max_c(h - lost, 0.0) * krg / H
+    krW = (H - _max_c(h_max, lost) + _max_c(h_max - _max_c(h, lost), 0.0) * krw) / H
     return (krW, krG)
 end
 

@@ -25,9 +25,7 @@
 # With hysteresis it is an unknown of the reservoir (roadmap Stage 3).
 #
 # co2lab's VE relperm, pcWG and PVT are in ve_fluid.jl (Stage 2 items 1, 3).
-# Still placeholders: the transfer rate (linear relaxation with a smoothed
-# onset, not co2lab's computeDissolutionTransfer — Stage 5), and
-# instantaneous dissolution (Stage 5).
+# Instantaneous dissolution (dis_rate 0 or Inf) is in instant_dissolution.jl.
 #
 # Note: docstrings cannot be attached to @jutul_secondary definitions; their
 # "Modifies:" lines are comments instead.
@@ -307,22 +305,19 @@ end
 # ----------------------------- Dissolved-CO2 law ------------------------------
 
 """
-    DissolvedCO2Equation(flow_discretization, rate)
+    DissolvedCO2Equation(flow_discretization, dis_rate, dis_max)
 
-Conservation of dissolved CO2 with a transfer term (co2lab's rate-driven
-mode, `CO2VEBlackOilTypeModel.m:84-97`): `d/dt(M_dis) + div(F_dis) − η = 0`.
+Conservation of dissolved CO2 with co2lab's transfer term (rate-driven mode,
+`CO2VEBlackOilTypeModel.m:84-97`): `d/dt(M_dis) + div(F_dis) − η = 0`.
 Assembled like Jutul's TPFA conservation law, with the same stencil; the flux
 is the dissolved part of black-oil's CO2 flux (`JutulDarcy/src/blackoil/
-flux.jl`): `ρ_VS · rs_up · (bλ)_L,up · ∇ψ_L`.
-
-`rate` (1/s) is a placeholder transfer law: linear relaxation towards
-saturation where free CO2 is present, with the onset smoothed over
-`sG ∈ [0, 1e-3]` (a hard on/off test made Newton cycle). co2lab's
-`computeDissolutionTransfer` replaces it (Stage 5).
+flux.jl`): `ρ_VS · rs_up · (bλ)_L,up · ∇ψ_L`. The transfer `η` is co2lab's
+`computeDissolutionTransfer` ([`_dissolution_transfer`](@ref)).
 """
 struct DissolvedCO2Equation{D} <: Jutul.JutulEquation
     flow_discretization::D
-    rate::Float64
+    dis_rate::Float64
+    dis_max::Float64
 end
 Jutul.number_of_equations_per_entity(::Jutul.SimulationModel, ::DissolvedCO2Equation) = 1
 function Jutul.local_discretization(eq::DissolvedCO2Equation, i)
@@ -347,6 +342,75 @@ function Jutul.declare_pattern(model, eq::DissolvedCO2Equation, e_s, entity::Jut
 end
 
 """
+    _co2_face_fluxes(state, model, ldisc) -> (dissolved_out, free_in)
+
+Over the faces of one cell: the net outflow of dissolved CO2 (kg/s, the
+brine phase's `ρ_VS · rs · bλ_L · ψ_L`) and the net inflow of free CO2 (the
+CO2 phase's `ρ_VS · bλ_V · ψ_V`), both upwinded as black-oil's fluxes.
+"""
+function _co2_face_fluxes(state, model, ldisc)
+    ρV = reference_densities(model.system)[2]
+    out_dis = zero(eltype(state.Rs))
+    in_free = zero(out_dis)
+    for ld in ldisc
+        kgrad = Jutul.TPFA(ld.self, ld.other, ld.face_sign)
+        upw = Jutul.SPU(ld.self, ld.other)
+        ψ = darcy_permeability_potential_differences(ld.face, state, model,
+                                                     Jutul.DefaultFlux(), kgrad, upw)
+        bλL = phase_upwind(upw, state.SurfaceVolumeMobilities, 1, ψ[1])
+        rs = Jutul.upwind(upw, state.Rs, ψ[1])
+        out_dis += ρV * rs * bλL * ψ[1]
+
+        bλV = phase_upwind(upw, state.SurfaceVolumeMobilities, 2, ψ[2])
+        in_free -= ρV * bλV * ψ[2]
+    end
+    return (out_dis, in_free)
+end
+
+"""
+    _dissolution_transfer(eq, ρV, state, state0, c, dt, out_dis, in_free, src) -> η
+
+co2lab's `computeDissolutionTransfer` (`CO2VEBlackOilTypeModel.m:163-238`) for
+cell `c`, as a mass rate (kg/s) — co2lab's `eta .* rhoGS .* bW`. In co2lab's
+units (per `ρ_VS · b_W`):
+
+    # co2lab's tie rules (see _max_c in ve_fluid.jl)
+    η = _min_v(max(basic_rate, min_transfer), max_transfer)
+
+- `basic_rate = dis_rate · pv / H`;
+- `max_transfer`: the lesser of the demand (dissolved CO2 up to `dis_max`
+  over the step, plus the dissolved outflow `out_dis`) and the supply (free
+  CO2 at the start of the step, plus the free inflow `in_free` and the
+  source `src`), at least zero;
+- `min_transfer`: brine that has been in contact with CO2 (below the plume,
+  above `h_max`) is kept saturated — `dis_max · sW_touched · bW · pv` less
+  what was dissolved, at least zero. Vertically homogeneous, as co2lab.
+
+co2lab's `min_transfer` is in surface volume per time, while the rest is
+divided by `bW` once more; kept as co2lab has it.
+"""
+function _dissolution_transfer(eq, ρV, state, state0, c, dt, out_dis, in_free, src)
+    pv, pv0 = state.FluidVolume[c], state0.FluidVolume[c]
+    bW, bG0 = state.ShrinkageFactors[1, c], state0.ShrinkageFactors[2, c]
+    sW, H = state.Saturations[1, c], state.ColumnHeight[c]
+
+    # most CO2 the brine could still take up, and most CO2 there is to give
+    demand = (pv * sW * bW * eq.dis_max * ρV - state0.DissolvedCO2[c]) / dt + out_dis
+    supply = pv0 * state0.sG[c] * bG0 * ρV / dt + in_free + src
+    max_transfer = _max_c(_min_v(demand, supply), 0.0) / (bW * ρV)
+
+    # brine touched by the plume (between h and h_max) is kept saturated
+    sW_touched = sW - (H - state.PlumeHeights[2, c]) / H
+    min_dissolved = eq.dis_max * sW_touched * bW * pv
+    min_transfer = _max_c(min_dissolved - state0.Rs[c] * sW * bW * pv, 0.0) / dt
+
+    basic_rate = eq.dis_rate * pv / H
+    # co2lab's tie rules (see _max_c in ve_fluid.jl)
+    η = _min_v(max(basic_rate, min_transfer), max_transfer)
+    return η * ρV * bW
+end
+
+"""
 Jutul hook: the dissolved-CO2 residual of cell `c`.
 
 Modifies: `v`.
@@ -356,26 +420,76 @@ function Jutul.update_equation_in_entity!(v, c, state, state0, eq::DissolvedCO2E
                                           ldisc = Jutul.local_discretization(eq, c))
     ρV = reference_densities(model.system)[2]
     acc = (state.DissolvedCO2[c] - state0.DissolvedCO2[c]) / dt
+    out_dis, in_free = _co2_face_fluxes(state, model, ldisc)
+    η = _dissolution_transfer(eq, ρV, state, state0, c, dt, out_dis, in_free, 0.0)
+    v[1] = acc + out_dis - η
+end
 
-    div = zero(acc)
-    for ld in ldisc
-        kgrad = Jutul.TPFA(ld.self, ld.other, ld.face_sign)
-        upw = Jutul.SPU(ld.self, ld.other)
-        ψ = darcy_permeability_potential_differences(ld.face, state, model,
-                                                     Jutul.DefaultFlux(), kgrad, upw)
-        ψL = ψ[1]
-        bλL = phase_upwind(upw, state.SurfaceVolumeMobilities, 1, ψL)
-        rs = Jutul.upwind(upw, state.Rs, ψL)
-        div += ρV * rs * bλL * ψL
+# ---------------------- Well CO2 in the transfer supply -----------------------
+
+"""
+    DissolutionWellSupplyCT(reservoir_cells, well_cells)
+
+Cross term from a well to the dissolved-CO2 law: co2lab counts the CO2 a
+well puts into its perforated cell, at the current iterate, as supply for
+dissolution (`computeDissolutionTransfer`'s `src.value{2}`). In Jutul the
+well's inflow reaches the reservoir only through a cross term, so this one
+recomputes the transfer of the perforated cell with that inflow (JutulDarcy's
+own perforation flux) and adds the difference to the residual, with
+derivatives with respect to both reservoir and well. One perforation per
+cell, as co2lab's VE wells; several perforations in one cell would each be
+counted on their own.
+"""
+struct DissolutionWellSupplyCT{I <: AbstractVector} <: Jutul.AdditiveCrossTerm
+    reservoir_cells::I
+    well_cells::I
+end
+
+Jutul.cross_term_entities(ct::DissolutionWellSupplyCT, eq::DissolvedCO2Equation, model) =
+    ct.reservoir_cells
+Jutul.cross_term_entities_source(ct::DissolutionWellSupplyCT, eq, model) = ct.well_cells
+
+"""
+Jutul hook: the change in the perforated cell's residual from the well's CO2 —
+of the dissolved-CO2 law (the transfer) or, with hysteresis, of the
+hysteresis equation (the depletion of residual CO2 follows the transfer).
+
+Modifies: `out`.
+"""
+function Jutul.update_cross_term_in_entity!(out, i, state_t, state0_t,
+                                            state_s, state0_s, model_t, model_s,
+                                            ct::DissolutionWellSupplyCT, eq, dt,
+                                            ldisc = nothing)
+    sys = model_t.system
+    rhoS = reference_densities(sys)
+    conn = JutulDarcy.cross_term_perforation_get_conn(ct, i, state_s, state_t)
+    # JutulDarcy's perforation flux, as its ReservoirFromWellFlowCT computes it;
+    # untyped buffer: the flux's number type (AD, sparsity tracing) depends on
+    # which well quantities it reads (one perforated cell per well, so cheap)
+    c = conn.reservoir
+    q = Vector{Any}(undef, 2)
+    if haskey(state_s, :MassFractions)
+        JutulDarcy.simple_well_perforation_flux!(q, sys, state_t, state_s, rhoS, conn)
+    else
+        JutulDarcy.multisegment_well_perforation_flux!(q, sys, state_t, state_s, rhoS,
+                                                       conn)
     end
 
-    rs_sat = first(model.system.rs_max)(state.Pressure[c])   # single PVT region
-    free = min(max(state.sG[c], 0.0) / 1e-3, 1.0)
-    # transfer: rate × rs deficit × CO2 density × brine surface volume (b_L s_L Φ)
-    η = free * eq.rate * max(rs_sat - state.Rs[c], 0.0) * ρV *
-        state.ShrinkageFactors[1, c] * state.Saturations[1, c] * state.FluidVolume[c]
-    v[1] = acc + div - η
+    # CO2 into the cell (the cross term's convention: positive out of the cell)
+    src = -q[2]
+    out[1] = _well_supply_change(eq, state_t, state0_t, model_t, c, dt, src)
+    return out
 end
+
+# Residual with the well's CO2 in the supply, minus without.
+function _well_supply_change(eq::DissolvedCO2Equation, state, state0, model, c, dt, src)
+    ρV = reference_densities(model.system)[2]
+    ld = Jutul.local_discretization(eq, c)
+    out_dis, in_free = _co2_face_fluxes(state, model, ld)
+    η(q) = _dissolution_transfer(eq, ρV, state, state0, c, dt, out_dis, in_free, q)
+    return η(0.0) - η(src)
+end
+
 
 # dissolved-CO2 residual, made dimensionless like CNV: |r| dt / (ρ_VS Φ)
 function Jutul.convergence_criterion(model::Jutul.SimulationModel, storage,
@@ -390,7 +504,7 @@ end
 # ---------------------------- Hysteresis equation -----------------------------
 
 """
-    HysteresisEquation(flow_discretization, res_water, res_gas)
+    HysteresisEquation(flow_discretization, res_water, res_gas, dissolution)
 
 co2lab's equation for `sGmax` with hysteresis on (`res_gas > 0`),
 `CO2VEBlackOilTypeModel.m:113-124`, per cell:
@@ -398,46 +512,83 @@ co2lab's equation for `sGmax` with hysteresis on (`res_gas > 0`),
     sGmax − max(sGmax0 − s_depletion · dt · fac, sG) = 0
 
 with `sGmax0` from the start of the step. The depletion term, residual CO2
-consumed by dissolution, is [`_residual_depletion`](@ref): zero until roadmap
-Stage 5. Cell-local; `flow_discretization` only supplies the matrix pattern
-(see `declare_pattern` below).
+consumed by dissolution, is [`_residual_depletion`](@ref): zero without
+dissolution (`dissolution = nothing`), otherwise from the dissolved-CO2 law
+`dissolution` ([`DissolvedCO2Equation`](@ref)). `flow_discretization` gives the
+matrix pattern (see `declare_pattern` below) and, with dissolution, the faces
+the transfer needs.
 """
-struct HysteresisEquation{D} <: Jutul.JutulEquation
+struct HysteresisEquation{D, E} <: Jutul.JutulEquation
     flow_discretization::D
     res_water::Float64
     res_gas::Float64
+    dissolution::E
 end
+HysteresisEquation(flow, rw, rg) = HysteresisEquation(flow, rw, rg, nothing)
 Jutul.number_of_equations_per_entity(::Jutul.SimulationModel, ::HysteresisEquation) = 1
-Jutul.local_discretization(::HysteresisEquation, i) = nothing
+Jutul.local_discretization(::HysteresisEquation{<:Any, Nothing}, i) = nothing
+Jutul.local_discretization(eq::HysteresisEquation, i) =
+    Jutul.local_discretization(eq.dissolution, i)
 
 # Same pattern as the conservation law, in its order, as for the dissolved-CO2
 # law: the block matrix layout requires identical patterns.
 function Jutul.declare_pattern(model, eq::HysteresisEquation, e_s, entity::Jutul.Cells)
-    law = DissolvedCO2Equation(eq.flow_discretization, 0.0)
+    law = DissolvedCO2Equation(eq.flow_discretization, 0.0, 0.0)
     return Jutul.declare_pattern(model, law, e_s, entity)
 end
 
 """
-    _residual_depletion(eq, state, model, c, dt) -> Real
+    _residual_depletion(eq, state, state0, model, c, dt, ldisc, src) -> Real
 
 The term `s_depletion · dt · fac` of co2lab's hysteresis equation: the drop
 in `sGmax` from residual CO2 consumed by dissolution, `fac = (1 − res_water) /
-res_gas / (pv · ρ_CO2,ref · b_CO2)`, with `s_depletion` the dissolution
-transfer (rate-driven) or the dissolved-CO2 residual (instantaneous). Zero
-until dissolution is coupled in (roadmap Stage 5 item 4); kept as a separate
-function so that Stage 5 fills it in without reshaping the equation.
+res_gas / (pv · ρ_CO2,ref · b_CO2)`, with `s_depletion` the rate-driven
+dissolution transfer (kg/s, [`_dissolution_transfer`](@ref), with the well's
+CO2 `src` in its supply) — `CO2VEBlackOilTypeModel.m:95-124`. Zero without
+dissolution. (co2lab's instantaneous mode uses the dissolved-CO2 residual
+instead: Stage 4 item 2.)
 """
-_residual_depletion(eq::HysteresisEquation, state, model, c, dt) = 0.0
+_residual_depletion(eq::HysteresisEquation{<:Any, Nothing}, state, state0, model, c, dt,
+                    ldisc, src) = 0.0
+
+function _residual_depletion(eq::HysteresisEquation, state, state0, model, c, dt,
+                             ldisc, src)
+    ρV = reference_densities(model.system)[2]
+    out_dis, in_free = _co2_face_fluxes(state, model, ldisc)
+    η = _dissolution_transfer(eq.dissolution, ρV, state, state0, c, dt, out_dis,
+                              in_free, src)
+    pv, bG = state.FluidVolume[c], state.ShrinkageFactors[2, c]
+    fac = (1 - eq.res_water) / eq.res_gas / (pv * ρV * bG)
+    return η * dt * fac
+end
+
+# The hysteresis residual of cell c, with the well's CO2 src in the transfer.
+function _hysteresis_residual(eq, state, state0, model, c, dt, ldisc, src)
+    dep = _residual_depletion(eq, state, state0, model, c, dt, ldisc, src)
+    return state.sGmax[c] - max(state0.sGmax[c] - dep, state.sG[c])
+end
+
+Jutul.cross_term_entities(ct::DissolutionWellSupplyCT, eq::HysteresisEquation, model) =
+    ct.reservoir_cells
+
+# Residual with the well's CO2 in the transfer, minus without
+# (DissolutionWellSupplyCT).
+function _well_supply_change(eq::HysteresisEquation, state, state0, model, c, dt, src)
+    ld = Jutul.local_discretization(eq, c)
+    return _hysteresis_residual(eq, state, state0, model, c, dt, ld, src) -
+           _hysteresis_residual(eq, state, state0, model, c, dt, ld, 0.0)
+end
 
 """
-Jutul hook: the hysteresis residual of cell `c`.
+Jutul hook: the hysteresis residual of cell `c` (without well CO2; a
+[`DissolutionWellSupplyCT`](@ref) adds it in perforated cells).
 
 Modifies: `v`.
 """
 function Jutul.update_equation_in_entity!(v, c, state, state0, eq::HysteresisEquation,
-                                          model, dt, ldisc = nothing)
-    dep = _residual_depletion(eq, state, model, c, dt)
-    v[1] = state.sGmax[c] - max(state0.sGmax[c] - dep, state.sG[c])
+                                          model, dt,
+                                          ldisc = Jutul.local_discretization(eq, c))
+    v[1] = _hysteresis_residual(eq, state, state0, model, c, dt, ldisc, 0.0)
 end
 
 # sGmax residual: a saturation, dimensionless already
@@ -474,25 +625,29 @@ end
 """
     setup_co2lab_model(domain; wells = [], fluid = co2lab_ve_fluid(),
                        rock_compressibility = (reference_pressure = 100e5,
-                                               compressibility = 1e-10),
-                       rs_sat = nothing, transfer_rate = nothing) -> MultiModel
+                                               compressibility = 1e-10))
+        -> MultiModel
 
 VE reservoir model with co2lab's formulation and fluid, plus wells. `domain`
 must come from [`ve_domain`](@ref) (it needs `:column_height`; its
 `:rugosity` gives the relperm's accretion layer). `fluid`
-([`co2lab_ve_fluid`](@ref)) gives the residual saturations, endpoints and
-PVT. `rock_compressibility` is passed to
+([`co2lab_ve_fluid`](@ref)) gives the residual saturations, endpoints, PVT
+and dissolution. `rock_compressibility` is passed to
 [`set_co2lab_rock_compressibility!`](@ref) — co2lab's linear pore-volume
 multiplier, with makeVEFluid's defaults; `nothing` keeps the pore volume
 constant (e.g. to use JutulDarcy's `set_rock_compressibility!` instead). The
 configuration decides the unknowns (see the top of `co2lab_fluid.jl`):
 
-- `rs_sat` and `transfer_rate` (1/s) turn rate-driven dissolution on. Both or
-  neither must be given. Instantaneous dissolution is Stage 5 work and throws.
+- `fluid.dissolution` turns dissolution on. Rate-driven: `rs` becomes an
+  unknown, with co2lab's dissolved-CO2 law ([`DissolvedCO2Equation`](@ref)).
+  Instantaneous (`dis_rate` 0 or `Inf`): co2lab's switching unknown `:CO2X`
+  ([`DissolvedOrFreeCO2`](@ref)) replaces `sG` and `Rs`, which become
+  secondary.
 - hysteresis follows co2lab: on when `fluid.res_gas > 0`, making `sGmax` an
-  unknown of the reservoir with [`HysteresisEquation`](@ref). Hysteresis
-  together with dissolution throws until Stage 5 couples them (residual CO2
-  consumed by dissolution).
+  unknown of the reservoir with [`HysteresisEquation`](@ref); with
+  dissolution, residual CO2 is consumed by the transfer, as co2lab.
+- each well's CO2 counts as supply for dissolution in its cells
+  ([`DissolutionWellSupplyCT`](@ref)).
 - stacked columns (`ve_columns(...; below_holes = :stack)`, `domain`'s
   `:pillar_columns` above 1) need the transition flux of Stage 8: throws.
 
@@ -513,25 +668,16 @@ dissolution) besides JutulDarcy's defaults. The wells get the same PVT.
 """
 function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve_fluid(),
                             rock_compressibility = (reference_pressure = 100e5,
-                                                    compressibility = 1e-10),
-                            rs_sat = nothing, transfer_rate = nothing)
-    fluid.res_gas > 0 && !isnothing(rs_sat) &&
-        error("hysteresis with dissolution (residual CO2 consumed by dissolution) " *
-              "is roadmap Stage 5; not implemented yet")
+                                                    compressibility = 1e-10))
     haskey(domain, :pillar_columns) && any(>(1), domain[:pillar_columns]) &&
         error("stacked columns connect through partial faces, which need the " *
               "transition flux of roadmap Stage 8; not implemented yet")
-    isnothing(rs_sat) == isnothing(transfer_rate) ||
-        error("rate-driven dissolution needs both `rs_sat` and `transfer_rate`")
-    if !isnothing(rs_sat) && !(0 < transfer_rate < Inf)
-        error("instantaneous dissolution (co2lab's dis_rate = 0 or Inf) is roadmap " *
-              "Stage 5; not implemented yet")
-    end
-
-    model = _co2lab_multimodel(domain, wells, fluid.rho_ref, rs_sat, transfer_rate)
+    model = _co2lab_multimodel(domain, wells, fluid)
     rmodel = model[:Reservoir]
+    instantaneous_dissolution(fluid) && _set_instant_dissolution!(rmodel, fluid)
 
     _set_max_gas_saturation!(rmodel, fluid)
+    _add_well_supply_terms!(model)
     push!(rmodel.output_variables, :sG, :sGmax)
     _set_ve_fluid!(rmodel, fluid)
     isnothing(rock_compressibility) ||
@@ -564,8 +710,12 @@ function _set_max_gas_saturation!(rmodel, fluid::CO2LabVEFluid)
     if fluid.res_gas > 0
         rmodel.primary_variables[:sGmax] = v
         flow = rmodel.domain.discretizations.mass_flow
+        # residual CO2 consumed by dissolution: the transfer of the dissolved-CO2
+        # law, or with instantaneous dissolution the dissolved-CO2 balance
+        dis = instantaneous_dissolution(fluid) ? InstantDissolution() :
+              get(rmodel.equations, :dissolved_co2, nothing)
         rmodel.equations[:hysteresis] = HysteresisEquation(flow, fluid.res_water,
-                                                           fluid.res_gas)
+                                                           fluid.res_gas, dis)
     else
         rmodel.parameters[:sGmax] = v
     end
@@ -573,13 +723,15 @@ function _set_max_gas_saturation!(rmodel, fluid::CO2LabVEFluid)
 end
 
 """
-    _co2lab_multimodel(domain, wells, rho_ref, rs_sat, transfer_rate) -> MultiModel
+    _co2lab_multimodel(domain, wells, fluid) -> MultiModel
 
 The reservoir (co2lab's formulation; with dissolution also the dissolved-CO2
 law) and the wells (with dissolution on JutulDarcy's equilibrium
 formulation). Arguments are only read.
 """
-function _co2lab_multimodel(domain, wells, rho_ref, rs_sat, transfer_rate)
+function _co2lab_multimodel(domain, wells, fluid::CO2LabVEFluid)
+    rho_ref = fluid.rho_ref
+    rs_sat = fluid.dissolution ? fluid.dis_max : nothing
     sys = co2lab_system(reference_densities = rho_ref, rs_sat = rs_sat)
     isnothing(rs_sat) && return setup_reservoir_model(domain, sys; wells = wells)
 
@@ -589,7 +741,8 @@ function _co2lab_multimodel(domain, wells, rho_ref, rs_sat, transfer_rate)
 
     rmodel = setup_reservoir_model(domain, sys)[:Reservoir]
     flow = rmodel.domain.discretizations.mass_flow
-    rmodel.equations[:dissolved_co2] = DissolvedCO2Equation(flow, transfer_rate)
+    rmodel.equations[:dissolved_co2] = DissolvedCO2Equation(flow, fluid.dis_rate,
+                                                            fluid.dis_max)
     push!(rmodel.output_variables, :Rs, :DissolvedCO2)
 
     # the wells and facility from `full`, the reservoir with co2lab's formulation
@@ -600,13 +753,43 @@ function _co2lab_multimodel(domain, wells, rho_ref, rs_sat, transfer_rate)
 end
 
 """
-    setup_co2lab_state(model; pressure, sG = 0.0, rs = 0.0) -> state
+    _add_well_supply_terms!(model)
+
+Each well's CO2 counts as supply for dissolution in its perforated cells
+([`DissolutionWellSupplyCT`](@ref)): one cross term per well for the
+dissolved-CO2 law and, with hysteresis, one for the hysteresis equation.
+
+Modifies: `model` (its cross terms).
+"""
+function _add_well_supply_terms!(model)
+    eqs = model[:Reservoir].equations
+    for (k, m) in pairs(model.models), eq in (:dissolved_co2, :hysteresis)
+        g = Jutul.physical_representation(m.domain)
+        g isa JutulDarcy.WellDomain && haskey(eqs, eq) && haskey(eqs, :dissolved_co2) ||
+            continue
+        perf = g.perforations
+        ct = DissolutionWellSupplyCT(vec(perf.reservoir), vec(perf.self))
+        Jutul.add_cross_term!(model, ct, target = :Reservoir, source = k, equation = eq)
+    end
+    return model
+end
+
+"""
+    setup_co2lab_state(model; pressure, sG = 0.0, rs = 0.0, forces = nothing) -> state
 
 Initial state for a model from [`setup_co2lab_model`](@ref). `pressure` is
-per reservoir cell (or a scalar); well nodes start at their first perforated
-cell's pressure, with no gas. `rs` is only used with dissolution on. With
-hysteresis, `sGmax` starts at `sG` (as co2lab's examples). `model` is only
-read.
+per reservoir cell (or a scalar). `rs` is only used with dissolution on;
+with hysteresis `sGmax` starts at `sG`, as co2lab's examples. `model` and
+`forces` are only read.
+
+Well nodes start at their first perforated cell's pressure, filled with what
+the well injects according to `forces` (from `setup_reservoir_forces`, or a
+vector of them: the first is used) — CO2 for `co2_injector_control` — and
+with brine otherwise. co2lab's wells have no wellbore volume; a wellbore
+starting with brine would push it into the reservoir with the first CO2
+(measured on the sloping aquifer: 1e-5 in `sG` and BHP, 1e-4 in pressure
+with instantaneous dissolution; with the wellbore filled with the injected
+CO2, the well runs agree with co2lab to solver precision).
 
 Written per submodel: `setup_reservoir_state` copies the reservoir's unknowns
 to the wells (`JutulDarcy/src/state0.jl:297-300`), which does not hold when
@@ -616,14 +799,11 @@ Returns a new state as `Jutul.setup_state` builds it: a `Dict` with one entry
 per submodel (`:Reservoir`, the wells, `:Facility`), each a `Dict{Symbol, Any}`
 of that submodel's unknowns.
 """
-function setup_co2lab_state(model; pressure, sG = 0.0, rs = 0.0)
+function setup_co2lab_state(model; pressure, sG = 0.0, rs = 0.0, forces = nothing)
     rmodel = model[:Reservoir]
     nc = Jutul.number_of_cells(rmodel.domain)
     p = pressure isa Number ? fill(Float64(pressure), nc) : collect(Float64, pressure)
-    rinit = Dict{Symbol, Any}(:Pressure => p, :sG => sG)
-    has_dissolution(rmodel.system) && (rinit[:Rs] = rs)
-    haskey(rmodel.primary_variables, :sGmax) && (rinit[:sGmax] = sG)
-    init = Dict{Symbol, Any}(:Reservoir => rinit)
+    init = Dict{Symbol, Any}(:Reservoir => _reservoir_init(rmodel, p, sG, rs, nc))
 
     perforated_cells(wm) =
         Jutul.physical_representation(wm.domain).perforations.reservoir
@@ -637,17 +817,49 @@ function setup_co2lab_state(model; pressure, sG = 0.0, rs = 0.0)
             init[k] = Dict(:TotalSurfaceMassRate => 0.0, :SurfacePhaseRates => 0.0,
                            :BottomHolePressure => p_bh)
         else
-            pw = first_perf_pressure(m)
-            if haskey(m.primary_variables, :BlackOilUnknown)
-                # equilibrium wellbore: black-oil's switching unknown, no gas
-                x = JutulDarcy.BlackOilX(m.system, pw; sg = 0.0, rs = 0.0)
-                init[k] = Dict(:Pressure => pw, :BlackOilUnknown => x)
-            else
-                init[k] = Dict(:Pressure => pw, :sG => 0.0)
-            end
+            init[k] = _wellbore_init(m, first_perf_pressure(m), _injected_sg(forces, k))
         end
     end
     return setup_state(model, init)
+end
+
+# The reservoir's unknowns: pressure and sG, plus rs (dissolution), sGmax
+# (hysteresis) or co2lab's switching unknown (instantaneous dissolution).
+function _reservoir_init(rmodel, p, sG, rs, nc)
+    P = rmodel.primary_variables
+    rinit = Dict{Symbol, Any}(:Pressure => p, :sG => sG)
+    has_dissolution(rmodel.system) && (rinit[:Rs] = rs)
+    haskey(P, :sGmax) && (rinit[:sGmax] = sG)
+    if haskey(P, :CO2X)
+        v = P[:CO2X]
+        sGv, rsv = (x isa Number ? fill(Float64(x), nc) : x for x in (sG, rs))
+        rinit[:CO2X] = [_co2lab_x(v, sGv[i], rsv[i]) for i in 1:nc]
+        delete!(rinit, :sG); delete!(rinit, :Rs)
+    end
+    return rinit
+end
+
+# CO2 saturation of what well `k` injects under `forces` (0 if it does not
+# inject, or no forces are given): the CO2 phase's share of its control's
+# wellbore mixture (InjectorControl's `phases`).
+function _injected_sg(forces, k)
+    isnothing(forces) && return 0.0
+    f = forces isa AbstractVector ? first(forces) : forces
+    ctrl = get(f[:Facility].control, k, nothing)
+    ctrl isa JutulDarcy.InjectorControl || return 0.0
+    return sum((x[2] for x in ctrl.phases if x[1] == 2); init = 0.0)
+end
+
+# A wellbore at pressure pw with CO2 saturation sg (the rest brine, without
+# dissolved CO2 unless saturated with free CO2 present).
+function _wellbore_init(m, pw, sg)
+    if haskey(m.primary_variables, :BlackOilUnknown)
+        # equilibrium wellbore: black-oil's switching unknown
+        x = sg > 0 ? JutulDarcy.BlackOilX(sg, JutulDarcy.OilAndGas, false) :
+                     JutulDarcy.BlackOilX(m.system, pw; sg = 0.0, rs = 0.0)
+        return Dict(:Pressure => pw, :BlackOilUnknown => x)
+    end
+    return Dict(:Pressure => pw, :sG => sg)
 end
 
 """

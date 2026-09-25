@@ -9,7 +9,7 @@ them). Jutul/JutulDarcy supertypes are in brackets. Exported names are in
 Keep this file current: update it in the same commit as any change that adds,
 removes, renames or changes the meaning of a structure (see `../CLAUDE.md`).
 
-*Last updated: 2026-09-25.*
+*Last updated: 2026-09-26.*
 
 ## A. Grid and domain
 
@@ -21,7 +21,7 @@ removes, renames or changes the meaning of a structure (see `../CLAUDE.md`).
 | 4 | *VE domain* (NamedTuple) | `vedomain.jl` | `(domain, coarse, geometry, rock)`: the `DataDomain` on a `CoarseMesh` (with `:column_height`, `:rugosity`, `:is_ve` (all true until Stage 8), `:pillar_columns` (columns in the pillar) per column, caprock `:gdz`; `:transmissibilities` when stacked, sealing faces between stacked columns), that `CoarseMesh`, 2 and 3 | mesh, `VEColumns`, 2, 3, caprock rugosity (`ve_domain`) |
 | 5 | **`VEColumnSides`** | `vefaces.jl` | Each column's lateral fine faces grouped by direction and neighbouring column: one entry per (column, direction, neighbour) — one coarse face seen from one side — or an outer side (neighbour 0) when the side has no neighbour; `exposed_faces`: boundary fine faces on sides that have a neighbour (no-flow) | mesh (direction tags), `VEColumns` (`ve_column_sides`) |
 | 6 | **`VEBoundarySides`** | `vedomain.jl` | Outer sides (no neighbour): direction, caprock edge depth and midpoint, area, centroid, normal, half transmissibility, fine faces, `across_fault` | 5, `VEColumns`, 4's domain (`ve_boundary_sides`, which also returns the unassigned faces) |
-| 7 | **`VEBoundaryCondition`** [force, passed as JutulDarcy's `bc`] | `vebc.jl` | co2lab's pressure BC on one open side: column, boundary pressure, transmissibility, edge-minus-caprock depth `dz`, inflow saturations | 6 (selected with `ve_select_sides`), 2 (`ve_boundary_conditions`) |
+| 7 | **`VEBoundaryCondition`** [force, passed as JutulDarcy's `bc`] | `vebc.jl` | co2lab's pressure BC on one open side: column, boundary pressure, transmissibility, edge-minus-caprock depth `dz`, inflow saturations, `carry_dissolved` (with dissolution: brine carries its dissolved CO2 across, or co2lab's booking as brine) | 6 (selected with `ve_select_sides`), 2 (`ve_boundary_conditions`) |
 
 Constants: `_DIRECTIONS` (`:left, :right, :lower, :upper, :top, :bottom` —
 Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
@@ -31,7 +31,7 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
-| 8 | **`CO2LabVEFluid`** | `ve_fluid.jl` | co2lab's VE fluid settings (makeVEFluid's fluid options): residual saturations, endpoints, reference densities and linear PVT, viscosities. Rugosity is in 4, rock compressibility in the model (20) | nothing (`co2lab_ve_fluid`); supplies the constants of the variables in C |
+| 8 | **`CO2LabVEFluid`** | `ve_fluid.jl` | co2lab's VE fluid settings (makeVEFluid's fluid options): residual saturations, endpoints, reference densities and linear PVT, viscosities, dissolution (`dissolution`, `dis_rate`, `dis_max`; `dis_rate` 0 or `Inf` is instantaneous). Rugosity is in 4, rock compressibility in the model (20) | nothing (`co2lab_ve_fluid`); supplies the constants of the variables in C |
 
 ## C. Jutul variables and equations, in the order they are computed
 
@@ -39,9 +39,11 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 |---|---|---|---|---|
 | 9 | `ColumnHeight` [ScalarVariable] | `ve_fluid.jl` | parameter `H` | `domain[:column_height]` (4) |
 | 9b | `Rugosity` [ScalarVariable] | `ve_fluid.jl` | parameter `dh`, caprock rugosity per column | `domain[:rugosity]` (4); zero if absent |
-| 10 | **`MaxGasSaturation`** [ScalarVariable] | `co2lab_fluid.jl` | `sGmax` in `[0, 1 − res_water]`: without hysteresis a parameter, the running maximum of converged `sG`; with hysteresis (`res_gas > 0`) an unknown, governed by 22b | `sG`; constant `res_water` from 8 |
+| 10 | **`MaxGasSaturation`** [ScalarVariable] | `co2lab_fluid.jl` | `sGmax` in `[0, 1 − res_water]`: without hysteresis a parameter, the running maximum of converged `sG`; with hysteresis (`res_gas > 0`) an unknown, governed by 22c | `sG`; constant `res_water` from 8 |
 | 11 | `GasSaturation` [ScalarVariable] | `co2lab_fluid.jl` | unknown `sG` | — |
-| 12 | `DissolvedGasRatio` [ScalarVariable] | `co2lab_fluid.jl` | unknown `rs` (dissolution on only) | — |
+| 12 | `DissolvedGasRatio` [ScalarVariable] | `co2lab_fluid.jl` | unknown `rs` (rate-driven dissolution) | — |
+| 12b | **`DissolvedOrFreeCO2`** [ScalarVariable, values JutulDarcy's `BlackOilX`] | `instant_dissolution.jl` | co2lab's switching unknown `:CO2X` for instantaneous dissolution: `rs` where brine is undersaturated, `sG` where saturated; co2lab's update rule | — |
+| 12c | `InstantGasSaturation`, `InstantDissolvedGasRatio` [ScalarVariable] | `instant_dissolution.jl` | secondary `sG`, `Rs` from 12b (instantaneous dissolution) | 12b |
 | 13 | `PlumeHeights` [VectorVariables] | `ve_fluid.jl` | secondary: row 1 `h`, row 2 `h_max`; field `is_ve` (`nothing` = all VE; 0 in fine cells) | 11, 10, 9 |
 | 14 | `VESharpInterfaceRelPerm` [AbstractRelativePermeabilities] | `ve_fluid.jl` | relative permeabilities (co2lab's `sharp_interface_simple`); fields `is_ve` and `fine` (3D relperm for fine cells, Stage 8) | 13, 9, 9b |
 | 15 | **`LinearShrinkage`** [PhaseVariables] | `co2lab_fluid.jl` | shrinkage factors `b` | pressure |
@@ -51,8 +53,10 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 | 19 | **`ConstantViscosities`** [PhaseVariables] | `co2lab_fluid.jl` | placeholder default, replaced by 18 in `setup_co2lab_model` | — |
 | 20 | `LinearPoreVolume` [ScalarVariable] | `rock_compressibility.jl` | pore volume `1 + c·(p − p_ref)` times the static pore volume — co2lab's rock compressibility, set on the model by `set_co2lab_rock_compressibility!` (or `setup_co2lab_model`'s `rock_compressibility`); exchangeable for JutulDarcy's `LinearlyCompressiblePoreVolume` | pressure, parameter `StaticFluidVolume` |
 | 21 | `DissolvedCO2Mass` [ScalarVariable] | `co2lab_fluid.jl` | dissolved CO2 mass per cell | 12, 15, saturations, 20 |
-| 22 | **`DissolvedCO2Equation`** [JutulEquation] | `co2lab_fluid.jl` | dissolved-CO2 conservation with transfer term | 21, fluxes |
-| 22b | **`HysteresisEquation`** [JutulEquation] | `co2lab_fluid.jl` | co2lab's `sGmax − max(sGmax0 − depletion, sG) = 0` per cell (hysteresis on); depletion zero until Stage 5 | 10, 11 |
+| 22 | **`DissolvedCO2Equation`** [JutulEquation] | `co2lab_fluid.jl` | dissolved-CO2 conservation with co2lab's transfer (`dis_rate`, `dis_max`; demand and supply caps, touched-brine minimum) — rate-driven dissolution | 21, fluxes, 13 |
+| 22b | `InstantDissolution` (marker) | `instant_dissolution.jl` | tells 22c the depletion is the dissolved-CO2 balance's residual (instantaneous dissolution) | — |
+| 22c | **`HysteresisEquation`** [JutulEquation] | `co2lab_fluid.jl` | co2lab's `sGmax − max(sGmax0 − depletion, sG) = 0` per cell (hysteresis on); `dissolution`: `nothing`, 22 (depletion = its transfer) or 22b | 10, 11, 22 or 22b |
+| 22d | `DissolutionWellSupplyCT` [AdditiveCrossTerm] | `co2lab_fluid.jl` | well → reservoir cross term on 22 (and 22c): the well's CO2 inflow counted as dissolution supply in its perforated cells | 22, 22c, the well's state |
 
 ## D. System and model types
 
@@ -69,9 +73,9 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
 | 28 | *VE well* (JutulDarcy well `DataDomain`) | `vewells.jl` | simple well in one column: co2lab's well index, perforation at the caprock, node at the chosen datum | 4 (`setup_ve_well`, `ve_well_index`) |
-| 29 | *CO2 injector control* (JutulDarcy `InjectorControl`) | `vewells.jl` | CO2 injection with the reference density and a CO2 wellbore column | 8 (`co2_injector_control`) |
-| 30 | *reconstructed 3D state* (NamedTuple) | `vereconstruct.jl` | `(pressure, sG, sGmax)` per 3D cell | a reservoir state of 27, 4, `VEColumns`, 8 (`ve_reconstruct`) |
-| 31 | *boundary mass fluxes* (Matrix) | `vebc.jl` | 2 × number of conditions, kg/s out (brine, CO2) | 7, a reservoir state (`ve_boundary_mass_fluxes`) |
+| 29 | *CO2 injector control* (JutulDarcy `InjectorControl`) | `vewells.jl` | CO2 injection with the reference density and a CO2 wellbore column; also fills the wellbore at the start (`setup_co2lab_state(...; forces)`) | 8 (`co2_injector_control`) |
+| 30 | *reconstructed 3D state* (NamedTuple) | `vereconstruct.jl` | `(pressure, sG, sGmax, rs)` per 3D cell; `rs` `nothing` without dissolution | a reservoir state of 27, 4, `VEColumns`, 8 (`ve_reconstruct`) |
+| 31 | *boundary mass fluxes* (Matrix) | `vebc.jl` | 3 × number of conditions, kg/s out: brine, CO2 (free and dissolved), the dissolved part | 7, a reservoir state (`ve_boundary_mass_fluxes`) |
 
 Constants: `_WELL_CONSTANT_RATIO`, `_WELL_CONSTANT_VALUE` (MRST's
 `wellConstant` table, `vewells.jl`).

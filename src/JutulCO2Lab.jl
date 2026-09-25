@@ -45,13 +45,16 @@ include("rock_compressibility.jl")
 export set_co2lab_rock_compressibility!
 
 include("ve_fluid.jl")
-export co2lab_ve_fluid, CO2LabVEFluid
+export co2lab_ve_fluid, CO2LabVEFluid, instantaneous_dissolution
 
 include("co2lab_fluid.jl")
 export co2lab_system, has_dissolution
 export setup_co2lab_model, setup_co2lab_state, setup_co2lab_simulator
 export LinearShrinkage, ConstantViscosities, MaxGasSaturation, DissolvedCO2Equation
 export HysteresisEquation
+
+include("instant_dissolution.jl")
+export DissolvedOrFreeCO2
 
 include("vewells.jl")
 export ve_well_index, setup_ve_well, co2_injector_control

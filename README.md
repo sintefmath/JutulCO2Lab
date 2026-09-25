@@ -10,8 +10,9 @@ columns, geometry, rock, caprock datum, boundary sides — all derived from the
 relperm, `pcWG`, PVT, VE wells, VE boundary conditions and reconstruction of
 3D states, running end to end on co2lab's sloping aquifer, plus the
 structures Stage 8 (hybrid) extends — stackable columns cut by connectivity
-and per-cell VE/fine branch points; and Stage 3: co2lab's hysteresis
-(residual trapping).
+and per-cell VE/fine branch points; Stage 3: co2lab's hysteresis (residual
+trapping); and Stage 4: dissolution, rate-driven and instantaneous, each
+gated against co2lab to solver precision.
 Readable walkthroughs: `../scripts/example_sloping_aquifer.jl` (Stage 2) and
 `../scripts/example_residual_trapping.jl` (Stage 3, residual trapping). The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
@@ -56,6 +57,8 @@ JutulDarcy is patched except one Jutul bug fix (see Environment).
 | `select_secondary_variables!` and `@jutul_secondary` | saturations, `TotalMasses`, dissolved CO2; plume heights, sharp-interface relperm, `pcWG`, linear PVT, pore volume | `co2lab_fluid.jl`, `ve_fluid.jl`, `rock_compressibility.jl` |
 | parameters (`default_parameter_values`) | `ColumnHeight`, `Rugosity` from the domain; without hysteresis `sGmax`, updated after each converged step (`update_after_step!`) | `ve_fluid.jl`, `co2lab_fluid.jl` |
 | extra equations | `DissolvedCO2Equation` (rate-driven dissolution) and `HysteresisEquation` (`sGmax` with hysteresis), each with its own convergence criterion | `co2lab_fluid.jl` |
+| `update_primary_variable!` | co2lab's switching unknown for instantaneous dissolution (`DissolvedOrFreeCO2`, on JutulDarcy's `BlackOilX`) | `instant_dissolution.jl` |
+| cross term | `DissolutionWellSupplyCT`: a well's CO2 as dissolution supply in its cells | `co2lab_fluid.jl` |
 | `apply_forces_to_equation!` | `VEBoundaryCondition` passed as JutulDarcy's `bc` force | `vebc.jl` |
 | flux | none: JutulDarcy's stock two-point flux with the caprock `:gdz` is co2lab's VE flux (roadmap Stage 0) | — |
 | wells | none: JutulDarcy's wells with co2lab's well index and a CO2 wellbore column (`co2_injector_control`) | `vewells.jl` |
@@ -157,7 +160,9 @@ src/rock_compressibility.jl  co2lab's linear pore volume, a model setting
 src/ve_fluid.jl      co2lab's VE fluid: plume heights, sharp-interface relperm, pcWG,
                      linear PVT; column height and rugosity parameters
 src/co2lab_fluid.jl  co2lab's fluid system: black-oil with a :co2lab formulation,
-                     unknowns by configuration; model, state and simulator setup
+                     unknowns by configuration; dissolution transfer, hysteresis;
+                     model, state and simulator setup
+src/instant_dissolution.jl  co2lab's instantaneous dissolution: switching unknown
 src/vewells.jl       VE wells: co2lab's well index, pressure datum option, CO2 injector
 src/vebc.jl          VE boundary conditions: co2lab's pressure BC as a force, side
                      selection, exited mass

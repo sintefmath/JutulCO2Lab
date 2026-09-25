@@ -19,18 +19,28 @@
 # JutulDarcy's FlowBoundaryCondition has none of this (no pcWG, no gravity
 # term, one flow direction for all phases), hence a separate force. It is
 # passed as JutulDarcy's `bc` force: setup_reservoir_forces(model; bc = bcs).
+#
+# With dissolution, co2lab passes no dissolved components to the boundary
+# fluxes (CO2VEBlackOilTypeModel.addBoundaryConditionsAndSources, dissolved =
+# {}): the brine phase's mass — dissolved CO2 included — is booked to the
+# brine component, and the dissolved-CO2 law sees no boundary flux — the
+# brine balance loses the dissolved CO2's mass (analysis/co2lab-issues.org).
+# Here brine leaves with its dissolved CO2 and enters without any
+# (`dissolved = :carry`, the default); `dissolved = :co2lab` reproduces
+# co2lab's booking for comparisons.
 
 # ---------------- Boundary conditions and the sides they open -----------------
 
 """
-    VEBoundaryCondition(cell, pressure, trans, dz, sat)
+    VEBoundaryCondition(cell, pressure, trans, dz, sat, carry_dissolved)
 
 co2lab's pressure boundary condition on one lateral side of VE column `cell`:
 boundary pressure `pressure` (Pa, both phases), transmissibility `trans` (m³,
 permeability times geometry; the column's half transmissibility to the side),
 `dz` = caprock-edge depth − column caprock depth (m, depth positive down),
-`sat` = saturations (brine, CO2) of inflowing fluid. Build with
-[`ve_boundary_conditions`](@ref).
+`sat` = saturations (brine, CO2) of inflowing fluid, `carry_dissolved`: with
+dissolution, whether brine carries its dissolved CO2 across (see the top of
+`vebc.jl`). Build with [`ve_boundary_conditions`](@ref).
 """
 struct VEBoundaryCondition{T <: Real}
     cell::Int
@@ -38,6 +48,7 @@ struct VEBoundaryCondition{T <: Real}
     trans::T
     dz::T
     sat::NTuple{2, T}
+    carry_dissolved::Bool
 end
 
 """
@@ -78,7 +89,8 @@ end
 
 """
     ve_boundary_conditions(ve, sides, ix; pressure, sat = (1.0, 0.0),
-                           trans = nothing) -> Vector{VEBoundaryCondition}
+                           trans = nothing, dissolved = :carry)
+        -> Vector{VEBoundaryCondition}
 
 co2lab's pressure boundary conditions on the sides `sides[ix]` (from
 [`ve_boundary_sides`](@ref) and [`ve_select_sides`](@ref)); `ve` is the
@@ -92,13 +104,19 @@ NamedTuple from [`ve_domain`](@ref).
 - `trans`: one transmissibility per selected side; defaults to the column's
   half transmissibility to the side, `sides.half_trans`. Give MRST's
   `T_all(bc.face)` for runs on identical input.
+- `dissolved` (with dissolution only): `:carry` — brine leaves with its
+  dissolved CO2 and enters without any; `:co2lab` — the brine phase's mass,
+  dissolved CO2 included, is booked to brine, as co2lab does (for
+  comparisons with co2lab).
 
 Returns a new vector, one condition per selected side, in the order of
 `ix`; pass it as `setup_reservoir_forces(model; bc = ...)`. Arguments are
 only read.
 """
 function ve_boundary_conditions(ve, sides::VEBoundarySides, ix; pressure,
-                                sat = (1.0, 0.0), trans = nothing)
+                                sat = (1.0, 0.0), trans = nothing, dissolved = :carry)
+    dissolved in (:co2lab, :carry) ||
+        throw(ArgumentError("dissolved must be :co2lab or :carry, got $dissolved"))
     n = length(ix)
     z_edge = sides.edge_depth[ix]
 
@@ -113,7 +131,8 @@ function ve_boundary_conditions(ve, sides::VEBoundarySides, ix; pressure,
 
     cols = sides.column[ix]
     dz = z_edge .- ve.geometry.z_top[cols]
-    return [VEBoundaryCondition(cols[k], p_bc[k], T[k], dz[k], s) for k in 1:n]
+    carry = dissolved == :carry
+    return [VEBoundaryCondition(cols[k], p_bc[k], T[k], dz[k], s, carry) for k in 1:n]
 end
 
 # ----------------------------------- Fluxes -----------------------------------
@@ -131,12 +150,14 @@ function _ve_bc_volume_flux(bc, p_ph, mob_ph, rho_ph, mob_t, sat_ph, g)
 end
 
 """
-    _ve_bc_mass_outflow(bc, state, g) -> (brine, co2)
+    _ve_bc_mass_outflow(bc, state, g) -> (brine, co2, dissolved)
 
-Mass flux (kg/s) of brine and CO2 *out of* the column through `bc`, from the
-column's pressure, capillary pressure, relative permeabilities, viscosities
-and densities in `state` (read with `state[:Name]`, so both a simulator state
-and an output state work).
+Mass flux (kg/s) *out of* the column through `bc`, from the column's
+pressure, capillary pressure, relative permeabilities, viscosities and
+densities in `state` (read with `state[:Name]`, so both a simulator state and
+an output state work), per component row of the mass balance: brine and CO2,
+and the part of the CO2 that is dissolved (zero without dissolution, and with
+co2lab's booking, where the brine phase's whole mass counts as brine).
 """
 function _ve_bc_mass_outflow(bc, state, g)
     c = bc.cell
@@ -150,9 +171,19 @@ function _ve_bc_mass_outflow(bc, state, g)
     mob = (kr[1, c] / mu[1, c], kr[2, c] / mu[2, c])
     mob_t = mob[1] + mob[2]
 
-    q(ph) = -rho[ph, c] *
-            _ve_bc_volume_flux(bc, pp[ph], mob[ph], rho[ph, c], mob_t, bc.sat[ph], g)
-    return (q(1), q(2))
+    vol(ph) = -_ve_bc_volume_flux(bc, pp[ph], mob[ph], rho[ph, c], mob_t, bc.sat[ph], g)
+    brine, co2 = rho[1, c] * vol(1), rho[2, c] * vol(2)
+    bc.carry_dissolved && haskey(state, :Rs) || return (brine, co2, zero(brine))
+
+    # brine leaves with its dissolved CO2 and enters without any; with
+    # ρ_L = b_L·(ρ_LS + rs·ρ_VS) and ρ_V = b_V·ρ_VS, the dissolved part of the
+    # brine phase's mass is b_L·rs·ρ_VS per volume
+    b, rs = state[:ShrinkageFactors], state[:Rs][c]
+    dissolved_per_volume = b[1, c] * rs * rho[2, c] / b[2, c]
+    v = vol(1)
+    dis = v > 0 ? dissolved_per_volume * v : zero(v)
+    brine = v > 0 ? brine - dis : brine - dissolved_per_volume * v
+    return (brine, co2 + dis, dis)
 end
 
 """
@@ -162,37 +193,49 @@ Mass fluxes out of the domain (kg/s, positive out) through each boundary
 condition in `bcs`, evaluated on `state`, which must hold `:Pressure`,
 `:CapillaryPressure`, `:RelativePermeabilities`, `:PhaseViscosities` and
 `:PhaseMassDensities` (add them to the reservoir model's
-`output_variables` to get them in simulation output). Dissolution off only.
+`output_variables` to get them in simulation output); with dissolution and
+`dissolved = :carry` also `:ShrinkageFactors` and `:Rs`.
 
-Returns a new 2 × `length(bcs)` matrix: row 1 brine, row 2 CO2. Arguments
-are only read.
+Returns a new 3 × `length(bcs)` matrix: row 1 brine, row 2 CO2 (free and
+dissolved), row 3 the dissolved part of row 2. With co2lab's booking of
+dissolved CO2 row 1 holds the brine phase's whole mass and row 3 is zero.
+Arguments are only read.
 """
 function ve_boundary_mass_fluxes(bcs::AbstractVector{<:VEBoundaryCondition}, state)
-    q = zeros(2, length(bcs))
+    q = zeros(3, length(bcs))
     for (k, bc) in enumerate(bcs)
         q_k = _ve_bc_mass_outflow(bc, state, Jutul.gravity_constant)
-        q[1, k], q[2, k] = Jutul.value(q_k[1]), Jutul.value(q_k[2])
+        q[:, k] .= Jutul.value.(q_k)
     end
     return q
 end
 
 # --------------------------------- Jutul hook ---------------------------------
 
-
 # Modifies: `acc` (the mass-conservation accumulation, per component and cell).
-# Components are the phases (dissolution off): brine, CO2.
+# Component rows: brine, CO2 (free and dissolved).
 function Jutul.apply_forces_to_equation!(
         acc, storage, model::CO2LabModel, eq::JutulDarcy.ConservationLaw{:TotalMasses},
         eq_s, force::AbstractVector{<:VEBoundaryCondition}, time)
-    has_dissolution(model.system) &&
-        error("VE boundary conditions with dissolution are roadmap Stage 5 " *
-              "(co2lab passes no dissolved components to its boundary fluxes)")
-
     state = storage.state
     for bc in force
         q = _ve_bc_mass_outflow(bc, state, Jutul.gravity_constant)
         acc[1, bc.cell] += q[1]
         acc[2, bc.cell] += q[2]
+    end
+    return acc
+end
+
+# Dissolved CO2 carried out by brine, in the dissolved-CO2 law (`:carry`
+# only; co2lab's law sees no boundary flux).
+# Modifies: `acc` (the dissolved-CO2 residual, per cell).
+function Jutul.apply_forces_to_equation!(
+        acc, storage, model::CO2LabModel, eq::DissolvedCO2Equation,
+        eq_s, force::AbstractVector{<:VEBoundaryCondition}, time)
+    state = storage.state
+    for bc in force
+        bc.carry_dissolved || continue
+        acc[1, bc.cell] += _ve_bc_mass_outflow(bc, state, Jutul.gravity_constant)[3]
     end
     return acc
 end
