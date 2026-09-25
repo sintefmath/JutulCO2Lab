@@ -20,6 +20,8 @@
 # term, one flow direction for all phases), hence a separate force. It is
 # passed as JutulDarcy's `bc` force: setup_reservoir_forces(model; bc = bcs).
 
+# ---------------- Boundary conditions and the sides they open -----------------
+
 """
     VEBoundaryCondition(cell, pressure, trans, dz, sat)
 
@@ -61,6 +63,7 @@ function ve_select_sides(sides::VEBoundarySides, columns::VEColumns;
               inrange(columns.pillar[sides.column[s]][1], i) &&
               inrange(columns.pillar[sides.column[s]][2], j) &&
               (include_across_fault || !sides.across_fault[s])
+
     return filter(keep, collect(1:length(sides)))
 end
 
@@ -98,16 +101,22 @@ function ve_boundary_conditions(ve, sides::VEBoundarySides, ix; pressure,
                                 sat = (1.0, 0.0), trans = nothing)
     n = length(ix)
     z_edge = sides.edge_depth[ix]
+
     p_bc = pressure isa Function ? pressure.(z_edge) : collect(Float64, pressure)
     T = isnothing(trans) ? sides.half_trans[ix] : collect(Float64, trans)
+
     length(p_bc) == n && length(T) == n ||
         throw(ArgumentError("need one pressure and one transmissibility per side"))
+
     s = (Float64(sat[1]), Float64(sat[2]))
     sum(s) ≈ 1 || throw(ArgumentError("inflow saturations must sum to 1, got $sat"))
+
     cols = sides.column[ix]
     dz = z_edge .- ve.geometry.z_top[cols]
     return [VEBoundaryCondition(cols[k], p_bc[k], T[k], dz[k], s) for k in 1:n]
 end
+
+# ----------------------------------- Fluxes -----------------------------------
 
 """
     _ve_bc_volume_flux(bc, p_ph, mob_ph, rho_ph, mob_t, sat_ph, g) -> flux
@@ -133,11 +142,14 @@ function _ve_bc_mass_outflow(bc, state, g)
     c = bc.cell
     kr, mu, rho = state[:RelativePermeabilities], state[:PhaseViscosities],
                   state[:PhaseMassDensities]
+
     p = state[:Pressure][c]
     # CO2 pressure = brine pressure + pcWG (JutulDarcy's non-reference phase)
     pp = (p, p + state[:CapillaryPressure][1, c])
+
     mob = (kr[1, c] / mu[1, c], kr[2, c] / mu[2, c])
     mob_t = mob[1] + mob[2]
+
     q(ph) = -rho[ph, c] *
             _ve_bc_volume_flux(bc, pp[ph], mob[ph], rho[ph, c], mob_t, bc.sat[ph], g)
     return (q(1), q(2))
@@ -164,6 +176,9 @@ function ve_boundary_mass_fluxes(bcs::AbstractVector{<:VEBoundaryCondition}, sta
     return q
 end
 
+# --------------------------------- Jutul hook ---------------------------------
+
+
 # Modifies: `acc` (the mass-conservation accumulation, per component and cell).
 # Components are the phases (dissolution off): brine, CO2.
 function Jutul.apply_forces_to_equation!(
@@ -172,6 +187,7 @@ function Jutul.apply_forces_to_equation!(
     has_dissolution(model.system) &&
         error("VE boundary conditions with dissolution are roadmap Stage 5 " *
               "(co2lab passes no dissolved components to its boundary fluxes)")
+
     state = storage.state
     for bc in force
         q = _ve_bc_mass_outflow(bc, state, Jutul.gravity_constant)

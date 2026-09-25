@@ -15,6 +15,8 @@
 # The perforation is placed at the caprock in both cases, so the reservoir
 # side of the connection is the caprock pressure, as in co2lab.
 
+# --------------------------------- Well index ---------------------------------
+
 # MRST's `wellConstant` table for 'ip_simple' (computeWellIndex.m): aspect ratio
 # of the cell against the constant in the equivalent radius
 const _WELL_CONSTANT_RATIO = (1, 2, 3, 4, 5, 8, 9, 16, 17, 32, 33, 64, 65)
@@ -33,6 +35,7 @@ function _mrst_well_constant(d1, d2, inner_product::Symbol)
     inner_product == :ip_simple ||
         throw(ArgumentError("inner_product must be :ip_simple or :ip_tpf, " *
                             "got :$inner_product"))
+
     r = max(round(d1 / d2, RoundNearestTiesAway), round(d2 / d1, RoundNearestTiesAway))
     x, y = _WELL_CONSTANT_RATIO, _WELL_CONSTANT_VALUE
     i = clamp(searchsortedlast(collect(x), r), 1, length(x) - 1)
@@ -60,10 +63,13 @@ function ve_well_index(ve, col::Integer; radius = 0.1, skin = 0.0,
     dx, dy, H = g.dx[col], g.dy[col], g.H[col]
     k = ve.domain[:permeability][col]
     c = _mrst_well_constant(dx, dy, inner_product)
+
     # Kh = H·k: co2lab's 2D index (Kh = k) times H
     return JutulDarcy.compute_peaceman_index((dx, dy, H), k, radius;
                                              constant = c, skin = skin)
 end
+
+# ----------------------------- Wells and controls -----------------------------
 
 """
     setup_ve_well(ve, col; name, datum = :caprock, WI = nothing, radius = 0.1,
@@ -94,9 +100,11 @@ function setup_ve_well(ve, col::Integer; name::Symbol, datum::Symbol = :caprock,
     g = ve.geometry
     WI = something(WI, ve_well_index(ve, col; radius, skin, inner_product))
     z_ref = _well_datum_depth(g, col, datum)
+
     # perforation at the caprock: the depth of the column's pressure unknown
     centers = copy(ve.domain[:cell_centroids])
     centers[3, col] = g.z_top[col]
+
     return setup_well(ve.domain, [col]; name = name, WI = WI, radius = radius,
                       skin = skin, cell_centers = centers, reference_depth = z_ref,
                       kwarg...)

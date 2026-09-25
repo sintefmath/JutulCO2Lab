@@ -12,6 +12,8 @@
 # Dissolved CO2 (VEstates23D's rs) is Stage 5; capillary-fringe fluids
 # (cap_fringe_h2s) are Stage 4.
 
+# ------------------------------ Filling a column ------------------------------
+
 """
     _fill_degree(h, zb) -> (n, t)
 
@@ -43,9 +45,11 @@ function _column_saturations(zb, h, h_max, rw, rg)
     s = [k <= n ? 1 - rw : (k == n + 1 ? t * (1 - rw) : 0.0) for k in 1:nk]
     smax = copy(s)
     rg > 0 || return (s, smax)
+
     n_r, t_r = _fill_degree(h_max, zb)
     # the residual zone's partial cell is h's partial cell: only the part below h
     n_r == n && (t_r = max(t_r - t, 0.0))
+
     for k in 1:nk
         if k <= n_r && k > n + 1
             s[k], smax[k] = rg, 1 - rw
@@ -57,6 +61,8 @@ function _column_saturations(zb, h, h_max, rw, rg)
     end
     return (s, smax)
 end
+
+# ------------------------------- Reconstruction -------------------------------
 
 """
     ve_reconstruct(state, ve, columns, fluid) -> NamedTuple
@@ -79,12 +85,15 @@ function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid)
     p, sG, sGmax = state[:Pressure], state[:sG], state[:sGmax]
     nc = length(columns.cells)
     out = (pressure = zeros(nc), sG = zeros(nc), sGmax = zeros(nc))
+
     for col in 1:number_of_columns(columns)
         r = columns.pos[col]:(columns.pos[col+1] - 1)
         cells = columns.cells[r]
+
         h, h_max = _plume_heights(sG[col], sGmax[col], geo.H[col], rw, rg)
         s, smax = _column_saturations(view(geo.z, r), h, h_max, rw, rg)
         out.sG[cells], out.sGmax[cells] = s, smax
+
         # brine density at the caprock pressure, as co2lab's fluid.rhoW(pVE)
         rho_w = fluid.rho_ref[1] * _linear(1.0, fluid.rho_pvt[1], p[col])
         g = Jutul.gravity_constant

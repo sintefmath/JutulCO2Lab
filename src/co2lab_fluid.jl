@@ -36,7 +36,7 @@ import JutulDarcy: StandardBlackOilSystem, BlackOilSystem, reference_densities,
                    PhaseVariables, Saturations, TotalMasses,
                    darcy_permeability_potential_differences, phase_upwind
 
-# ------------------------------------------------------------------ system
+# ----------------------------------- System -----------------------------------
 
 "All systems with co2lab's formulation (two phases, no vaporised brine)."
 const CO2LabSystem = StandardBlackOilSystem{<:Any, Nothing, <:Any, <:Any, :co2lab}
@@ -94,7 +94,7 @@ function _with_formulation(sys::StandardBlackOilSystem, f::Symbol)
     return T((getfield(sys, k) for k in fieldnames(typeof(sys)))...)
 end
 
-# ------------------------------------------------------------------ unknowns
+# ---------------------------------- Unknowns ----------------------------------
 
 struct GasSaturation <: Jutul.ScalarVariable end
 Jutul.minimum_value(::GasSaturation) = 0.0
@@ -118,7 +118,7 @@ function Jutul.select_primary_variables!(S, sys::CO2LabSystem,
     end
 end
 
-# ------------------------------------------------------------------ sGmax
+# ----------------------------------- sGmax ------------------------------------
 
 """
     MaxGasSaturation(res_water)
@@ -172,7 +172,7 @@ function Jutul.update_after_step!(storage, sys::CO2LabSystem, model, dt, forces;
     end
 end
 
-# ------------------------------------------------------------------ derived quantities
+# ----------------------------- Derived quantities -----------------------------
 
 "b = b_ref (1 + c (p − p_ref)) per phase; b = reservoir density / surface density."
 struct LinearShrinkage <: PhaseVariables
@@ -206,11 +206,14 @@ function Jutul.select_secondary_variables!(S, sys::CO2LabSystem,
     # start from black-oil's own set (the generic BlackOilSystem method)
     invoke(Jutul.select_secondary_variables!, Tuple{Any, BlackOilSystem, Any},
            S, sys, model)
+
     delete!(S, :PhaseState)     # only read by the :varswitch / :zg code
     delete!(S, :Rs)             # an unknown here, when present at all
+
     S[:ShrinkageFactors]   = _default_shrinkage()
     S[:PhaseMassDensities] = BlackOilDensities()
     S[:PhaseViscosities]   = _default_viscosity()
+
     is_well = Jutul.physical_representation(model.domain) isa JutulDarcy.WellDomain
     if has_dissolution(sys) && !is_well
         S[:DissolvedCO2] = DissolvedCO2Mass()
@@ -275,6 +278,7 @@ end
     sys = model.system
     rhoS = reference_densities(sys)
     ind = JutulDarcy.phase_indices(sys)
+
     for cell in ix
         # Rs, Rv = missing: no dissolved gas, no vaporised oil; false: no water phase
         @views JutulDarcy.blackoil_mass!(totmass[:, cell], FluidVolume,
@@ -296,7 +300,7 @@ end
     end
 end
 
-# ------------------------------------------------------------- dissolved-CO2 law
+# ----------------------------- Dissolved-CO2 law ------------------------------
 
 """
     DissolvedCO2Equation(flow_discretization, rate)
@@ -333,6 +337,7 @@ function Jutul.declare_pattern(model, eq::DissolvedCO2Equation, e_s, entity::Jut
     n = Jutul.number_of_entities(model, eq)
     D = collect(1:n)
     I = map(x -> x.self, hfd); J = map(x -> x.other, hfd)
+
     I, J = Jutul.map_ij_to_active(I, J, model.domain, entity)
     return (vcat(I, D), vcat(J, D))
 end
@@ -347,6 +352,7 @@ function Jutul.update_equation_in_entity!(v, c, state, state0, eq::DissolvedCO2E
                                           ldisc = Jutul.local_discretization(eq, c))
     ρV = reference_densities(model.system)[2]
     acc = (state.DissolvedCO2[c] - state0.DissolvedCO2[c]) / dt
+
     div = zero(acc)
     for ld in ldisc
         kgrad = Jutul.TPFA(ld.self, ld.other, ld.face_sign)
@@ -358,6 +364,7 @@ function Jutul.update_equation_in_entity!(v, c, state, state0, eq::DissolvedCO2E
         rs = Jutul.upwind(upw, state.Rs, ψL)
         div += ρV * rs * bλL * ψL
     end
+
     rs_sat = first(model.system.rs_max)(state.Pressure[c])   # single PVT region
     free = min(max(state.sG[c], 0.0) / 1e-3, 1.0)
     # transfer: rate × rs deficit × CO2 density × brine surface volume (b_L s_L Φ)
@@ -376,7 +383,7 @@ function Jutul.convergence_criterion(model::Jutul.SimulationModel, storage,
     return (CNV = (errors = (e,), names = ("dissolved CO2",)),)
 end
 
-# ----------------------------------------- black-oil hooks that assume BlackOilUnknown
+# ---------------- Black-oil hooks that assume BlackOilUnknown -----------------
 
 function JutulDarcy.handle_alternate_primary_variable_spec!(init, found, rmodel,
                                                             ::CO2LabSystem)
@@ -390,6 +397,7 @@ function Jutul.convergence_criterion(model::Jutul.SimulationModel{D, S}, storage
     M = Jutul.global_map(model.domain)
     val(x) = Jutul.as_value(Jutul.active_view(x, M, for_variables = false))
     Φ = val(storage.state.FluidVolume)
+
     b = val(storage.state.ShrinkageFactors)
     rhoS = reference_densities(model.system)
     cnv, mb = JutulDarcy.cnv_mb_errors_bo(r, Φ, b, dt, rhoS, Val(2))
@@ -397,7 +405,7 @@ function Jutul.convergence_criterion(model::Jutul.SimulationModel{D, S}, storage
     return (CNV = (errors = cnv, names = names), MB = (errors = mb, names = names))
 end
 
-# ------------------------------------------------------- model, state, simulator
+# -------------------------- Model, state, simulator ---------------------------
 
 """
     setup_co2lab_model(domain; wells = [], fluid = co2lab_ve_fluid(),
@@ -438,11 +446,14 @@ function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve
         error("instantaneous dissolution (co2lab's dis_rate = 0 or Inf) is roadmap " *
               "Stage 5; not implemented yet")
     end
+
     model = _co2lab_multimodel(domain, wells, fluid.rho_ref, rs_sat, transfer_rate)
     rmodel = model[:Reservoir]
+
     rmodel.parameters[:sGmax] = MaxGasSaturation(fluid.res_water)
     push!(rmodel.output_variables, :sG, :sGmax)
     _set_ve_fluid!(rmodel, fluid)
+
     shrinkage, viscosity = _co2lab_pvt(fluid)
     for m in values(model.models)
         S = m.secondary_variables
@@ -466,13 +477,16 @@ formulation). Arguments are only read.
 function _co2lab_multimodel(domain, wells, rho_ref, rs_sat, transfer_rate)
     sys = co2lab_system(reference_densities = rho_ref, rs_sat = rs_sat)
     isnothing(rs_sat) && return setup_reservoir_model(domain, sys; wells = wells)
+
     sys_well = co2lab_system(reference_densities = rho_ref, rs_sat = rs_sat,
                              formulation = :varswitch)
     full = setup_reservoir_model(domain, sys_well; wells = wells)
+
     rmodel = setup_reservoir_model(domain, sys)[:Reservoir]
     flow = rmodel.domain.discretizations.mass_flow
     rmodel.equations[:dissolved_co2] = DissolvedCO2Equation(flow, transfer_rate)
     push!(rmodel.output_variables, :Rs, :DissolvedCO2)
+
     # the wells and facility from `full`, the reservoir with co2lab's formulation
     models = (; (k => (k == :Reservoir ? rmodel : full.models[k])
                  for k in keys(full.models))...)
@@ -503,9 +517,11 @@ function setup_co2lab_state(model; pressure, sG = 0.0, rs = 0.0)
     rinit = Dict{Symbol, Any}(:Pressure => p, :sG => sG)
     has_dissolution(rmodel.system) && (rinit[:Rs] = rs)
     init = Dict{Symbol, Any}(:Reservoir => rinit)
+
     perforated_cells(wm) =
         Jutul.physical_representation(wm.domain).perforations.reservoir
     first_perf_pressure(wm) = p[first(perforated_cells(wm))]
+
     for (k, m) in pairs(model.models)
         k == :Reservoir && continue
         g = Jutul.physical_representation(m.domain)
@@ -539,6 +555,7 @@ equation.
 """
 function setup_co2lab_simulator(case; dissolved_co2_tolerance = 1e-6, kwarg...)
     sim, cfg = setup_reservoir_simulator(case; kwarg...)
+
     if haskey(case.model[:Reservoir].equations, :dissolved_co2)
         cfg[:tolerances][:Reservoir][:dissolved_co2] = dissolved_co2_tolerance
     end

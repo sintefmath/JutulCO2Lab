@@ -30,6 +30,8 @@ export SourceInfo, source_provenance
 
 include("provenance.jl")
 
+# --------------------------------- MRST dumps ---------------------------------
+
 """
     MrstDump
 
@@ -70,6 +72,8 @@ function read_mrst_dump(path::AbstractString)
     return MrstDump(path, matread(path))
 end
 
+# --------------------------------- Tolerances ---------------------------------
+
 """
     Tolerance(rtol, atol)
 
@@ -109,6 +113,8 @@ const STAGE1_TOL = Dict{Symbol, Tolerance}(
     :trans_mult      => Tolerance(1e-12, 1e-14),   # -
     :well_index      => Tolerance(1e-10, 1e-24),   # m^3
 )
+
+# ----------------------------- Reports and checks -----------------------------
 
 """
     CheckResult
@@ -195,12 +201,14 @@ function check!(report::OracleReport, name::AbstractString, julia, mrst;
         end
         b = b[perm]
     end
+
     if length(a) != length(b)
         res = CheckResult(String(name), length(a), NaN, NaN, tol, false,
                           "length mismatch: julia $(length(a)) vs mrst $(length(b))")
         push!(report.results, res)
         return res
     end
+
     if isempty(a)
         res = CheckResult(String(name), 0, NaN, NaN, tol, false, "empty comparison")
         push!(report.results, res)
@@ -212,10 +220,13 @@ function check!(report::OracleReport, name::AbstractString, julia, mrst;
         nf = "$nonfinite non-finite entries"
         note = isempty(note) ? nf : "$note; $nf"
     end
+
     res = CheckResult(String(name), length(a), maxabs, maxrel, tol, ok, String(note))
     push!(report.results, res)
     return res
 end
+
+# --------------------------- Comparison and display ---------------------------
 
 """
     _compare(a, b, tol) -> (maxabs, maxrel, ok, nonfinite)
@@ -256,6 +267,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::OracleReport)
         println(io, "  (no checks run — this is a FAILURE, not a pass)")
         return
     end
+
     w = maximum(length(x.name) for x in r.results)
     for x in r.results
         @printf(io, "  %-3s %-*s  n=%-8d max|Δ|=%-10.3g max rel=%-10.3g",
@@ -265,6 +277,7 @@ function Base.show(io::IO, ::MIME"text/plain", r::OracleReport)
         end
         println(io)
     end
+
     nfail = count(x -> !x.ok, r.results)
     println(io, nfail == 0 ? "  PASS ($(length(r.results)) checks)" :
                              "  FAIL ($nfail of $(length(r.results)) checks)")

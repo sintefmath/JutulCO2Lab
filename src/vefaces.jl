@@ -22,6 +22,8 @@
 # neighbour (asserted — true for corner-point grids, whose faults run along
 # pillars).
 
+# ------------------------------ Face directions -------------------------------
+
 "Face directions, Jutul's names; the numbering 1..6 is MRST's face-tag order."
 const _DIRECTIONS = (:left, :right, :lower, :upper, :top, :bottom)
 const _TOP = Int8(5)
@@ -41,6 +43,7 @@ function _logical_direction(a, b)
         dk == 0 && error("cells $a and $b have the same logical index")
         return dk < 0 ? _TOP : _BOTTOM
     end
+
     di == -1 && dj == 0 && return Int8(1)
     di == 1 && dj == 0 && return Int8(2)
     di == 0 && dj == -1 && return Int8(3)
@@ -74,6 +77,7 @@ function _boundary_directions(mesh)
                                           throw = false)
         ismissing(faces) || (dirs[faces] .= k)
     end
+
     any(==(0), dirs) &&
         error("mesh has boundary faces without a :direction tag (Jutul corner-point " *
               "grids and ve_mesh_from_mrst / ve_trim provide them)")
@@ -98,6 +102,8 @@ function _set_boundary_directions!(mesh, dirs)
     return mesh
 end
 
+# -------------- Boundary directions from MRST and after trimming --------------
+
 """
     _mrst_boundary_directions(G, mesh) -> Vector{Int8}
 
@@ -110,14 +116,17 @@ function _mrst_boundary_directions(G, mesh)
     N = Int.(G["faces"]["neighbors"])
     cf, fpos = G["cells"]["faces"], Int.(vec(G["cells"]["facePos"]))
     fnodes, npos = Int.(vec(G["faces"]["nodes"])), Int.(vec(G["faces"]["nodePos"]))
+
     tag = zeros(Int8, size(N, 1))
     for c in 1:(length(fpos) - 1), p in fpos[c]:(fpos[c+1] - 1)
         f = Int(cf[p, 1])
         (N[f, 1] == 0 || N[f, 2] == 0) && (tag[f] = Int8(cf[p, 2]))
     end
+
     bfaces = [f for f in 1:size(N, 1) if N[f, 1] == 0 || N[f, 2] == 0]
     length(bfaces) == length(mesh.boundary_faces.neighbors) ||
         error("boundary face count differs from the MRST grid")
+
     for (k, f) in enumerate(bfaces)
         # same cell (the non-zero neighbour) and same node set
         mrst_nodes = fnodes[npos[f]:(npos[f+1] - 1)]
@@ -142,6 +151,7 @@ function _trimmed_boundary_directions(old, keep, new)
     renum = zeros(Int, number_of_cells(old)); renum[keep] = 1:length(keep)
     ijk(c) = cell_ijk(old, c)
     dirs, cells, nodes = Int8[], Int[], Vector{Int}[]
+
     for f in 1:number_of_faces(old)
         l, r = old.faces.neighbors[f]
         active[l] == active[r] && continue
@@ -149,6 +159,7 @@ function _trimmed_boundary_directions(old, keep, new)
         push!(dirs, _logical_direction(ijk(c), ijk(o)))
         push!(cells, c); push!(nodes, collect(old.faces.faces_to_nodes[f]))
     end
+
     olddirs = _boundary_directions(old)
     for bf in eachindex(olddirs)
         c = old.boundary_faces.neighbors[bf]
@@ -156,8 +167,10 @@ function _trimmed_boundary_directions(old, keep, new)
         push!(dirs, olddirs[bf])
         push!(cells, c); push!(nodes, collect(old.boundary_faces.faces_to_nodes[bf]))
     end
+
     length(dirs) == length(new.boundary_faces.neighbors) ||
         error("unexpected boundary face count after trimming")
+
     for k in eachindex(dirs)
         # same (renumbered) cell, same node coordinates — nodes are renumbered too
         new_pts = new.node_points[collect(new.boundary_faces.faces_to_nodes[k])]
@@ -168,7 +181,7 @@ function _trimmed_boundary_directions(old, keep, new)
     return dirs
 end
 
-# ------------------------------------------------------------------ column sides
+# -------------------------------- Column sides --------------------------------
 
 """
     VEColumnSides
@@ -210,18 +223,23 @@ function ve_column_sides(mesh, columns::VEColumns)
     bdir = _boundary_directions(mesh)
     ijk = [cell_ijk(mesh, c) for c in 1:number_of_cells(mesh)]
     out = VEColumnSides(Int[], Int8[], Int[], Vector{Int}[], Vector{Int}[])
+
     for col in 1:number_of_columns(columns)
         acc = [(nbrs = Int[], int = Int[], bnd = Int[]) for _ in 1:4]
+
         for c in column_cells(columns, col)
             _collect_side_faces!(acc, mesh, columns, ijk, bdir, c)
         end
+
         for d in 1:4
             a = acc[d]
             isempty(a.int) && isempty(a.bnd) && continue
+
             nb = unique(a.nbrs)
             length(nb) <= 1 ||
                 error("column $col, $(_DIRECTIONS[d]) side: faces towards columns " *
                       "$nb; expected at most one neighbouring column")
+
             push!(out.column, col); push!(out.direction, d)
             push!(out.neighbour, isempty(nb) ? 0 : nb[1])
             push!(out.interior_faces, a.int); push!(out.boundary_faces, a.bnd)
@@ -248,9 +266,11 @@ function _collect_side_faces!(acc, mesh, columns, ijk, bdir, c)
             d in (_TOP, _BOTTOM) || error("lateral face $f inside column $col")
             continue
         end
+
         d in (_TOP, _BOTTOM) && error("vertical face $f between columns $col and $oc")
         push!(acc[d].int, f); push!(acc[d].nbrs, oc)
     end
+
     for f in mesh.boundary_faces.cells_to_faces[c]
         bdir[f] <= 4 && push!(acc[bdir[f]].bnd, f)
     end

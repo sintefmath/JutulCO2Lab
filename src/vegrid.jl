@@ -10,6 +10,8 @@
 # (co2lab-common/grid/topSurfaceGrid.m:735-779): purely logical. Cells are
 # grouped by (i, j) pillar and ordered by k — no geometric sort.
 
+# ------------------------------ Column partition ------------------------------
+
 """
     VEColumns
 
@@ -46,6 +48,8 @@ writing to it would change `columns`.
 """
 column_cells(c::VEColumns, col::Integer) = view(c.cells, c.pos[col]:(c.pos[col+1]-1))
 
+# ------------------------------- Mesh from MRST -------------------------------
+
 """
     ve_mesh_from_mrst(G::AbstractDict) -> UnstructuredMesh
 
@@ -69,6 +73,8 @@ function ve_mesh_from_mrst(G::AbstractDict)
         z_is_depth = true)
     return _set_boundary_directions!(mesh, _mrst_boundary_directions(G, mesh))
 end
+
+# ---------------------------- Columns and trimming ----------------------------
 
 """
     ve_columns(mesh; discard_below_holes = true) -> (columns, discarded)
@@ -97,6 +103,7 @@ function ve_columns(mesh; discard_below_holes::Bool = true)
         i, j, _ = ijk[c]
         push!(get!(pillars, i + nx*(j - 1), Int[]), c)
     end
+
     cells = Int[]
     pos = [1]
     pillar = Tuple{Int, Int}[]
@@ -117,6 +124,7 @@ function ve_columns(mesh; discard_below_holes::Bool = true)
         push!(pos, pos[end] + nkeep)
         push!(pillar, ijk[col[1]][1:2])
     end
+
     partition = zeros(Int, nc)
     for col in 1:(length(pos) - 1), m in pos[col]:(pos[col+1] - 1)
         partition[cells[m]] = col
@@ -158,6 +166,8 @@ function ve_trim(mesh::UnstructuredMesh, discarded)
     return _set_boundary_directions!(trimmed, dirs)
 end
 
+# ------------------------------ Column geometry -------------------------------
+
 """
     ve_column_geometry(mesh, columns) -> NamedTuple
 
@@ -193,6 +203,7 @@ function ve_column_geometry(mesh, columns::VEColumns)
     for c in 1:nc
         ztop_cell[c], zbot_cell[c] = _cell_top_bottom_depth(mesh, geo, ijk, bdir, c)
     end
+
     ncol = number_of_columns(columns)
     dz = [zbot_cell[c] - ztop_cell[c] for c in columns.cells]
     z = similar(dz)
@@ -205,6 +216,7 @@ function ve_column_geometry(mesh, columns::VEColumns)
         z_top[col] = ztop_cell[top]
         dx[col], dy[col] = _top_face_xy_extent(mesh, ijk, bdir, top)
     end
+
     z_cell = [geo.cell_centroids[3, c] for c in columns.cells]
     return (z_top = z_top, H = H, dz = dz, z = z, dx = dx, dy = dy, z_cell = z_cell)
 end
@@ -221,10 +233,12 @@ function _cell_top_bottom_depth(mesh, geo, ijk, bdir, c)
         d == _TOP && push!(top, geo.face_centroids[3, f])
         d == _BOTTOM && push!(bot, geo.face_centroids[3, f])
     end
+
     for f in mesh.boundary_faces.cells_to_faces[c]
         bdir[f] == _TOP && push!(top, geo.boundary_centroids[3, f])
         bdir[f] == _BOTTOM && push!(bot, geo.boundary_centroids[3, f])
     end
+
     length(top) == 1 && length(bot) == 1 ||
         error("cell $c: expected one top and one bottom face, " *
               "found $(length(top)) and $(length(bot))")
@@ -240,6 +254,7 @@ function _top_face_xy_extent(mesh, ijk, bdir, c)
     for f in mesh.boundary_faces.cells_to_faces[c]
         bdir[f] == _TOP && return _xy_extent(mesh, mesh.boundary_faces.faces_to_nodes[f])
     end
+
     for f in mesh.faces.cells_to_faces[c]
         d, _ = _interior_face_direction(mesh, ijk, c, f)
         d == _TOP && return _xy_extent(mesh, mesh.faces.faces_to_nodes[f])

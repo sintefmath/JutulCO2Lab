@@ -10,6 +10,8 @@
 # Record-only by design: nothing here fails a gate. A dirty checkout triggers a
 # warning, not an error.
 
+# -------------------------------- Source trees --------------------------------
+
 """
     SourceInfo
 
@@ -62,6 +64,7 @@ in which case that tracked file shows as modified.
 function _git_source_info(name::AbstractString, dir::AbstractString)
     commit = _git(dir, ["rev-parse", "--short=8", "HEAD"])
     commit === nothing && return SourceInfo(name, dir, "unknown", missing)
+
     status = _git(dir, ["status", "--porcelain", "--untracked-files=no"])
     dirty = status === nothing ? missing : !isempty(status)
     return SourceInfo(name, dir, commit, dirty)
@@ -86,6 +89,8 @@ function source_provenance()
     end
     return infos
 end
+
+# ------------------------- MRST, and dirty checkouts --------------------------
 
 """
     _mrst_source_info(dump) -> SourceInfo

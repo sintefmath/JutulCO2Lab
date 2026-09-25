@@ -3,6 +3,8 @@
 # See roadmap Stage 1 and analysis/ve-meshing/grid-representation-comparison.md.
 # Everything is derived from the 3D mesh and the VEColumns partition.
 
+# ------------------------- Rock and initial pressure --------------------------
+
 """
     ve_average_rock(columns, dz; perm_x, perm_y = nothing, poro, ntg = nothing,
                     anisotropy_rtol = 1e-6) -> NamedTuple
@@ -27,6 +29,7 @@ function ve_average_rock(columns::VEColumns, dz::AbstractVector;
                          perm_x, perm_y = nothing, poro, ntg = nothing,
                          anisotropy_rtol = 1e-6)
     isnothing(perm_y) || _warn_lateral_anisotropy(perm_x, perm_y, anisotropy_rtol)
+
     avg(x) = [sum(x[columns.cells[r]] .* dz[r]) / sum(dz[r])
               for r in (columns.pos[c]:(columns.pos[c+1] - 1)
                         for c in 1:number_of_columns(columns))]
@@ -58,12 +61,15 @@ function _warn_lateral_anisotropy(kx, ky, rtol)
     rel = abs.(kx .- ky) ./ max.(abs.(kx), abs.(ky), floatmin())
     n = count(>(rtol), rel)
     n == 0 && return nothing
+
     ratio = maximum(max.(kx ./ ky, ky ./ kx))
     @warn "Lateral permeability is anisotropic in $n of $(length(kx)) cells " *
           "(largest kx/ky or ky/kx: $(round(ratio, sigdigits = 3))); VE " *
           "permeability uses x-permeability only"
     return nothing
 end
+
+# ------------------------------- The VE domain --------------------------------
 
 """
     ve_domain(mesh, columns; perm_x, perm_y = nothing, poro, ntg = nothing)
@@ -100,14 +106,18 @@ function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing, poro,
                    ntg = nothing)
     geometry = ve_column_geometry(mesh, columns)
     rock = ve_average_rock(columns, geometry.dz; perm_x, perm_y, poro, ntg)
+
     coarse = CoarseMesh(mesh, columns.partition)
     kw = isnothing(rock.ntg) ? (;) : (net_to_gross = rock.ntg,)
     domain = reservoir_domain(coarse; permeability = rock.perm, porosity = rock.poro,
                               kw...)
+
     domain[:gdz, Faces()] = Jutul.compute_face_gdz(domain[:neighbors], geometry.z_top)
     domain[:column_height, Cells()] = geometry.H
     return (domain = domain, coarse = coarse, geometry = geometry, rock = rock)
 end
+
+# ------------------------------- Boundary sides -------------------------------
 
 """
     VEBoundarySides
@@ -183,25 +193,31 @@ function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
     out = (column = Int[], dir = Int[], depth = Float64[], mid = NTuple{2, Float64}[],
            area = Float64[], cen = NTuple{3, Float64}[], nrm = NTuple{3, Float64}[],
            T = Float64[], faces = Vector{Int}[], fault = Bool[])
+
     column_at = Dict(columns.pillar[c] => c for c in 1:number_of_columns(columns))
     unassigned = Int[]
+
     for s in 1:length(cs)
         col, fs = cs.column[s], cs.boundary_faces[s]
         if cs.neighbour[s] != 0
             append!(unassigned, fs); continue
         end
+
         d, top = cs.direction[s], first(column_cells(columns, col))
         depth, mid = _side_top_edge(g, bdir, top, d, col)
         centroid = (cc[1, col], cc[2, col], cc[3, col])
         A, C, N, t = _side_aggregate(g, fs, perm[col], centroid)
+
         push!(out.column, col); push!(out.dir, d)
         push!(out.depth, depth); push!(out.mid, mid)
         push!(out.area, A); push!(out.cen, C); push!(out.nrm, N)
         push!(out.T, t); push!(out.faces, fs)
+
         # a column exists across this side, but nothing connects to it: sealed fault
         across = _logical_neighbour_pillar(columns.pillar[col], d)
         push!(out.fault, haskey(column_at, across))
     end
+
     sides = VEBoundarySides(out.column, out.dir, out.depth, out.mid, out.area, out.cen,
                             out.nrm, out.T, out.faces, out.fault)
     return (sides, unassigned)
@@ -232,14 +248,17 @@ function _side_top_edge(g, bdir, top, d, col)
     length(tops) == 1 ||
         error("column $col: top cell $top has $(length(tops)) top boundary faces, " *
               "expected 1")
+
     side_nodes = Set{Int}()
     for f in g.c2f[top]
         bdir[f] == d && union!(side_nodes, g.nodes[f])
     end
+
     shared = [n for n in g.nodes[tops[1]] if n in side_nodes]
     length(shared) == 2 ||
         error("column $col, $(_DIRECTIONS[d]) side: top edge has " *
               "$(length(shared)) nodes, expected 2")
+
     Xa, Xb = g.X[shared[1]], g.X[shared[2]]
     return ((Xa[3] + Xb[3]) / 2, ((Xa[1] + Xb[1]) / 2, (Xa[2] + Xb[2]) / 2))
 end
@@ -251,6 +270,7 @@ function _side_aggregate(g, fs, perm, col_centroid)
     C = ntuple(d -> sum(g.ba[f] * g.bc[d, f] for f in fs) / A, 3)
     Nv = ntuple(d -> sum(g.ba[f] * g.bn[d, f] for f in fs), 3)
     N = Nv ./ sqrt(sum(abs2, Nv))
+
     cvec = C .- col_centroid
     t = perm * A * sum(cvec .* N) / sum(abs2, cvec)
     return (A, C, N, t)

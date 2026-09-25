@@ -14,7 +14,7 @@
 # variables and checked directly against co2lab evaluated under Octave
 # (scripts/mrst_dump_ve_fluid.m).
 
-# ------------------------------------------------------------------ settings
+# ---------------------------------- Settings ----------------------------------
 
 """
     co2lab_ve_fluid(; residual = (0.0, 0.0), krmax = (-1.0, -1.0), rugosity = 0.0,
@@ -50,6 +50,7 @@ function co2lab_ve_fluid(; residual = (0.0, 0.0), krmax = (-1.0, -1.0), rugosity
     krw = krmax[1] < 0 ? 1 - rg : Float64(krmax[1])
     krg = krmax[2] < 0 ? 1 - rw : Float64(krmax[2])
     lin = _linear_pvt
+
     return CO2LabVEFluid(rw, rg, krw, krg, Float64(rugosity),
                          (Float64(wat_rho_ref), Float64(co2_rho_ref)),
                          (lin(wat_rho_pvt), lin(co2_rho_pvt)),
@@ -88,7 +89,7 @@ function _linear_pvt(spec)
     return (Float64(spec[1]), Float64(spec[2]))
 end
 
-# ------------------------------------------------------------------ formulas
+# ---------------------------------- Formulas ----------------------------------
 
 """
     _plume_heights(sG, sGmax, H, rw, rg) -> (h, h_max)
@@ -121,7 +122,7 @@ end
 "Linear property `ref·(1 + c·(p − p_ref))`; constant when `c = 0`."
 _linear(ref, (c, p_ref), p) = ref * (1 + c * (p - p_ref))
 
-# ------------------------------------------------------------------ Jutul variables
+# ------------------------------ Jutul variables -------------------------------
 
 "Column height `H` per VE column (m), read from `domain[:column_height]`."
 struct ColumnHeight <: Jutul.ScalarVariable end
@@ -211,6 +212,8 @@ end
     end
 end
 
+# --------------------- Installing the VE fluid in a model ---------------------
+
 """
     _set_ve_fluid!(model, fluid)
 
@@ -225,15 +228,18 @@ Modifies: `model.parameters` (adds `:ColumnHeight`, moves `:FluidVolume` to
 function _set_ve_fluid!(model, fluid::CO2LabVEFluid)
     haskey(model.data_domain, :column_height) ||
         error("VE fluid needs domain[:column_height]; build the domain with ve_domain")
+
     prm, S = model.parameters, model.secondary_variables
     prm[:ColumnHeight] = ColumnHeight()
     prm[:StaticFluidVolume] = prm[:FluidVolume]
     delete!(prm, :FluidVolume)
+
     S[:FluidVolume] = LinearPoreVolume(fluid.pv_p_ref, fluid.pv_c)
     S[:PlumeHeights] = PlumeHeights(fluid.res_water, fluid.res_gas)
     S[:RelativePermeabilities] = VESharpInterfaceRelPerm(fluid.krw, fluid.krg,
                                                          fluid.rugosity)
     S[:CapillaryPressure] = VECapillaryPressure()
+
     push!(model.output_variables, :PlumeHeights, :CapillaryPressure)
     unique!(model.output_variables)
     return model
