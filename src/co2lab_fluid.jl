@@ -14,15 +14,15 @@
 # :19-20, :440-460):
 #   always              p, sG
 #   dissolution on      + rs, and the dissolved-CO2 conservation law
-#   hysteresis on       + sGmax as an unknown with its own residual (Stage 3,
-#                         not implemented yet)
+#   hysteresis on       + sGmax, with co2lab's equation (HysteresisEquation)
+#   (res_gas > 0)
 # Dissolution off is black-oil without dissolved gas (rs_max = nothing), which
 # JutulDarcy already supports in its fluxes and wells.
 #
-# sGmax always exists, as a stored field (a Jutul parameter) updated
-# explicitly: max(sGmax, sG), capped at 1 - res_water. Without hysteresis it
-# does not affect the flow (roadmap Stage 2 item 2); the trapping inventory
-# needs it later.
+# sGmax always exists. Without hysteresis it is a stored field (a Jutul
+# parameter) updated after each converged step: max(sGmax, sG), capped at
+# 1 - res_water; it does not affect the flow then (roadmap Stage 2 item 2).
+# With hysteresis it is an unknown of the reservoir (roadmap Stage 3).
 #
 # co2lab's VE relperm, pcWG and PVT are in ve_fluid.jl (Stage 2 items 1, 3).
 # Still placeholders: the transfer rate (linear relaxation with a smoothed
@@ -123,17 +123,21 @@ end
 """
     MaxGasSaturation(res_water)
 
-co2lab's `sGmax`, stored as a Jutul parameter and updated explicitly before
-each step and after each converged step: `sGmax = min(max(sGmax, sG),
-1 - res_water)`. MRST does the same in `updateState`
-(`CO2VEBlackOilTypeModel.m:352-353`), but after every Newton update, so an
-overshooting iterate can raise its `sGmax`; here only converged states count.
-With hysteresis (Stage 3) it becomes an unknown instead.
+co2lab's `sGmax`, between 0 and `1 - res_water`. Without hysteresis a Jutul
+parameter, updated explicitly before each step and after each converged
+step: `sGmax = min(max(sGmax, sG), 1 - res_water)`. MRST does the same in
+`updateState` (`CO2VEBlackOilTypeModel.m:352-353`), but after every Newton
+update, so an overshooting iterate can raise its `sGmax`; here only converged
+states count. With hysteresis an unknown instead, governed by
+[`HysteresisEquation`](@ref).
 """
 struct MaxGasSaturation <: Jutul.ScalarVariable
     res_water::Float64
 end
 Jutul.default_value(model, ::MaxGasSaturation) = 0.0
+Jutul.minimum_value(::MaxGasSaturation) = 0.0
+Jutul.maximum_value(v::MaxGasSaturation) = 1 - v.res_water
+Jutul.absolute_increment_limit(::MaxGasSaturation) = 0.2
 
 """
     _update_max_gas_saturation!(sGmax, v, sG)
@@ -383,6 +387,66 @@ function Jutul.convergence_criterion(model::Jutul.SimulationModel, storage,
     return (CNV = (errors = (e,), names = ("dissolved CO2",)),)
 end
 
+# ---------------------------- Hysteresis equation -----------------------------
+
+"""
+    HysteresisEquation(flow_discretization, res_water, res_gas)
+
+co2lab's equation for `sGmax` with hysteresis on (`res_gas > 0`),
+`CO2VEBlackOilTypeModel.m:113-124`, per cell:
+
+    sGmax − max(sGmax0 − s_depletion · dt · fac, sG) = 0
+
+with `sGmax0` from the start of the step. The depletion term, residual CO2
+consumed by dissolution, is [`_residual_depletion`](@ref): zero until roadmap
+Stage 5. Cell-local; `flow_discretization` only supplies the matrix pattern
+(see `declare_pattern` below).
+"""
+struct HysteresisEquation{D} <: Jutul.JutulEquation
+    flow_discretization::D
+    res_water::Float64
+    res_gas::Float64
+end
+Jutul.number_of_equations_per_entity(::Jutul.SimulationModel, ::HysteresisEquation) = 1
+Jutul.local_discretization(::HysteresisEquation, i) = nothing
+
+# Same pattern as the conservation law, in its order, as for the dissolved-CO2
+# law: the block matrix layout requires identical patterns.
+function Jutul.declare_pattern(model, eq::HysteresisEquation, e_s, entity::Jutul.Cells)
+    law = DissolvedCO2Equation(eq.flow_discretization, 0.0)
+    return Jutul.declare_pattern(model, law, e_s, entity)
+end
+
+"""
+    _residual_depletion(eq, state, model, c, dt) -> Real
+
+The term `s_depletion · dt · fac` of co2lab's hysteresis equation: the drop
+in `sGmax` from residual CO2 consumed by dissolution, `fac = (1 − res_water) /
+res_gas / (pv · ρ_CO2,ref · b_CO2)`, with `s_depletion` the dissolution
+transfer (rate-driven) or the dissolved-CO2 residual (instantaneous). Zero
+until dissolution is coupled in (roadmap Stage 5 item 4); kept as a separate
+function so that Stage 5 fills it in without reshaping the equation.
+"""
+_residual_depletion(eq::HysteresisEquation, state, model, c, dt) = 0.0
+
+"""
+Jutul hook: the hysteresis residual of cell `c`.
+
+Modifies: `v`.
+"""
+function Jutul.update_equation_in_entity!(v, c, state, state0, eq::HysteresisEquation,
+                                          model, dt, ldisc = nothing)
+    dep = _residual_depletion(eq, state, model, c, dt)
+    v[1] = state.sGmax[c] - max(state0.sGmax[c] - dep, state.sG[c])
+end
+
+# sGmax residual: a saturation, dimensionless already
+function Jutul.convergence_criterion(model::Jutul.SimulationModel, storage,
+                                     eq::HysteresisEquation, eq_s, r;
+                                     dt = 1.0, update_report = missing)
+    return (AbsMax = (errors = (maximum(abs, r),), names = ("sGmax",)),)
+end
+
 # ---------------- Black-oil hooks that assume BlackOilUnknown -----------------
 
 function JutulDarcy.handle_alternate_primary_variable_spec!(init, found, rmodel,
@@ -425,8 +489,10 @@ configuration decides the unknowns (see the top of `co2lab_fluid.jl`):
 
 - `rs_sat` and `transfer_rate` (1/s) turn rate-driven dissolution on. Both or
   neither must be given. Instantaneous dissolution is Stage 5 work and throws.
-- hysteresis follows co2lab: on when `fluid.res_gas > 0` — Stage 3 work,
-  throws for now.
+- hysteresis follows co2lab: on when `fluid.res_gas > 0`, making `sGmax` an
+  unknown of the reservoir with [`HysteresisEquation`](@ref). Hysteresis
+  together with dissolution throws until Stage 5 couples them (residual CO2
+  consumed by dissolution).
 - stacked columns (`ve_columns(...; below_holes = :stack)`, `domain`'s
   `:pillar_columns` above 1) need the transition flux of Stage 8: throws.
 
@@ -440,16 +506,18 @@ read.
 Returns a new `MultiModel` with submodels `:Reservoir`, one per well (named
 as the wells) and `:Facility`. The reservoir submodel has co2lab's VE relperm,
 `pcWG`, PVT and (unless `nothing`) pore-volume multiplier, the parameters
-`:sGmax`, `:ColumnHeight` and `:Rugosity`, and outputs `:sG`, `:sGmax`, `:PlumeHeights`,
-`:CapillaryPressure` (plus `:Rs`, `:DissolvedCO2` with dissolution) besides
-JutulDarcy's defaults. The wells get the same PVT.
+`:ColumnHeight` and `:Rugosity`, `:sGmax` (a parameter, or with hysteresis an
+unknown with the equation `:hysteresis`), and outputs `:sG`, `:sGmax`,
+`:PlumeHeights`, `:CapillaryPressure` (plus `:Rs`, `:DissolvedCO2` with
+dissolution) besides JutulDarcy's defaults. The wells get the same PVT.
 """
 function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve_fluid(),
                             rock_compressibility = (reference_pressure = 100e5,
                                                     compressibility = 1e-10),
                             rs_sat = nothing, transfer_rate = nothing)
-    fluid.res_gas > 0 && error("hysteresis (res_gas > 0: sGmax as an unknown) is " *
-                               "roadmap Stage 3; not implemented yet")
+    fluid.res_gas > 0 && !isnothing(rs_sat) &&
+        error("hysteresis with dissolution (residual CO2 consumed by dissolution) " *
+              "is roadmap Stage 5; not implemented yet")
     haskey(domain, :pillar_columns) && any(>(1), domain[:pillar_columns]) &&
         error("stacked columns connect through partial faces, which need the " *
               "transition flux of roadmap Stage 8; not implemented yet")
@@ -463,7 +531,7 @@ function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve
     model = _co2lab_multimodel(domain, wells, fluid.rho_ref, rs_sat, transfer_rate)
     rmodel = model[:Reservoir]
 
-    rmodel.parameters[:sGmax] = MaxGasSaturation(fluid.res_water)
+    _set_max_gas_saturation!(rmodel, fluid)
     push!(rmodel.output_variables, :sG, :sGmax)
     _set_ve_fluid!(rmodel, fluid)
     isnothing(rock_compressibility) ||
@@ -480,6 +548,28 @@ function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve
         S[:PhaseViscosities] = viscosity
     end
     return model
+end
+
+"""
+    _set_max_gas_saturation!(rmodel, fluid)
+
+`sGmax` for the reservoir model: a parameter without hysteresis; with
+hysteresis (`res_gas > 0`) an unknown, with co2lab's equation.
+
+Modifies: `rmodel.parameters` or `rmodel.primary_variables` and
+`rmodel.equations`. `fluid` is only read.
+"""
+function _set_max_gas_saturation!(rmodel, fluid::CO2LabVEFluid)
+    v = MaxGasSaturation(fluid.res_water)
+    if fluid.res_gas > 0
+        rmodel.primary_variables[:sGmax] = v
+        flow = rmodel.domain.discretizations.mass_flow
+        rmodel.equations[:hysteresis] = HysteresisEquation(flow, fluid.res_water,
+                                                           fluid.res_gas)
+    else
+        rmodel.parameters[:sGmax] = v
+    end
+    return rmodel
 end
 
 """
@@ -514,8 +604,9 @@ end
 
 Initial state for a model from [`setup_co2lab_model`](@ref). `pressure` is
 per reservoir cell (or a scalar); well nodes start at their first perforated
-cell's pressure, with no gas. `rs` is only used with dissolution on. `model`
-is only read.
+cell's pressure, with no gas. `rs` is only used with dissolution on. With
+hysteresis, `sGmax` starts at `sG` (as co2lab's examples). `model` is only
+read.
 
 Written per submodel: `setup_reservoir_state` copies the reservoir's unknowns
 to the wells (`JutulDarcy/src/state0.jl:297-300`), which does not hold when
@@ -531,6 +622,7 @@ function setup_co2lab_state(model; pressure, sG = 0.0, rs = 0.0)
     p = pressure isa Number ? fill(Float64(pressure), nc) : collect(Float64, pressure)
     rinit = Dict{Symbol, Any}(:Pressure => p, :sG => sG)
     has_dissolution(rmodel.system) && (rinit[:Rs] = rs)
+    haskey(rmodel.primary_variables, :sGmax) && (rinit[:sGmax] = sG)
     init = Dict{Symbol, Any}(:Reservoir => rinit)
 
     perforated_cells(wm) =
@@ -559,20 +651,24 @@ function setup_co2lab_state(model; pressure, sG = 0.0, rs = 0.0)
 end
 
 """
-    setup_co2lab_simulator(case; dissolved_co2_tolerance = 1e-6, kwarg...) -> (sim, cfg)
+    setup_co2lab_simulator(case; dissolved_co2_tolerance = 1e-6,
+                           hysteresis_tolerance = 1e-6, kwarg...) -> (sim, cfg)
 
-`setup_reservoir_simulator`, plus a tolerance for the dissolved-CO2
-equation (dimensionless, like CNV) when present. `case` is only read.
+`setup_reservoir_simulator`, plus tolerances for co2lab's extra equations
+when present: the dissolved-CO2 law (dimensionless, like CNV) and the
+hysteresis equation (a saturation; co2lab's default `nonlinearTolerance` is
+1e-6 on it). `case` is only read.
 
 Returns `(sim, cfg)`: a new `Simulator` and its `JutulConfig`, with
-`cfg[:tolerances][:Reservoir][:dissolved_co2]` set when the model has that
-equation.
+`cfg[:tolerances][:Reservoir][:dissolved_co2]` and `[:hysteresis]` set when the
+model has those equations.
 """
-function setup_co2lab_simulator(case; dissolved_co2_tolerance = 1e-6, kwarg...)
+function setup_co2lab_simulator(case; dissolved_co2_tolerance = 1e-6,
+                                hysteresis_tolerance = 1e-6, kwarg...)
     sim, cfg = setup_reservoir_simulator(case; kwarg...)
 
-    if haskey(case.model[:Reservoir].equations, :dissolved_co2)
-        cfg[:tolerances][:Reservoir][:dissolved_co2] = dissolved_co2_tolerance
-    end
+    eqs, tol = case.model[:Reservoir].equations, cfg[:tolerances][:Reservoir]
+    haskey(eqs, :dissolved_co2) && (tol[:dissolved_co2] = dissolved_co2_tolerance)
+    haskey(eqs, :hysteresis) && (tol[:hysteresis] = hysteresis_tolerance)
     return (sim, cfg)
 end

@@ -39,7 +39,7 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 |---|---|---|---|---|
 | 9 | `ColumnHeight` [ScalarVariable] | `ve_fluid.jl` | parameter `H` | `domain[:column_height]` (4) |
 | 9b | `Rugosity` [ScalarVariable] | `ve_fluid.jl` | parameter `dh`, caprock rugosity per column | `domain[:rugosity]` (4); zero if absent |
-| 10 | **`MaxGasSaturation`** [ScalarVariable] | `co2lab_fluid.jl` | parameter `sGmax`, running maximum of converged `sG` | `sG`; constant `res_water` from 8 |
+| 10 | **`MaxGasSaturation`** [ScalarVariable] | `co2lab_fluid.jl` | `sGmax` in `[0, 1 − res_water]`: without hysteresis a parameter, the running maximum of converged `sG`; with hysteresis (`res_gas > 0`) an unknown, governed by 22b | `sG`; constant `res_water` from 8 |
 | 11 | `GasSaturation` [ScalarVariable] | `co2lab_fluid.jl` | unknown `sG` | — |
 | 12 | `DissolvedGasRatio` [ScalarVariable] | `co2lab_fluid.jl` | unknown `rs` (dissolution on only) | — |
 | 13 | `PlumeHeights` [VectorVariables] | `ve_fluid.jl` | secondary: row 1 `h`, row 2 `h_max`; field `is_ve` (`nothing` = all VE; 0 in fine cells) | 11, 10, 9 |
@@ -52,6 +52,7 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 | 20 | `LinearPoreVolume` [ScalarVariable] | `rock_compressibility.jl` | pore volume `1 + c·(p − p_ref)` times the static pore volume — co2lab's rock compressibility, set on the model by `set_co2lab_rock_compressibility!` (or `setup_co2lab_model`'s `rock_compressibility`); exchangeable for JutulDarcy's `LinearlyCompressiblePoreVolume` | pressure, parameter `StaticFluidVolume` |
 | 21 | `DissolvedCO2Mass` [ScalarVariable] | `co2lab_fluid.jl` | dissolved CO2 mass per cell | 12, 15, saturations, 20 |
 | 22 | **`DissolvedCO2Equation`** [JutulEquation] | `co2lab_fluid.jl` | dissolved-CO2 conservation with transfer term | 21, fluxes |
+| 22b | **`HysteresisEquation`** [JutulEquation] | `co2lab_fluid.jl` | co2lab's `sGmax − max(sGmax0 − depletion, sG) = 0` per cell (hysteresis on); depletion zero until Stage 5 | 10, 11 |
 
 ## D. System and model types
 

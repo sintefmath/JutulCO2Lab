@@ -35,6 +35,44 @@ function _ve_case(d)
     return ve, cols, sides
 end
 
+# capfringe_si.mat (scripts/mrst_dump_capfringe_si.m): the sharp-interface half
+# of co2lab's capfringeFigures.m — relperm and pcWG over sG without and with
+# hysteresis, and the reconstructed profile of one state, on its single column.
+function _capfringe_si_vs_mrst(d)
+    mesh = ve_mesh_from_mrst(d["G3"])
+    cols, _ = ve_columns(mesh)
+    ve = ve_domain(mesh, cols; perm_x = fill(1e-13, 1000), poro = fill(0.3, 1000))
+    H, rw, rg = ve.geometry.H[1], d["srw"], d["src"]
+    fl = co2lab_ve_fluid(residual = (rw, rg), krmax = Tuple(vec(d["krmax"])),
+                         wat_rho_ref = d["rhoW"], co2_rho_ref = d["rhoG"])
+
+    # the model's plume heights, relperm and pcWG for (sG, sGmax)
+    function curves(s, smax)
+        hh = JutulCO2Lab._plume_heights.(s, max.(min.(smax, 1 - rw), s), H, rw, rg)
+        kr = JutulCO2Lab._sharp_interface_relperm.(first.(hh), last.(hh), H, fl.krw,
+                                                   fl.krg, 0.0)
+        pc = (d["rhoW"] - d["rhoG"]) * d["gravity"] .* first.(hh)
+        return first.(kr), last.(kr), pc
+    end
+
+    rep = OracleReport("capfringeFigures.m, sharp interface, vs MRST")
+    tol, tol_pc = Tolerance(1e-12, 1e-14), Tolerance(1e-12, 1e-9)
+    s = vec(d["s"])
+    cases = (("", s, ""), (" with hysteresis", vec(d["smax_hyst"]), "_hyst"))
+    for (label, smax, sfx) in cases
+        krw, krg, pc = curves(s, smax)
+        check!(rep, "krW" * label, krw, vec(d["krW" * sfx]); tol = tol)
+        check!(rep, "krG" * label, krg, vec(d["krG" * sfx]); tol = tol)
+        check!(rep, "pcWG" * label, pc, vec(d["pcWG" * sfx]); tol = tol_pc)
+    end
+
+    st = Dict(:Pressure => [d["pressure"]], :sG => [d["S"]], :sGmax => [d["Smax"]])
+    o = ve_reconstruct(st, ve, cols, fl)
+    check!(rep, "profile: sG", o.sG, vec(d["s3D"]); tol = Tolerance(0.0, 1e-12))
+    check!(rep, "profile: sGmax", o.sGmax, vec(d["smax3D"]); tol = Tolerance(0.0, 1e-12))
+    return rep
+end
+
 # mrst_ref_{rate,bhp,src}.mat (scripts/stage2_mrst_comparison.jl): co2lab's
 # sloping aquifer run by MRST on Julia's geometry, same report steps, tight
 # tolerances. With a source term instead of the well, Julia matches to solver
@@ -837,7 +875,7 @@ end
         n_on, n_off = 10, 10
         dt = fill(10.0day, n_on + n_off)
 
-        function run(; kw...)
+        function run(; fluid = fluid, kw...)
             model = setup_co2lab_model(domain; wells = [inj], fluid = fluid, kw...)
             state0 = setup_co2lab_state(model; pressure = p0)
 
@@ -858,9 +896,12 @@ end
         co2_mass(s) = sum(s[:TotalMasses][2, :])
 
         @testset "configuration errors" begin
-            # hysteresis: Stage 3; dissolution needs a rate; instantaneous: Stage 5
+            # hysteresis with dissolution, and instantaneous dissolution: Stage 5;
+            # dissolution needs a rate
             hyst = co2lab_ve_fluid(residual = (0.2, 0.2))
-            @test_throws ErrorException setup_co2lab_model(domain; fluid = hyst)
+            @test_throws ErrorException setup_co2lab_model(domain; fluid = hyst,
+                                                           rs_sat = 0.03,
+                                                           transfer_rate = 1e-6)
             @test_throws ErrorException setup_co2lab_model(domain; rs_sat = 0.03)
             @test_throws ErrorException setup_co2lab_model(domain; rs_sat = 0.03,
                                                            transfer_rate = Inf)
@@ -904,6 +945,30 @@ end
             @test S[:PlumeHeights].is_ve === nothing
             @test S[:RelativePermeabilities].is_ve === nothing
             @test S[:CapillaryPressure].is_ve === nothing
+        end
+
+        @testset "hysteresis (Stage 3): sGmax an unknown with co2lab's equation" begin
+            hfl = co2lab_ve_fluid(wat_rho_pvt = (4.3e-10, 100e5),
+                                  co2_rho_pvt = (4.3e-9, 100e5), residual = (0.2, 0.2))
+            model, states = run(fluid = hfl)
+            r = model[:Reservoir]
+            @test haskey(r.primary_variables, :sGmax) && !haskey(r.parameters, :sGmax)
+            @test r.equations[:hysteresis] isa HysteresisEquation
+            @test Jutul.matrix_layout(r.context) isa Jutul.BlockMajorLayout
+
+            # converged sGmax is the running maximum of converged sG
+            sG = reduce(hcat, [s[:sG] for s in states])
+            sGmax = reduce(hcat, [s[:sGmax] for s in states])
+            @test maximum(abs.(sGmax .- accumulate(max, sG, dims = 2))) < 1e-12
+
+            # after shut-in the plume moves on and leaves residual CO2 behind: a
+            # residual zone (h < h_max) holding res_gas · (h_max − h) / H of CO2
+            hh = states[end][:PlumeHeights]
+            zone = findall(i -> hh[2, i] - hh[1, i] > 0.1, axes(hh, 2))
+            @test !isempty(zone)
+            s_res = [0.8 * hh[1, i] / 20 + 0.2 * (hh[2, i] - hh[1, i]) / 20 for i in zone]
+            @test sG[zone, end] ≈ s_res
+            @test co2_mass(states[end]) ≈ injected rtol = 1e-3
         end
 
         @testset "sGmax update: running maximum, capped at 1 - res_water" begin
@@ -1049,6 +1114,17 @@ end
             @info "Skipping: $f not generated (scripts/mrst_dump_ve_reconstruction.m)"
         else
             _ve_reconstruction_vs_mrst(matread(f))
+        end
+    end
+
+    @testset "capfringeFigures.m, sharp interface, vs MRST (Stage 3 gate)" begin
+        f = joinpath(refdir, "capfringe_si.mat")
+        if !isfile(f)
+            @info "Skipping: $f not generated (scripts/mrst_dump_capfringe_si.m)"
+        else
+            rep = _capfringe_si_vs_mrst(matread(f))
+            passed(rep) || display(rep)
+            @test passed(rep)
         end
     end
 

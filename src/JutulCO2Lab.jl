@@ -51,6 +51,7 @@ include("co2lab_fluid.jl")
 export co2lab_system, has_dissolution
 export setup_co2lab_model, setup_co2lab_state, setup_co2lab_simulator
 export LinearShrinkage, ConstantViscosities, MaxGasSaturation, DissolvedCO2Equation
+export HysteresisEquation
 
 include("vewells.jl")
 export ve_well_index, setup_ve_well, co2_injector_control

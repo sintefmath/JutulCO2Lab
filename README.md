@@ -10,7 +10,8 @@ columns, geometry, rock, caprock datum, boundary sides — all derived from the
 relperm, `pcWG`, PVT, VE wells, VE boundary conditions and reconstruction of
 3D states, running end to end on co2lab's sloping aquifer, plus the
 structures Stage 8 (hybrid) extends — stackable columns cut by connectivity
-and per-cell VE/fine branch points.
+and per-cell VE/fine branch points; and Stage 3: co2lab's hysteresis
+(residual trapping).
 A readable walkthrough is `../scripts/example_sloping_aquifer.jl`. The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
@@ -50,10 +51,10 @@ JutulDarcy is patched except one Jutul bug fix (see Environment).
 | Hook | What is replaced or added | File |
 |---|---|---|
 | system type | `StandardBlackOilSystem` re-tagged with formulation `:co2lab` (`CO2LabSystem`); brine = liquid, CO2 = vapour | `co2lab_fluid.jl` |
-| `select_primary_variables!` | unknowns `p`, `sG` (and `rs` with dissolution) | `co2lab_fluid.jl` |
+| `select_primary_variables!` | unknowns `p`, `sG` (and `rs` with dissolution; `sGmax` with hysteresis, added by `setup_co2lab_model`) | `co2lab_fluid.jl` |
 | `select_secondary_variables!` and `@jutul_secondary` | saturations, `TotalMasses`, dissolved CO2; plume heights, sharp-interface relperm, `pcWG`, linear PVT, pore volume | `co2lab_fluid.jl`, `ve_fluid.jl`, `rock_compressibility.jl` |
-| parameters (`default_parameter_values`) | `ColumnHeight`, `Rugosity` from the domain; `sGmax`, updated after each converged step (`update_after_step!`) | `ve_fluid.jl`, `co2lab_fluid.jl` |
-| extra equation | `DissolvedCO2Equation` (rate-driven dissolution), with its own convergence criterion | `co2lab_fluid.jl` |
+| parameters (`default_parameter_values`) | `ColumnHeight`, `Rugosity` from the domain; without hysteresis `sGmax`, updated after each converged step (`update_after_step!`) | `ve_fluid.jl`, `co2lab_fluid.jl` |
+| extra equations | `DissolvedCO2Equation` (rate-driven dissolution) and `HysteresisEquation` (`sGmax` with hysteresis), each with its own convergence criterion | `co2lab_fluid.jl` |
 | `apply_forces_to_equation!` | `VEBoundaryCondition` passed as JutulDarcy's `bc` force | `vebc.jl` |
 | flux | none: JutulDarcy's stock two-point flux with the caprock `:gdz` is co2lab's VE flux (roadmap Stage 0) | — |
 | wells | none: JutulDarcy's wells with co2lab's well index and a CO2 wellbore column (`co2_injector_control`) | `vewells.jl` |
