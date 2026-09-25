@@ -15,6 +15,63 @@ function _ve_case(d)
     return ve, cols, sides
 end
 
+# mrst_ref_{rate,bhp}.mat (scripts/stage2_well_check.jl): co2lab's sloping
+# aquifer run by MRST on Julia's geometry, same report steps, tight
+# tolerances. Julia's run must agree to well below the measured differences'
+# order (BHP 1e-5, rate 3e-4, pressure 5e-6, sG 1.3e-5; roadmap item 7).
+function _ve_well_vs_mrst_runs(d, ref_rate, ref_bhp)
+    ve, cols, sides = _ve_case(d)
+    g, rho_w = d["gravity"], d["rhow"]
+    fluid = co2lab_ve_fluid(krmax = (1.0, 1.0), co2_rho_ref = d["rhoc"],
+                            wat_rho_ref = rho_w, co2_mu_ref = d["muco2"],
+                            wat_mu_ref = d["muw"], pvMult_p_ref = d["p_ref"],
+                            pvMult_fac = d["cf_rock"])
+    bc = ve_boundary_conditions(ve, sides, ve_select_sides(sides, cols;
+                                directions = (:right,)); pressure = z -> rho_w * g * z)
+    p0 = ve_hydrostatic_pressure(ve.geometry; rho_w = rho_w, g = g)
+    col, dt = Int(d["well"]["cells"]), vec(d["dT"])
+    on = vec(d["step_control"]) .== 1
+    function run(target)
+        w = setup_ve_well(ve, col; name = :inj, radius = d["well"]["r"])
+        model = setup_co2lab_model(ve.domain; wells = [w], fluid = fluid)
+        forces(c) = setup_reservoir_forces(model; bc = bc, control = Dict(:inj => c))
+        f_on = forces(co2_injector_control(target, fluid))
+        f_off = forces(DisabledControl())
+        case = JutulCase(model, dt, [i ? f_on : f_off for i in on];
+                         state0 = setup_co2lab_state(model; pressure = p0),
+                         parameters = setup_parameters(model))
+        sim, cfg = setup_co2lab_simulator(case; info_level = -1, timesteps = :none,
+                                          initial_dt = maximum(dt), max_timestep = Inf,
+                                          tol_cnv = 1e-9, tol_mb = 1e-12,
+                                          max_nonlinear_iterations = 50)
+        res = simulate_reservoir(case; simulator = sim, config = cfg)
+        @test all(length(r[:ministeps]) == 1 for r in res.result.reports)
+        return res
+    end
+    rep = OracleReport("well model: Julia vs MRST runs, sloping aquifer")
+    field(res, k) = reduce(hcat, [s[k] for s in res.states])
+    for (name, ref, target) in
+            (("rate", ref_rate, TotalRateTarget(d["injection_rate"])),
+             ("bhp", ref_bhp, BottomHolePressureTarget(p0[col] + 5e5)))
+        res = run(target)
+        check!(rep, "$name: pressure", field(res, :Pressure), ref["pressure"];
+               tol = Tolerance(2e-5, 0.0))
+        check!(rep, "$name: sG", field(res, :sG), ref["sG"]; tol = Tolerance(0.0, 1e-4))
+        if name == "rate"
+            check!(rep, "rate: injector BHP", res.wells[:inj][:bhp][on],
+                   vec(ref["bhp"])[on]; tol = Tolerance(1e-4, 0.0))
+        else
+            q = abs.(res.wells[:inj][:grat][on])
+            check!(rep, "bhp: injection rate", q, vec(ref["qGs"])[on];
+                   tol = Tolerance(1e-3, 0.0))
+            check!(rep, "bhp: cumulative injection", sum(q .* dt[on]),
+                   sum(vec(ref["qGs"])[on] .* dt[on]); tol = Tolerance(1e-4, 0.0))
+        end
+    end
+    passed(rep) || display(rep)
+    @test passed(rep)
+end
+
 # ve_reconstruction.mat: co2lab's VEstates23D on sampled states, three fluid
 # cases; and, per column, reconstructed CO2 volume = VE CO2 volume.
 function _ve_reconstruction_vs_mrst(d)
@@ -703,6 +760,16 @@ end
             @info "Skipping: $f not generated (scripts/mrst_dump_sloping_aquifer.m)"
         else
             _ve_bc_runs(matread(f))
+        end
+    end
+
+    @testset "well model vs MRST runs (Stage 2 item 7)" begin
+        fs = [joinpath(refdir, f) for f in ("sloping_aquifer.mat", "mrst_ref_rate.mat",
+                                            "mrst_ref_bhp.mat")]
+        if !all(isfile, fs)
+            @info "Skipping: MRST runs not generated (scripts/stage2_well_check.jl)"
+        else
+            _ve_well_vs_mrst_runs(matread.(fs)...)
         end
     end
 
