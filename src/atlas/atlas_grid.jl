@@ -297,3 +297,19 @@ function _interp2(xs, ys, Z, x, y)
     ty = (y - ys[j]) / (ys[j+1] - ys[j])
     return a + b * tx + c * ty + d * tx * ty
 end
+
+# An Atlas map as a surface for ve_contour_lines: one node per value (z the
+# value), one quadrilateral per four neighbouring values
+function _atlas_map_surface(map)
+    X, Y = _map_positions(map.meta)
+    nx, ny = size(map.data)
+    x = [X[i] for i in 1:nx, j in 1:ny] |> vec
+    y = [Y[j] for i in 1:nx, j in 1:ny] |> vec
+    L = LinearIndices((nx, ny))
+    polygons = [[L[i, j], L[i+1, j], L[i+1, j+1], L[i, j+1]]
+                for i in 1:nx-1, j in 1:ny-1] |> vec
+    xc = [sum(x[p]) / 4 for p in polygons]
+    yc = [sum(y[p]) / 4 for p in polygons]
+    return (x = x, y = y, z = vec(map.data), polygons = polygons, xc = xc, yc = yc,
+            outline = Tuple{Int, Int}[])
+end

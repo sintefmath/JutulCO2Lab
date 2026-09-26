@@ -226,3 +226,32 @@ const _ATLAS_AVERAGE_ROCK = Dict(
     "sto" => (500, 0.15), "nordmela" => (1, 0.15), "tubaen" => (500, 0.15),
     "tilje" => (140, 0.21, 0.30), "are" => (140, 0.21, 0.30),
     "garn" => (580, 0.27, 0.25), "ile" => (580, 0.27, 0.25))
+
+# ------------------------------ Coastline, wells ------------------------------
+
+"""
+    atlas_coastline() -> Vector{Matrix{Float64}}
+
+The coastline of Norway shipped with the North Sea data set (`norway.mat`,
+from the Norwegian Mapping Authority), for orientation on Atlas maps: one
+`n × 2` matrix of `(x, y)` per polyline. As co2lab's `showCO2atlas`, 680 km are
+added to x to bring it roughly into the Atlas's coordinates; the position is
+approximate (co2lab: "only provided for scale and rough positioning").
+Returns new matrices.
+"""
+function atlas_coastline()
+    lines = matread(joinpath(atlas_data_directory(), "CO2Atlas", "norway.mat"))["norway"]
+    return [hcat(l[:, 1] .+ 6.8e5, l[:, 2]) for l in vec(lines)]
+end
+
+"""
+    atlas_wells() -> NamedTuple
+
+Positions of the wells on the Norwegian continental shelf shipped with the
+North Sea data set (`welldata.mat`, from the NPD fact pages). Returns
+`(x, y)`, new vectors.
+"""
+function atlas_wells()
+    w = matread(joinpath(atlas_data_directory(), "CO2Atlas", "welldata.mat"))["welldata"]
+    return (x = w[:, 2], y = w[:, 1])
+end

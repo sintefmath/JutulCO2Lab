@@ -46,22 +46,42 @@ function atlas_ve_domain(name::AbstractString; coarsening::Integer = 1,
                          layers::Integer = 1, min_thickness::Real = 1e-3,
                          perm = nothing, poro = nothing,
                          co2lab_compatible::Bool = false)
-    s = atlas_grid_section(name; coarsening, nz = layers, min_thickness,
-                           co2lab_compatible)
-    grid, petro = s.grid, s.petro
+    m = atlas_mesh(name; coarsening, layers, min_thickness, co2lab_compatible)
+    petro = m.petro
     isnothing(perm) || (petro = (; petro..., perm = Float64(perm)))
     isnothing(poro) || (petro = (; petro..., poro = Float64(poro)))
     (isnan(petro.perm) || isnan(petro.poro)) &&
         throw(ArgumentError("the Atlas gives no average permeability or porosity " *
                             "for $name: pass `perm` and `poro`"))
 
+    rock = _atlas_cell_rock(m.grid, m.mesh, petro)
+    ve = ve_domain(m.mesh, m.columns; rock...)
+    return (mesh = m.mesh, columns = m.columns, ve = ve, grid = m.grid, petro = petro)
+end
+
+"""
+    atlas_mesh(name; coarsening = 1, layers = 1, min_thickness = 1e-3,
+               co2lab_compatible = false) -> NamedTuple
+
+Steps 1–3 of [`atlas_ve_domain`](@ref) without the rock: the geometry of
+Atlas formation `name` — also of formations without Atlas rock values (for
+maps, trap analysis). The arguments are as for [`atlas_ve_domain`](@ref).
+
+Returns the NamedTuple `(mesh, columns, grid, petro)`, all new: the 3D
+`UnstructuredMesh` of the largest connected piece, its `VEColumns`, the grid
+section with `ACTNUM` restricted to the mesh's cells, and the Atlas's average
+rock (possibly `NaN`).
+"""
+function atlas_mesh(name::AbstractString; coarsening::Integer = 1,
+                    layers::Integer = 1, min_thickness::Real = 1e-3,
+                    co2lab_compatible::Bool = false)
+    s = atlas_grid_section(name; coarsening, nz = layers, min_thickness,
+                           co2lab_compatible)
+    grid = s.grid
     grid["ACTNUM"] = _largest_piece(grid)
     mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
     columns, _ = ve_columns(mesh)
-
-    rock = _atlas_cell_rock(grid, mesh, petro)
-    ve = ve_domain(mesh, columns; rock...)
-    return (mesh = mesh, columns = columns, ve = ve, grid = grid, petro = petro)
+    return (mesh = mesh, columns = columns, grid = grid, petro = s.petro)
 end
 
 # ACTNUM (new Array{Bool, 3}) keeping only the largest connected piece of the

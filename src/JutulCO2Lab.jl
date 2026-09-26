@@ -66,14 +66,21 @@ export ve_boundary_mass_fluxes
 include("ve/vereconstruct.jl")
 export ve_reconstruct
 
+include("ve/ve_top_surface.jl")
+export ve_top_surface, ve_contour_lines
+
 include("atlas/atlas.jl")
 export atlas_data_directory, atlas_formation_names, read_aai_grid, atlas_map_files
-export read_atlas_maps, atlas_average_rock
+export read_atlas_maps, atlas_average_rock, atlas_coastline, atlas_wells
 
 include("atlas/atlas_grid.jl")
 export atlas_grid_section, atlas_grid_formations
 
 include("atlas/atlas_domain.jl")
-export atlas_ve_domain
+export atlas_ve_domain, atlas_mesh
+
+include("plotting.jl")
+export plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!
+export plot_atlas_context!, plot_ve_outline!, show_figure
 
 end # module

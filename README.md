@@ -16,7 +16,8 @@ gated against co2lab to solver precision.
 Readable walkthroughs: `examples/sloping_aquifer.jl` (Stage 2),
 `examples/residual_trapping.jl` (Stage 3, residual trapping) and
 `examples/dissolution.jl` (Stage 4, rate-driven and instantaneous
-dissolution). The plan
+dissolution), and `examples/atlas/show_co2_atlas.jl` (Stage 5, the CO2
+Storage Atlas with plots). The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
@@ -175,14 +176,24 @@ src/ve/              the VE simulator
                      selection, exited mass
   vereconstruct.jl   3D states from VE states: saturation from plume heights,
                      hydrostatic pressure
+  ve_top_surface.jl  the caprock in map view (column polygons), contour lines
 
 src/atlas/           the CO2 Storage Atlas (Stage 5)
   atlas.jl           data location, map reader, formation names, average rock
   atlas_grid.jl      top and thickness maps to a corner-point grid section, rock maps
   atlas_domain.jl    a formation as a VE domain: mesh, largest piece, columns, rock
 
-examples/            readable walkthroughs (run from the project root with
-                     scripts/julia --project=JutulCO2Lab JutulCO2Lab/examples/...)
+src/plotting.jl      plotting functions (declared and documented; implemented in
+                     the Makie extension)
+ext/JutulCO2LabMakieExt/  Makie extension: VE map views, Atlas maps, coastline;
+                     loaded with GLMakie or CairoMakie
+
+examples/            readable walkthroughs, with their own environment
+                     (examples/Project.toml: JutulCO2Lab, the Jutul fork,
+                     GLMakie, CairoMakie), run from the project root with
+                     scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/...
+  atlas/             CO2 Storage Atlas scripts; JUTULCO2LAB_BACKEND=CairoMakie
+                     writes figures to ./figures instead of opening windows
 test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, wells,
                      boundary conditions and reconstruction (vs MRST), Atlas,
                      toolchain smoke test

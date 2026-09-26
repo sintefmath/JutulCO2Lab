@@ -1457,6 +1457,44 @@ end
         end
     end
 
+    @testset "top surface and contour lines (Stage 5 item 5)" begin
+        # sloping aquifer, 5 layers: one quadrilateral per column
+        f = joinpath(refdir, "sloping_aquifer.mat")
+        if isfile(f)
+            ve, cols, _ = _ve_case(matread(f))
+            m = ve_mesh_from_mrst(matread(f)["G3"])
+            s = ve_top_surface(m, cols)
+            @test length(s.polygons) == number_of_columns(cols)
+            @test all(p -> length(p) == 4, s.polygons)
+            # a 100 x 1 strip: outline = 2 long sides of 100 edges + 2 ends
+            @test length(s.outline) == 202
+
+            # a field linear in x is contoured exactly at x = level
+            xa, xb = extrema(s.x)
+            levels = [xa + 0.3017 * (xb - xa), xa + 0.7123 * (xb - xa)]
+            lines = ve_contour_lines(s, s.x, levels)
+            @test all(!isempty, lines)
+            @test all(abs(seg[1] - levels[1]) < 1e-8 * xb &&
+                      abs(seg[3] - levels[1]) < 1e-8 * xb for seg in lines[1])
+            # per-column values; NaN columns are skipped
+            v = collect(1.0:number_of_columns(cols)); v[1:10] .= NaN
+            @test !isempty(only(ve_contour_lines(s, v, [50.5])))
+            @test_throws ArgumentError ve_contour_lines(s, [1.0, 2.0], [1.0])
+        end
+
+        # an Atlas map as a lattice surface, NaN outside the formation
+        if isdir(atlas_data_directory())
+            mp = only(filter(m -> m.variant == :top,
+                             read_atlas_maps(["Johansenfm"]; coarsening = 4)))
+            ms = JutulCO2Lab._atlas_map_surface(mp)
+            @test length(ms.polygons) == prod(size(mp.data) .- 1)
+            seg = only(ve_contour_lines(ms, ms.z, [2500.0]))
+            x0, x1 = extrema(ms.x)
+            @test !isempty(seg) && all(x0 <= t[1] <= x1 for t in seg)
+            @test length(atlas_coastline()) > 100 && length(atlas_wells().x) > 1000
+        end
+    end
+
     @testset "VE fluid vs MRST co2lab (Stage 2 items 1, 3)" begin
         f = joinpath(refdir, "ve_fluid.mat")
         if !isfile(f)

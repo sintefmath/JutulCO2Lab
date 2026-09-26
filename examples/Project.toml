@@ -1,0 +1,7 @@
+[deps]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+Jutul = "2b460a1a-8a2b-45b2-b125-b5c536396eb9"
+JutulCO2Lab = "83503c3c-39c3-43f3-b5b8-359b1f6bdcbd"
+JutulDarcy = "82210473-ab04-4dce-b31b-11573c4f8e0a"
+MAT = "23992714-dd62-5051-b70f-ba57cb901cac"

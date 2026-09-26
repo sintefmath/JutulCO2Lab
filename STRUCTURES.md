@@ -93,6 +93,9 @@ Constants: `_WELL_CONSTANT_RATIO`, `_WELL_CONSTANT_VALUE` (MRST's
 | 40 | *Atlas average rock* (NamedTuple) | `atlas.jl` | `(perm, poro, ntg)`: the Atlas reports' averages, perm in m², NaN where none, `ntg` `nothing` unless given | formation name (`atlas_average_rock`) |
 | 41 | *Atlas grid section* (NamedTuple) | `atlas_grid.jl` | `(grid, petro)`: `grid` a GeoEnergyIO grid section `Dict{String, Any}` (`cartDims`, `COORD`, `ZCORN` with 0 at undefined pillars, `ACTNUM` `Array{Bool, 3}`, and `PORO`, `PERMX/Y/Z`, `NTG` as `Array{Float64, 3}` where the Atlas has rock maps); `petro` 40 with map means where there are maps | 39, 40 (`atlas_grid_section`) |
 | 42 | *Atlas VE domain* (NamedTuple) | `atlas_domain.jl` | `(mesh, columns, ve, grid, petro)`: the 3D `UnstructuredMesh` of the largest connected piece, its `VEColumns` (1), `ve_domain`'s result, the grid section (41) with `ACTNUM` restricted to the mesh, the average rock (40, with `perm`/`poro` overrides) | 41, 1, `ve_domain` (`atlas_ve_domain`) |
+| 43 | *Atlas mesh* (NamedTuple) | `atlas_domain.jl` | `(mesh, columns, grid, petro)`: 42 without the VE domain and rock (also for formations without Atlas rock) | 41, 1 (`atlas_mesh`) |
+| 44 | *Top surface* (NamedTuple) | `ve_top_surface.jl` (`src/ve`) | `(x, y, z, polygons, xc, yc, outline)`: node coordinates and caprock depths, each column's top-face node indices, polygon centres, boundary edges (node pairs) | mesh, 1 (`ve_top_surface`); an Atlas map as a lattice (`_atlas_map_surface`) |
+| 45 | *Contour lines* (Vector) | `ve_top_surface.jl` (`src/ve`) | per level, a vector of segments `(x1, y1, x2, y2)` | 44 (`ve_contour_lines`) |
 
 Constants: `_ATLAS_DATASETS` (the three data-set directories),
 `_ATLAS_AVERAGE_ROCK` (co2lab's `getAvgRock` table), `_JURASSIC_MID`,
