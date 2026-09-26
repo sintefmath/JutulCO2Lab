@@ -106,7 +106,7 @@ function _atlas_vs_mrst(d)
     for (key, maps) in d["maps"]
         name, c = split(key, "_c")
         ours = read_atlas_maps([name, "Jurassic", "Jurassicmid"];
-                               coarsening = parse(Int, c), co2lab_rows = true)
+                               coarsening = parse(Int, c), co2lab_compatible = true)
         for e in maps
             o = only(filter(x -> x.name == e["name"] &&
                                  string(x.variant) == e["variant"], ours))
@@ -127,6 +127,46 @@ function _atlas_vs_mrst(d)
         name in with_rock_maps && continue
         r = atlas_average_rock(name)
         check!(rep, "$name: average perm, poro", [r.perm, r.poro], vec(v); tol = exact)
+    end
+    return rep
+end
+
+# atlas_grids.mat (scripts/mrst_dump_atlas_grids.m): getAtlasGrid's decks and
+# petroinfo for ten formation/coarsening/refining/layer cases. Julia builds
+# them with co2lab_compatible = true; co2lab's Inf at undefined pillars is 0
+# here (GeoEnergyIO's convention).
+function _atlas_grids_vs_mrst(d)
+    rep = OracleReport("Atlas grid sections vs co2lab")
+    exact = Tolerance(0.0, 0.0)
+    same(a, b) = isequal(a, b) ? 0 : 1
+    for e in d["cases"]
+        c, r, nz = Int(e["coarsening"]), Int(e["refining"]), Int(e["nz"])
+        o = atlas_grid_section(e["name"]; coarsening = c, refining = r, nz,
+                               co2lab_compatible = true)
+        g = o.grid
+        label = "$(e["name"]) c$c r$r nz$nz"
+        zero_inf(x) = (v = vec(x); ifelse.(isinf.(v), 0.0, v))
+
+        check!(rep, "$label: cartDims", collect(g["cartDims"]), vec(e["cartDims"]);
+               tol = exact)
+        for k in ("COORD", "ZCORN")
+            check!(rep, "$label: $k", same(g[k], zero_inf(e[k])), 0; tol = exact)
+        end
+        check!(rep, "$label: ACTNUM", same(vec(g["ACTNUM"]), vec(e["ACTNUM"] .> 0)), 0;
+               tol = exact)
+        # co2lab's rock arrays have one layer (co2lab-issues.org)
+        for k in ("PORO", "PERMX", "NTG")
+            haskey(e, k) || continue
+            check!(rep, "$label: $k", same(vec(g[k][:, :, 1]), vec(e[k])), 0;
+                   tol = exact)
+        end
+        # petroinfo [avgperm, avgporo, avgntg], avgntg NaN where co2lab has none
+        p, q = o.petro, vec(e["petro"])
+        ours = [p.perm, p.poro, something(p.ntg, NaN)]
+        has = .!isnan.(q)
+        check!(rep, "$label: petroinfo defined", same(.!isnan.(ours), has), 0;
+               tol = exact)
+        check!(rep, "$label: petroinfo", ours[has], q[has]; tol = Tolerance(1e-12, 0.0))
     end
     return rep
 end
@@ -1241,6 +1281,47 @@ end
         @test isnan(atlas_average_rock("Rorfm").perm)
         @test length(atlas_formation_names()) == 31
         @test_throws ArgumentError atlas_formation_names(:arctic)
+    end
+
+    @testset "CO2 Storage Atlas grid sections (Stage 5 step 2)" begin
+        f = joinpath(refdir, "atlas_grids.mat")
+        if !isfile(f) || !isdir(atlas_data_directory())
+            @info "Skipping: Atlas data or $f (scripts/mrst_dump_atlas_grids.m) missing"
+        else
+            rep = _atlas_grids_vs_mrst(matread(f))
+            passed(rep) || display(rep)
+            @test passed(rep)
+        end
+
+        # bilinear interpolation reproduces a bilinear function
+        xs, ys = [0.0, 1.0, 3.0], [10.0, 12.0]
+        fb(x, y) = 1 + 2x - y + 0.5x * y
+        Z = [fb(x, y) for y in ys, x in xs]
+        @test JutulCO2Lab._interp2(xs, ys, Z, 2.2, 11.3) ≈ fb(2.2, 11.3)
+        @test isnan(JutulCO2Lab._interp2(xs, ys, Z, 3.1, 11.0))
+        @test JutulCO2Lab._linspace(0.0, 1.0, 5) == [0.0, 0.25, 0.5, 0.75, 1.0]
+
+        if isdir(atlas_data_directory())
+            a = atlas_grid_section("Johansenfm"; coarsening = 3, co2lab_compatible = true)
+            b = atlas_grid_section("Johansenfm"; coarsening = 3)
+            # values at their cell centres: half the file's cell size (200 m)
+            ca, cb = reshape(a.grid["COORD"], 6, :), reshape(b.grid["COORD"], 6, :)
+            @test cb[1:2, 1] ≈ ca[1:2, 1] .+ 100.0
+            # every active cell has four defined pillars
+            nx, ny, _ = b.grid["cartDims"]
+            ztop = reshape(cb[3, :], nx + 1, ny + 1)
+            @test all(b.grid["ACTNUM"][i, j, 1] <= all(ztop[i:i+1, j:j+1] .> 0)
+                      for i in 1:nx, j in 1:ny)
+            m = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(b.grid)
+            @test number_of_cells(m) == count(b.grid["ACTNUM"])
+
+            # Jurassic formations use the Jurassic top; rock maps on all layers
+            @test count(atlas_grid_section("Huginfmwest"; coarsening = 4).grid["ACTNUM"]) > 0
+            s = atlas_grid_section("Stofm"; coarsening = 4, nz = 2).grid
+            @test size(s["PORO"]) == s["cartDims"]
+            @test isequal(s["PORO"][:, :, 1], s["PORO"][:, :, 2])
+            @test_throws ArgumentError atlas_grid_section("Paleocene")
+        end
     end
 
     @testset "VE fluid vs MRST co2lab (Stage 2 items 1, 3)" begin

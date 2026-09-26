@@ -141,7 +141,7 @@ _is_atlas_map(f) = !(lowercase(f) in ("readme.txt", "readme")) &&
                    !(length(f) >= 4 && lowercase(f[end-3:end]) in (".mat", ".prj"))
 
 """
-    read_atlas_maps(names = nothing; coarsening = 1, co2lab_rows = false)
+    read_atlas_maps(names = nothing; coarsening = 1, co2lab_compatible = false)
         -> Vector{NamedTuple}
 
 The Atlas maps of the formations `names` (all maps for `nothing`), as
@@ -150,25 +150,41 @@ with any negative value are negated (depth positive down); every
 `coarsening`-th value is kept in each direction, from the first, and the cell
 size multiplied accordingly. Names compare case-insensitively.
 
+Each value is placed where the file puts it: at the centre of its cell, so
+`data[1, 1]` lies at `(xllcorner, yllcorner)` plus half the file's cell size.
+`co2lab_compatible = true` places the maps as co2lab does instead, for
+comparisons: read with co2lab's row shift (`co2lab_rows`), and `data[1, 1]`
+at the corner `(xllcorner, yllcorner)` itself (`co2lab-issues.org`).
+
 Returns a new vector of `(name, variant, meta, data)`, in the order of
-[`atlas_map_files`](@ref); `meta` is the header's with `cellsize` scaled and
-`dims = size(data)` added.
+[`atlas_map_files`](@ref); `meta` is the header's with `cellsize` scaled
+(the spacing of the values) and `dims = size(data)` and `x0`, `y0` (the
+position of `data[1, 1]`) added.
 """
 function read_atlas_maps(names = nothing; coarsening::Integer = 1,
-                         co2lab_rows::Bool = false)
+                         co2lab_compatible::Bool = false)
     wanted(n) = isnothing(names) || any(m -> lowercase(m) == lowercase(n), names)
     out = []
     for f in atlas_map_files()
         wanted(f.name) || continue
-        g = read_aai_grid(f.path; co2lab_rows)
+        g = read_aai_grid(f.path; co2lab_rows = co2lab_compatible)
         # top maps with negative values are elevations: make them depths
         negative = f.variant == :top && any(<(0), filter(!isnan, g.data))
         data = negative ? -g.data : g.data
-        data = data[1:coarsening:end, 1:coarsening:end]
-        meta = (; g.meta..., cellsize = g.meta.cellsize * coarsening, dims = size(data))
-        push!(out, (name = f.name, variant = f.variant, meta = meta, data = data))
+        push!(out, (name = f.name, variant = f.variant,
+                    _coarsen_map(g.meta, data, coarsening, co2lab_compatible)...))
     end
     return out
+end
+
+# (meta, data) of a map read by read_aai_grid, coarsened, with the positions
+# x0, y0 of its first value (see read_atlas_maps)
+function _coarsen_map(meta, data, coarsening, co2lab_compatible)
+    data = data[1:coarsening:end, 1:coarsening:end]
+    shift = co2lab_compatible ? 0.0 : meta.cellsize / 2
+    meta = (; meta..., cellsize = meta.cellsize * coarsening, dims = size(data),
+            x0 = meta.xllcorner + shift, y0 = meta.yllcorner + shift)
+    return (meta = meta, data = data)
 end
 
 # ------------------------------- Average rock ---------------------------------

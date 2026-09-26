@@ -86,11 +86,14 @@ Constants: `_WELL_CONSTANT_RATIO`, `_WELL_CONSTANT_VALUE` (MRST's
 |---|---|---|---|---|
 | 37 | *ESRI ASCII grid* (NamedTuple) | `atlas.jl` | `(meta, data)`: header `(ncols, nrows, xllcorner, yllcorner, cellsize, nodata)`; `data` ncols × nrows, x then y from the south, NaN for missing/zero | an Atlas file (`read_aai_grid`; `co2lab_rows` reproduces co2lab's one-row shift) |
 | 38 | *Atlas map file* (NamedTuple) | `atlas.jl` | `(name, variant, path)`: co2lab's naming (`Huginfm_east_thickness` → `Huginfmeast`, `:thickness` or `:top`) | the data directory (`atlas_map_files`) |
-| 39 | *Atlas map* (NamedTuple) | `atlas.jl` | `(name, variant, meta, data)`: 37 with tops as depths, coarsened; `meta` adds `dims` | 38, 37 (`read_atlas_maps`) |
+| 39 | *Atlas map* (NamedTuple) | `atlas.jl` | `(name, variant, meta, data)`: 37 with tops as depths, coarsened (and refined, `atlas_grid.jl`); `meta` adds `dims` and `x0`, `y0`, the position of `data[1, 1]` (its cell centre, or co2lab's corner with `co2lab_compatible`); `cellsize` is the spacing of the values | 38, 37 (`read_atlas_maps`) |
 | 40 | *Atlas average rock* (NamedTuple) | `atlas.jl` | `(perm, poro, ntg)`: the Atlas reports' averages, perm in m², NaN where none, `ntg` `nothing` unless given | formation name (`atlas_average_rock`) |
+| 41 | *Atlas grid section* (NamedTuple) | `atlas_grid.jl` | `(grid, petro)`: `grid` a GeoEnergyIO grid section `Dict{String, Any}` (`cartDims`, `COORD`, `ZCORN` with 0 at undefined pillars, `ACTNUM` `Array{Bool, 3}`, and `PORO`, `PERMX/Y/Z`, `NTG` as `Array{Float64, 3}` where the Atlas has rock maps); `petro` 40 with map means where there are maps | 39, 40 (`atlas_grid_section`) |
 
 Constants: `_ATLAS_DATASETS` (the three data-set directories),
-`_ATLAS_AVERAGE_ROCK` (co2lab's `getAvgRock` table).
+`_ATLAS_AVERAGE_ROCK` (co2lab's `getAvgRock` table), `_JURASSIC_MID`,
+`_JURASSIC_TOP` (formations taking the `Jurassicmid` and `Jurassic` top maps,
+`atlas_grid.jl`).
 
 ## F. MRST comparison harness (`JutulCO2Lab.Oracle`), independent of A–E
 

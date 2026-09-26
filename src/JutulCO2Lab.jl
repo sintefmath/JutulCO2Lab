@@ -70,4 +70,7 @@ include("atlas.jl")
 export atlas_data_directory, atlas_formation_names, read_aai_grid, atlas_map_files
 export read_atlas_maps, atlas_average_rock
 
+include("atlas_grid.jl")
+export atlas_grid_section
+
 end # module
