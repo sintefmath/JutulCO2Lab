@@ -100,7 +100,8 @@ Constants: `_WELL_CONSTANT_RATIO`, `_WELL_CONSTANT_VALUE` (MRST's
 Constants: `_ATLAS_DATASETS` (the three data-set directories),
 `_ATLAS_AVERAGE_ROCK` (co2lab's `getAvgRock` table), `_JURASSIC_MID`,
 `_JURASSIC_TOP` (formations taking the `Jurassicmid` and `Jurassic` top maps,
-`atlas_grid.jl`).
+`atlas_grid.jl`), `_UTM_A`, `_UTM_F`, `_UTM_K0` (GRS80 semi-major axis and
+flattening, UTM scale factor; `projection.jl`).
 
 ## F. MRST comparison harness (`JutulCO2Lab.Oracle`), independent of A–E
 
