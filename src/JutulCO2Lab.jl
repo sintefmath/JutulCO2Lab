@@ -83,6 +83,10 @@ export atlas_ve_domain, atlas_mesh
 include("atlas/sleipner.jl")
 export sleipner_data_directory, sleipner_grid_section, sleipner_ve_domain
 
+include("trapping/trap_surface.jl")
+include("trapping/cell_traps.jl")
+export trap_surface, trap_analysis
+
 include("plotting.jl")
 export plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!
 export plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure

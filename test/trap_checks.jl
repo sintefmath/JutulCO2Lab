@@ -1,0 +1,118 @@
+# Comparisons of the trapping analysis with co2lab-spillpoint (roadmap Stage 9),
+# used by the package tests (runtests.jl) and the Stage 9 gate. Each takes the
+# MRST export traps.mat (scripts/mrst_dump_traps.m, read with matread) and
+# returns an OracleReport.
+
+# The mesh and columns of one exported case: an Atlas formation as co2lab builds
+# it (co2lab_compatible, no thin-cell removal), or the synthetic sine surface
+function _trap_case_mesh(e)
+    name, c = e["name"], Int(e["coarsening"])
+    name == "sine" && return _sine_mesh()
+    m = atlas_mesh(name; coarsening = c, co2lab_compatible = true, min_thickness = 0.0)
+    return (m.mesh, m.columns)
+end
+
+# mrst_dump_traps.m's synthetic case: 30 x 20 cells of 100 m, 50 m thick, the
+# caprock at 1000 - 20 sin(x/400) cos(y/300) + 0.005 x (cartGrid, nodes moved)
+function _sine_mesh()
+    nx, ny = 30, 20
+    f(x, y) = 1000 - 20 * sin(x / 400) * cos(y / 300) + 0.005 * x
+    coord = Float64[]
+    for j in 0:ny, i in 0:nx
+        x, y = 100.0 * i, 100.0 * j
+        append!(coord, [x, y, f(x, y), x, y, f(x, y) + 50])
+    end
+    # each cell's eight corners: corner a of 2n along x lies on pillar 1 + a ÷ 2
+    zcorn = [f(100.0 * (a ÷ 2), 100.0 * (b ÷ 2)) + 50.0 * (c - 1)
+             for c in 1:2 for b in 1:2ny for a in 1:2nx]
+    grid = Dict("cartDims" => (nx, ny, 1), "COORD" => coord, "ZCORN" => zcorn,
+                "ACTNUM" => fill(true, nx, ny, 1))
+    mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+    return (mesh, first(ve_columns(mesh)))
+end
+
+# Item 1: the trap surface against co2lab's Gt — nodes (order included),
+# edges and their columns, caprock depths, heights, areas, centroids, corners
+function _trap_surface_vs_mrst(d)
+    rep = OracleReport("Trap surface vs co2lab's Gt"; mrst = d)
+    exact = Tolerance(0.0, 0.0)
+    for e in d["cases"]
+        label = "$(e["name"]) c$(Int(e["coarsening"]))"
+        mesh, cols = _trap_case_mesh(e)
+        s = trap_surface(mesh, cols)
+
+        nodes = hcat(s.x, s.y, s.z)
+        check!(rep, "$label: nodes (co2lab's order)", nodes,
+               hcat(e["node_coords"], vec(e["node_z"])); tol = Tolerance(0.0, 1e-9))
+        E = sort(Int.(e["edge_nodes"]), dims = 2)
+        N = Int.(e["edge_neighbors"])
+        mrst_edges = Dict(Tuple(E[k, :]) => sort(N[k, :]) for k in axes(E, 1))
+        ours = Dict(Tuple(s.edges[:, k]) => sort(s.edge_columns[:, k])
+                    for k in axes(s.edges, 2))
+        check!(rep, "$label: edges and their columns", ours == mrst_edges ? 0 : 1, 0;
+               tol = exact)
+        same_corners = s.corners == permutedims(Int.(e["cell_corners"]))
+        check!(rep, "$label: corner nodes", same_corners ? 0 : 1, 0; tol = exact)
+
+        rel = Tolerance(1e-12, 1e-9)
+        check!(rep, "$label: caprock depth", s.zc, vec(e["cell_z"]); tol = rel)
+        check!(rep, "$label: height", s.H, vec(e["cell_H"]); tol = rel)
+        check!(rep, "$label: area", s.area, vec(e["cell_areas"]); tol = rel)
+        check!(rep, "$label: centroid", hcat(s.cx, s.cy), e["cell_centroids"]; tol = rel)
+    end
+    return rep
+end
+
+# Our trap numbers → co2lab's, matching traps by their columns (co2lab's trap
+# numbering follows dmperm and is arbitrary); nothing if the sets differ
+function _trap_mapping(ours, theirs)
+    n = maximum(ours; init = 0)
+    m = zeros(Int, n)
+    for t in 1:n
+        ids = unique(theirs[ours .== t])
+        length(ids) == 1 && ids[1] > 0 || return nothing
+        m[t] = ids[1]
+    end
+    allunique(m) && count(>(0), theirs) == count(>(0), ours) || return nothing
+    return m
+end
+
+# co2lab's rivers per trap (exported as [trap; river; cells...]) as sets
+_mrst_rivers(t) = [(Int(r[1]), Int.(r[3:end])) for r in vec(t["rivers"]) if !isempty(r)]
+
+# Item 2 (cell-based) or 3 (node-based): trapAnalysis's result, traps matched
+# by their columns — trap membership, spill depths, spill regions, trap
+# connections, tops and rivers
+function _traps_vs_mrst(d, method::Symbol)
+    rep = OracleReport("Traps ($method-based) vs co2lab's trapAnalysis"; mrst = d)
+    exact = Tolerance(0.0, 0.0)
+    key = method == :cell ? "cell_based" : "node_based"
+    for e in d["cases"]
+        label = "$(e["name"]) c$(Int(e["coarsening"]))"
+        mesh, cols = _trap_case_mesh(e)
+        r = trap_analysis(trap_surface(mesh, cols); method)
+        t = e[key]
+        theirs = Int.(vec(t["traps"]))
+        check!(rep, "$label: number of traps", maximum(r.traps; init = 0),
+               maximum(theirs; init = 0); tol = exact)
+        m = _trap_mapping(r.traps, theirs)
+        check!(rep, "$label: trap columns", isnothing(m) ? 1 : 0, 0; tol = exact)
+        isnothing(m) && continue
+
+        check!(rep, "$label: spill depths", r.trap_z, vec(t["trap_z"])[m];
+               tol = Tolerance(1e-12, 0.0))
+        regions = [g == 0 ? 0 : m[g] for g in r.trap_regions]
+        check!(rep, "$label: spill regions",
+               count(regions .!= Int.(vec(t["trap_regions"]))), 0; tol = exact)
+        adj = Set((m[i], m[j]) for (i, j, v) in zip(findnz(r.trap_adj)...) if v)
+        A = Int.(t["trap_adj"])
+        same_adj = adj == Set(Tuple(A[k, :]) for k in axes(A, 1))
+        check!(rep, "$label: trap connections", same_adj ? 0 : 1, 0; tol = exact)
+        check!(rep, "$label: tops", sort(r.top) == sort(Int.(vec(t["top"]))) ? 0 : 1, 0;
+               tol = exact)
+        ours = Set((m[i], cells) for i in eachindex(r.rivers) for cells in r.rivers[i])
+        check!(rep, "$label: rivers", ours == Set(_mrst_rivers(t)) ? 0 : 1, 0;
+               tol = exact)
+    end
+    return rep
+end

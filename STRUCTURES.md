@@ -10,7 +10,7 @@ Keep this file current: update it in the same commit as any change that adds,
 removes, renames or changes the meaning of a structure (see `../CLAUDE.md`).
 
 The *File* column gives file names only: sections A–E are in `src/ve/`,
-G in `src/atlas/`, F in `src/`.
+G in `src/atlas/`, H in `src/trapping/`, F in `src/`.
 
 *Last updated: 2026-09-26.*
 
@@ -104,6 +104,13 @@ Constants: `_ATLAS_DATASETS` (the three data-set directories),
 `atlas_grid.jl`), `_UTM_A`, `_UTM_F`, `_UTM_K0` (GRS80 semi-major axis and
 flattening, UTM scale factor; `projection.jl`), `_SLEIPNER_FILES` (the
 benchmark files read, `sleipner.jl`).
+
+## H. Trapping analysis (roadmap Stage 9), on A
+
+| # | Name | File | What it is | Built from / depends on |
+|---|---|---|---|---|
+| 47 | *Trap surface* (NamedTuple) | `trap_surface.jl` | `(x, y, z, polygons, corners, edges, edge_columns, zc, H, area, cx, cy, outline)`: 44 with co2lab's node order (sorted by x, y, z), each column's four corner nodes (west-south, east-south, west-north, east-north), edges as node pairs with the columns on either side (0: boundary), caprock depth, height, map area and centroid per column | mesh, 1 (`trap_surface`) |
+| 48 | *Trap analysis* (NamedTuple) | `cell_traps.jl` | `(traps, trap_z, trap_regions, trap_adj, rivers, top)`: trap index per column (0: none), spill depth per trap, the trap each column drains into (0: none), which trap spills into which (sparse `Bool`), rivers per trap (vectors of columns), trap tops — co2lab's `trapAnalysis` result | 47 (`trap_analysis`) |
 
 ## F. MRST comparison harness (`JutulCO2Lab.Oracle`), independent of A–E
 

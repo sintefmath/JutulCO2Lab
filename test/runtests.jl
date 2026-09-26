@@ -5,6 +5,7 @@ using Jutul
 using JutulDarcy
 using MAT
 using Statistics
+using SparseArrays
 
 # --------------------- Helpers: small corner-point grids -----------------------
 
@@ -26,6 +27,7 @@ end
 # --------------- Helpers: comparisons with MRST dumps and runs ----------------
 
 include("atlas_checks.jl")
+include("trap_checks.jl")
 
 # The VE sloping-aquifer domain of an MRST dump (3D grid G3 and rock).
 function _ve_case(d)
@@ -1336,6 +1338,20 @@ end
             @test all(isapprox.(JutulCO2Lab._utm_rezone(x33, y33, 33, 31),
                                 JutulCO2Lab._utm_forward(60.4, 5.3, 31); atol = 1e-3))
         end
+    end
+
+    @testset "trapping analysis vs co2lab-spillpoint (Stage 9)" begin
+        f = joinpath(refdir, "traps.mat")
+        if !isfile(f) || !isdir(atlas_data_directory())
+            @info "Skipping: Atlas data or $f (scripts/mrst_dump_traps.m) missing"
+        else
+            d = matread(f)
+            for rep in (_trap_surface_vs_mrst(d), _traps_vs_mrst(d, :cell))
+                passed(rep) || display(rep)
+                @test passed(rep)
+            end
+        end
+        @test_throws ArgumentError trap_analysis((;); method = :other)
     end
 
     @testset "VE fluid vs MRST co2lab (Stage 2 items 1, 3)" begin

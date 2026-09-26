@@ -192,6 +192,10 @@ src/plotting.jl      plotting functions (declared and documented; implemented in
 ext/JutulCO2LabMakieExt/  Makie extension: VE map views, Atlas maps, coastline;
                      loaded with GLMakie or CairoMakie
 
+src/trapping/        structural traps (Stage 9, co2lab-spillpoint)
+  trap_surface.jl    the caprock as trap analysis sees it (co2lab's Gt quantities)
+  cell_traps.jl      the cell-based method: traps, spill depths, rivers, regions
+
 examples/            readable walkthroughs, with their own environment
                      (examples/Project.toml: JutulCO2Lab, the Jutul fork,
                      GLMakie, CairoMakie), run from the project root with
@@ -202,6 +206,7 @@ test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, we
                      boundary conditions and reconstruction (vs MRST), Atlas,
                      toolchain smoke test
 test/atlas_checks.jl the Atlas comparisons with co2lab, shared with the Stage 5 gate
+test/trap_checks.jl  the trapping comparisons with co2lab, shared with the Stage 9 gate
 ../scripts/          MRST/Octave reference dumps, prototypes, gate scripts
 ```
 
