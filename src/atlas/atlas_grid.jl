@@ -84,6 +84,28 @@ function atlas_grid_section(name::AbstractString; coarsening::Integer = 1,
     return (grid = grid, petro = petro)
 end
 
+"""
+    atlas_grid_formations(region = :all) -> Vector{String}
+
+The formations of `region` (as [`atlas_formation_names`](@ref)) that
+[`atlas_grid_section`](@ref) can build: those with a thickness map and a top
+map (their own, or the Jurassic one) in the data directory — the formations
+co2lab's `getAtlasGrid(names)` returns decks for. Returns a new vector, in
+the order of `atlas_formation_names(region)`.
+"""
+function atlas_grid_formations(region::Symbol = :all)
+    files = atlas_map_files()
+    has(name, variant) = any(f -> lowercase(f.name) == lowercase(name) &&
+                                  f.variant == variant, files)
+    function top_name(n)
+        any(j -> lowercase(j) == lowercase(n), _JURASSIC_MID) && return "Jurassicmid"
+        any(j -> lowercase(j) == lowercase(n), _JURASSIC_TOP) && return "Jurassic"
+        return n
+    end
+    return filter(n -> has(n, :thickness) && has(top_name(n), :top),
+                  atlas_formation_names(region))
+end
+
 # The formation's top and thickness maps (Atlas map NamedTuples, 39 in
 # STRUCTURES.md); the Jurassic formations take the Jurassic top maps.
 function _atlas_top_and_thickness(name, coarsening, co2lab_compatible)

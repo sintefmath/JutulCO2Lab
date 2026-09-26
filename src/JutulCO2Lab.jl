@@ -71,7 +71,7 @@ export atlas_data_directory, atlas_formation_names, read_aai_grid, atlas_map_fil
 export read_atlas_maps, atlas_average_rock
 
 include("atlas/atlas_grid.jl")
-export atlas_grid_section
+export atlas_grid_section, atlas_grid_formations
 
 include("atlas/atlas_domain.jl")
 export atlas_ve_domain

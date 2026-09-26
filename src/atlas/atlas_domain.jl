@@ -10,7 +10,8 @@
 
 """
     atlas_ve_domain(name; coarsening = 1, layers = 1, min_thickness = 1e-3,
-                    co2lab_compatible = false) -> NamedTuple
+                    perm = nothing, poro = nothing, co2lab_compatible = false)
+        -> NamedTuple
 
 Atlas formation `name` as a VE domain, as co2lab's
 `getFormationTopGrid(name, coarsening, 'vertical_layers', layers)`:
@@ -29,20 +30,30 @@ Atlas formation `name` as a VE domain, as co2lab's
    Atlas's average net-to-gross then, and so does this); without, from the
    average if the Atlas gives one.
 
-`min_thickness` (per layer) and `co2lab_compatible` are passed on to
-[`atlas_grid_section`](@ref).
+`perm` (m²) and `poro`, if given, replace the formation's average values:
+needed where the Atlas has none (the Brent Group, Pliocene sand, Sleipner,
+and the sealing Rør and Not formations), for which co2lab builds grids with
+`NaN` rock; here they throw an `ArgumentError` instead. `min_thickness` (per
+layer) and `co2lab_compatible` are passed on to [`atlas_grid_section`](@ref).
 
 Returns the NamedTuple `(mesh, columns, ve, grid, petro)`, all new: the 3D
 `UnstructuredMesh`, its `VEColumns`, [`ve_domain`](@ref)'s result, the grid
 section with `ACTNUM` restricted to the mesh's cells, and the formation's
-average rock (`(perm, poro, ntg)`, 41 in `STRUCTURES.md`).
+average rock (`(perm, poro, ntg)`, 40 in `STRUCTURES.md`, with `perm`,
+`poro` as given).
 """
 function atlas_ve_domain(name::AbstractString; coarsening::Integer = 1,
                          layers::Integer = 1, min_thickness::Real = 1e-3,
+                         perm = nothing, poro = nothing,
                          co2lab_compatible::Bool = false)
     s = atlas_grid_section(name; coarsening, nz = layers, min_thickness,
                            co2lab_compatible)
     grid, petro = s.grid, s.petro
+    isnothing(perm) || (petro = (; petro..., perm = Float64(perm)))
+    isnothing(poro) || (petro = (; petro..., poro = Float64(poro)))
+    (isnan(petro.perm) || isnan(petro.poro)) &&
+        throw(ArgumentError("the Atlas gives no average permeability or porosity " *
+                            "for $name: pass `perm` and `poro`"))
 
     grid["ACTNUM"] = _largest_piece(grid)
     mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)

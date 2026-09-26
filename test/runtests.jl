@@ -4,6 +4,7 @@ using JutulCO2Lab.Oracle
 using Jutul
 using JutulDarcy
 using MAT
+using Statistics
 
 # --------------------- Helpers: small corner-point grids -----------------------
 
@@ -228,6 +229,39 @@ function _atlas_domains_vs_mrst(d)
         pv = dom[:volumes] .* dom[:porosity] .* ntg
         check!(rep, "$label: pore volume (≤ 0.2 %)", pv, vec(e["pore_volume"])[p];
                tol = Tolerance(2e-3, 0.0))
+    end
+    return rep
+end
+
+# atlas_all.mat (scripts/mrst_dump_atlas_all.m): the formations getAtlasGrid
+# builds decks for, and getFormationTopGrid's column count, total height,
+# total pore volume and mean rock for each at coarsening 5. Julia removes
+# columns thinner than 1 mm; formations without Atlas rock get placeholder
+# values (their rock is not compared).
+function _atlas_all_vs_mrst(d)
+    rep = OracleReport("All Atlas formations vs co2lab (coarsening 5)")
+    exact = Tolerance(0.0, 0.0)
+    check!(rep, "formations with a grid", Set(atlas_grid_formations()) ==
+           Set(d["deck_names"]) ? 0 : 1, 0; tol = exact)
+    for e in d["cases"]
+        name = e["name"]
+        norock = isnan(e["mean_perm"]) || isnan(e["mean_poro"])
+        kw = norock ? (perm = 1e-13, poro = 0.2) : (;)
+        o = atlas_ve_domain(name; coarsening = Int(e["coarsening"]),
+                            co2lab_compatible = true, kw...)
+        ve, n = o.ve, number_of_columns(o.columns)
+
+        check!(rep, "$name: columns removed (≤ 1.5 %)", (Int(e["num_cells"]) - n) / n,
+               0.0; tol = Tolerance(0.0, 0.015))
+        check!(rep, "$name: total height", sum(ve.geometry.H), e["sum_height"];
+               tol = Tolerance(1e-7, 0.0))
+        norock && continue
+        ntg = isnothing(ve.rock.ntg) ? 1.0 : ve.rock.ntg
+        pv = sum(ve.domain[:volumes] .* ve.domain[:porosity] .* ntg)
+        check!(rep, "$name: total pore volume", pv, e["pore_volume"];
+               tol = Tolerance(1e-4, 0.0))
+        check!(rep, "$name: mean perm, poro", [mean(ve.rock.perm), mean(ve.rock.poro)],
+               [e["mean_perm"], e["mean_poro"]]; tol = Tolerance(1e-12, 0.0))
     end
     return rep
 end
@@ -1404,6 +1438,22 @@ end
             @test JutulCO2Lab.Graphs.is_connected(g)
             @test !any(isnan, o.ve.rock.perm) && !any(isnan, o.ve.rock.ntg)
             @test all(==(2), diff(o.columns.pos))
+        end
+    end
+
+    @testset "All CO2 Storage Atlas formations (Stage 5 item 3)" begin
+        f = joinpath(refdir, "atlas_all.mat")
+        if !isfile(f) || !isdir(atlas_data_directory())
+            @info "Skipping: Atlas data or $f (scripts/mrst_dump_atlas_all.m) missing"
+        else
+            rep = _atlas_all_vs_mrst(matread(f))
+            passed(rep) || display(rep)
+            @test passed(rep)
+        end
+        if isdir(atlas_data_directory())
+            @test "Johansenfm" in atlas_grid_formations(:north_sea)
+            @test !("Paleocene" in atlas_grid_formations())      # top map only
+            @test_throws ArgumentError atlas_ve_domain("Brentgrp"; coarsening = 10)
         end
     end
 
