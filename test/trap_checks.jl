@@ -116,3 +116,58 @@ function _traps_vs_mrst(d, method::Symbol)
     end
     return rep
 end
+
+# A MATLAB vector as read by matread: scalars for one element, matrices for more
+_vecs(x) = x isa Number ? [x] : vec(x)
+
+# co2lab's trees as (root, traps set, value), mapped through m⁻¹ = identity on
+# co2lab's numbers
+_mrst_trees(T) = [(Int(r), Set(Int.(_vecs(t))), v) for (r, t, v) in
+                  zip(_vecs(T["root"]), _vecs(T["traps"]), _vecs(T["value"]))]
+
+# Item 5: volumes, downstream traps, capacity trees, injection point and the
+# flattened surface, on the traps of `method`, mapped to co2lab's numbers
+function _trap_quantities_vs_mrst(d, method::Symbol)
+    rep = OracleReport("Trap quantities ($method-based) vs co2lab"; mrst = d)
+    exact, rel = Tolerance(0.0, 0.0), Tolerance(1e-12, 0.0)
+    # sums over up to thousands of columns: Julia sums pairwise, MATLAB in order
+    vol = Tolerance(1e-10, 0.0)
+    for e in d["cases"]
+        label = "$(e["name"]) c$(Int(e["coarsening"]))"
+        t = e[method == :cell ? "cell_based" : "node_based"]
+        isempty(t["volumes"]) && continue
+        mesh, cols = _trap_case_mesh(e)
+        s = trap_surface(mesh, cols)
+        r = trap_analysis(s; method)
+        m = _trap_mapping(r.traps, Int.(_vecs(t["traps"])))
+        if isnothing(m)
+            check!(rep, "$label: trap columns", 1, 0; tol = exact)
+            continue
+        end
+
+        check!(rep, "$label: volumes", trap_volumes(s, r), _vecs(t["volumes"])[m];
+               tol = vol)
+        down = [Set(m[downstream_traps(r, i)]) for i in eachindex(m)]
+        theirs = [Set(Int.(_vecs(t["downstream"][m[i]]))) for i in eachindex(m)]
+        check!(rep, "$label: downstream traps", count(down .!= theirs), 0; tol = exact)
+        for (key, kw) in (("trees", (;)), ("trees_all", (remove_overlap = false,
+                                                         calculate_all = true)))
+            ours = maximize_trapping(s, r; kw...)
+            mt = _mrst_trees(t[key])
+            check!(rep, "$label: $key roots and traps",
+                   [(m[x.root], Set(m[x.traps])) for x in ours] ==
+                   [(x[1], x[2]) for x in mt] ? 0 : 1, 0; tol = exact)
+            check!(rep, "$label: $key values", [x.value for x in ours], last.(mt);
+                   tol = vol)
+        end
+        inj = optimal_injection_point(s, r)
+        check!(rep, "$label: injection column", inj.column, t["injection"]["cell"];
+               tol = exact)
+        check!(rep, "$label: injection volume", inj.volume, t["injection"]["volume"];
+               tol = vol)
+        f = flatten_traps(s, r)
+        check!(rep, "$label: flattened surface", [f.zc; f.z],
+               [_vecs(t["flat_cell_z"]); _vecs(t["flat_node_z"])]; tol = rel)
+    end
+    return rep
+end

@@ -85,7 +85,10 @@ export sleipner_data_directory, sleipner_grid_section, sleipner_ve_domain
 
 include("trapping/trap_surface.jl")
 include("trapping/cell_traps.jl")
-export trap_surface, trap_analysis
+include("trapping/trap_analysis.jl")
+include("trapping/trap_quantities.jl")
+export trap_surface, trap_analysis, trap_volumes, downstream_traps
+export maximize_trapping, optimal_injection_point, flatten_traps
 
 include("plotting.jl")
 export plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!

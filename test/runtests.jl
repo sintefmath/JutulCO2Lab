@@ -1346,7 +1346,8 @@ end
             @info "Skipping: Atlas data or $f (scripts/mrst_dump_traps.m) missing"
         else
             d = matread(f)
-            for rep in (_trap_surface_vs_mrst(d), _traps_vs_mrst(d, :cell))
+            for rep in (_trap_surface_vs_mrst(d), _traps_vs_mrst(d, :cell),
+                        _trap_quantities_vs_mrst(d, :cell))
                 passed(rep) || display(rep)
                 @test passed(rep)
             end

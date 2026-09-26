@@ -240,17 +240,3 @@ function _cell_trap_analysis(s)
     return (traps = traps, trap_z = trap_z, trap_regions = trap_regions,
             trap_adj = trap_adj, rivers = rivers, top = st.tops)
 end
-
-# ------------------------------- Front end (temporary) ------------------------
-
-"""
-    trap_analysis(s; method = :cell) -> NamedTuple
-
-Structural traps of a [`trap_surface`](@ref) `s`, as co2lab's
-`trapAnalysis(Gt, method == :cell)`. Returns [`_cell_trap_analysis`](@ref)'s
-NamedTuple. `s` is only read.
-"""
-function trap_analysis(s; method::Symbol = :cell)
-    method == :cell && return _cell_trap_analysis(s)
-    throw(ArgumentError("method must be :cell (:node not yet implemented)"))
-end
