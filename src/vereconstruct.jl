@@ -13,7 +13,7 @@
 #   the caprock down — saturated (dis_max) down to the depth where the brine
 #   volume above holds the column's fraction rs/dis_max of it, none below.
 #
-# Capillary-fringe fluids (cap_fringe_h2s) are Stage 5.
+# Capillary-fringe fluids (cap_fringe_h2s) are Stage 6.
 
 # ------------------------------ Filling a column ------------------------------
 
