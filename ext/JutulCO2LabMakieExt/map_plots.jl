@@ -75,3 +75,30 @@ function _background_plot(ax)
     i = findfirst(is_field, ax.scene.plots)
     return isnothing(i) ? nothing : ax.scene.plots[i]
 end
+
+# ------------------------------- Surface in 3D --------------------------------
+
+function plot_ve_surface!(ax, surface; color = (:steelblue, 0.6), offset = 0.0,
+                          strokecolor = :black, strokewidth = 1)
+    x, y, z = surface.x, surface.y, surface.z .+ offset
+    Face = Makie.GeometryBasics.GLTriangleFace
+    pts, tris = Point3f[], Face[]
+    # each polygon as a fan around its node mean
+    for p in surface.polygons
+        q = unique(p)
+        length(q) < 3 && continue
+        c = length(pts) + 1
+        push!(pts, Point3f(sum(x[q]) / length(q), sum(y[q]) / length(q),
+                           sum(z[q]) / length(q)))
+        append!(pts, Point3f.(x[q], y[q], z[q]))
+        for k in eachindex(q)
+            push!(tris, Face(c, c + k, c + (k == length(q) ? 1 : k + 1)))
+        end
+    end
+    mesh!(ax, pts, tris; color = color, shading = NoShading)
+
+    edges = [Point3f(x[n], y[n], z[n]) for p in surface.polygons
+             for (k, a) in enumerate(p) for n in (a, p[k == length(p) ? 1 : k + 1])]
+    linesegments!(ax, edges; color = strokecolor, linewidth = strokewidth)
+    return ax
+end

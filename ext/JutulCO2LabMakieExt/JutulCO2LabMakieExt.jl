@@ -8,7 +8,7 @@ module JutulCO2LabMakieExt
 
 using JutulCO2Lab, Makie
 import JutulCO2Lab: plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!,
-    plot_atlas_context!, plot_ve_outline!, show_figure
+    plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure
 
 include("map_plots.jl")
 include("atlas_plots.jl")
@@ -29,6 +29,12 @@ function show_figure(fig, name; dir = "figures")
         path = joinpath(dir, "$name.png")
         save(path, fig)
         println("saved $path")
+    elseif nameof(Makie.current_backend()) == :GLMakie
+        # a window of its own; a script's windows close when Julia exits, so
+        # outside the REPL wait until this one is closed
+        screen = Makie.current_backend().Screen()
+        display(screen, fig)
+        isinteractive() || wait(screen)
     else
         display(fig)
     end

@@ -61,10 +61,21 @@ The lateral boundary of a VE domain (`surface.outline` of
 function plot_ve_outline! end
 
 """
+    plot_ve_surface!(ax, surface; color = (:steelblue, 0.6), offset = 0.0,
+                     strokecolor = :black, strokewidth = 1) -> ax
+
+The top surface of a VE domain ([`ve_top_surface`](@ref)) in 3D: the
+columns' top faces at their node depths (plus `offset`, e.g. to lift it off
+the 3D grid), with their edges. Modifies: `ax` (an `Axis3`). Returns `ax`.
+"""
+function plot_ve_surface! end
+
+"""
     show_figure(fig, name; dir = "figures") -> nothing
 
-Show `fig` in a window with an interactive backend (GLMakie), or save it as
-`dir/name.png` with a file backend (CairoMakie), so that example scripts run
-either way. Returns `nothing`.
+Show `fig` in a window of its own with GLMakie — in a script (not the REPL)
+waiting until the window is closed, since Julia closes its windows on exit —
+or save it as `dir/name.png` with CairoMakie, so that example scripts run
+either way. Other backends: `display(fig)`. Returns `nothing`.
 """
 function show_figure end

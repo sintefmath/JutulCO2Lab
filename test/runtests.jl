@@ -1492,6 +1492,22 @@ end
             x0, x1 = extrema(ms.x)
             @test !isempty(seg) && all(x0 <= t[1] <= x1 for t in seg)
             @test length(atlas_coastline()) > 100 && length(atlas_wells().x) > 1000
+
+            # the coastline, converted from UTM 33 to the Atlas's UTM 31, passes
+            # within 1 km of Lindesnes (57.9826 N, 7.0475 E)
+            x, y = JutulCO2Lab._utm_forward(57.9826, 7.0475, 31)
+            c = reduce(vcat, atlas_coastline())
+            @test minimum(filter(!isnan, hypot.(c[:, 1] .- x, c[:, 2] .- y))) < 1000
+        end
+
+        # UTM: round trip to below 1 mm, zone change consistent
+        for (lat, lon) in ((57.98, 7.05), (71.17, 25.78), (60.4, -1.0)), z in (31, 33)
+            la, lo = JutulCO2Lab._utm_inverse(JutulCO2Lab._utm_forward(lat, lon, z)..., z)
+            @test hypot(la - lat, (lo - lon) * cosd(lat)) * 111e3 < 1e-3
+        end
+        let (x33, y33) = JutulCO2Lab._utm_forward(60.4, 5.3, 33)
+            @test all(isapprox.(JutulCO2Lab._utm_rezone(x33, y33, 33, 31),
+                                JutulCO2Lab._utm_forward(60.4, 5.3, 31); atol = 1e-3))
         end
     end
 

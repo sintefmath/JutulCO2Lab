@@ -234,14 +234,16 @@ const _ATLAS_AVERAGE_ROCK = Dict(
 
 The coastline of Norway shipped with the North Sea data set (`norway.mat`,
 from the Norwegian Mapping Authority), for orientation on Atlas maps: one
-`n × 2` matrix of `(x, y)` per polyline. As co2lab's `showCO2atlas`, 680 km are
-added to x to bring it roughly into the Atlas's coordinates; the position is
-approximate (co2lab: "only provided for scale and rough positioning").
-Returns new matrices.
+`n × 2` matrix of `(x, y)` per polyline (`NaN` rows separate pieces). The
+file is in UTM zone 33; it is converted here to the Atlas's zone 31
+(`projection.jl`). co2lab's `showCO2atlas` instead shifts x by 680 km, which
+misplaces the coast by up to tens of kilometres. Returns new matrices.
 """
 function atlas_coastline()
     lines = matread(joinpath(atlas_data_directory(), "CO2Atlas", "norway.mat"))["norway"]
-    return [hcat(l[:, 1] .+ 6.8e5, l[:, 2]) for l in vec(lines)]
+    rezone(l) = reduce(vcat, [collect(_utm_rezone(l[i, 1], l[i, 2], 33, 31))'
+                              for i in axes(l, 1)])
+    return [rezone(l) for l in vec(lines)]
 end
 
 """

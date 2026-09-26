@@ -16,8 +16,9 @@ gated against co2lab to solver precision.
 Readable walkthroughs: `examples/sloping_aquifer.jl` (Stage 2),
 `examples/residual_trapping.jl` (Stage 3, residual trapping) and
 `examples/dissolution.jl` (Stage 4, rate-driven and instantaneous
-dissolution), and `examples/atlas/show_co2_atlas.jl` (Stage 5, the CO2
-Storage Atlas with plots). The plan
+dissolution), and `examples/atlas/` (Stage 5, the CO2 Storage Atlas with
+plots: `show_co2_atlas.jl`, `models_from_atlas.jl`,
+`show_top_surface_grids.jl`). The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
@@ -179,7 +180,9 @@ src/ve/              the VE simulator
   ve_top_surface.jl  the caprock in map view (column polygons), contour lines
 
 src/atlas/           the CO2 Storage Atlas (Stage 5)
-  atlas.jl           data location, map reader, formation names, average rock
+  atlas.jl           data location, map reader, formation names, average rock,
+                     coastline and wells
+  projection.jl      UTM zone conversion (coastline to the Atlas's zone)
   atlas_grid.jl      top and thickness maps to a corner-point grid section, rock maps
   atlas_domain.jl    a formation as a VE domain: mesh, largest piece, columns, rock
 
