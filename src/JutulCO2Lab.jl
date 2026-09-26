@@ -80,6 +80,9 @@ export atlas_grid_section, atlas_grid_formations
 include("atlas/atlas_domain.jl")
 export atlas_ve_domain, atlas_mesh
 
+include("atlas/sleipner.jl")
+export sleipner_data_directory, sleipner_grid_section, sleipner_ve_domain
+
 include("plotting.jl")
 export plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!
 export plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure

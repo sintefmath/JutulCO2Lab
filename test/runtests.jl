@@ -1267,6 +1267,23 @@ end
         end
     end
 
+    @testset "Sleipner benchmark (Stage 5 item 4)" begin
+        # without the data: an error naming the directory, not a failure later
+        withenv("CO2LAB_ATLAS_DATA" => mktempdir()) do
+            err = try sleipner_grid_section(); nothing catch e; e end
+            @test err isa ArgumentError && occursin("no longer publicly", err.msg)
+        end
+        # with the data: the grid section only (43 layers; the VE model is gated
+        # in scripts/stage5_gate.jl)
+        if isdir(sleipner_data_directory())
+            g = sleipner_grid_section()
+            @test g["cartDims"] == (65, 119, 43)
+            @test count(g["ACTNUM"]) == 262990          # co2lab's G.cells.num
+            c = reshape(g["COORD"], 3, :)
+            @test extrema(c[1, :]) == (436914.0, 440114.0)   # MAPAXES: UTM zone 31
+        end
+    end
+
     @testset "top surface and contour lines (Stage 5 item 5)" begin
         # sloping aquifer, 5 layers: one quadrilateral per column
         f = joinpath(refdir, "sloping_aquifer.mat")

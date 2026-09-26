@@ -122,7 +122,8 @@ function _atlas_domains_vs_mrst(d)
         check!(rep, "$label: 3D cells not in co2lab's",
                count(i -> !(lin(i) in mrst_cells), 1:number_of_cells(m)), 0; tol = exact)
         top = Dict(t => k for (k, t) in enumerate(Int.(vec(e["top_cell"]))))
-        p = [get(top, lin(cols.cells[cols.pos[k]]), 0) for k in 1:number_of_columns(cols)]
+        p = [get(top, lin(cols.cells[cols.pos[k]]), 0)
+             for k in 1:number_of_columns(cols)]
         check!(rep, "$label: columns not in co2lab's", count(==(0), p), 0; tol = exact)
         any(==(0), p) && continue
 
@@ -144,7 +145,8 @@ function _atlas_domains_vs_mrst(d)
         check!(rep, "$label: interior faces", same_faces ? 0 : 1, 0; tol = exact)
 
         rel = Tolerance(1e-12, 0.0)
-        check!(rep, "$label: caprock depth", geo.z_top, vec(e["z_caprock"])[p]; tol = rel)
+        check!(rep, "$label: caprock depth", geo.z_top, vec(e["z_caprock"])[p];
+               tol = rel)
         check!(rep, "$label: height", geo.H, H_m[p]; tol = Tolerance(1e-10, 1e-9))
         check!(rep, "$label: perm", rock.perm, vec(e["perm"])[p]; tol = rel)
         check!(rep, "$label: poro", rock.poro, vec(e["poro"])[p]; tol = rel)
@@ -233,5 +235,60 @@ function _atlas_volumes_vs_mrst(d)
         check!(rep, "$name: bulk volume", volume, e["volume"];
                tol = Tolerance(1e-4, 0.0))
     end
+    return rep
+end
+
+# sleipner.mat (scripts/mrst_dump_sleipner.m): makeSleipnerVEmodel's steps with
+# global coordinates — cells, columns, faces, caprock depths, heights, rock,
+# pore volumes and the open boundary. 43 layers: only in the gate.
+function _sleipner_vs_mrst(d)
+    rep = OracleReport("Sleipner VE model vs co2lab (makeSleipnerVEmodel)"; mrst = d)
+    exact = Tolerance(0.0, 0.0)
+    s = sleipner_ve_domain()
+    m, cols, ve = s.mesh, s.columns, s.ve
+    LI = LinearIndices(Tuple(Int.(vec(d["cartDims"]))))
+    lin(c) = LI[cell_ijk(m, c)...]
+
+    cells = sort([lin(c) for c in 1:number_of_cells(m)])
+    check!(rep, "3D cells", cells == sort(Int.(vec(d["indexMap"]))) ? 0 : 1, 0;
+           tol = exact)
+    top = Dict(t => k for (k, t) in enumerate(Int.(vec(d["top_cell"]))))
+    p = [get(top, lin(cols.cells[cols.pos[k]]), 0) for k in 1:number_of_columns(cols)]
+    check!(rep, "columns matched", count(>(0), p), Int(d["num_cells"]); tol = exact)
+    any(==(0), p) && return rep
+
+    N = ve.domain[:neighbors]
+    F = Int.(d["face_pairs"])
+    same = Set(minmax(p[N[1, f]], p[N[2, f]]) for f in axes(N, 2)) ==
+           Set(minmax(F[f, 1], F[f, 2]) for f in axes(F, 1))
+    check!(rep, "interior faces", same ? 0 : 1, 0; tol = exact)
+    check!(rep, "open boundary sides (bcIxVE)", length(s.sides),
+           Int(d["num_boundary_faces"]); tol = exact)
+
+    geo, rock = ve.geometry, ve.rock
+    rel = Tolerance(1e-12, 0.0)
+    check!(rep, "caprock depth", geo.z_top, vec(d["z_caprock"])[p]; tol = rel)
+    check!(rep, "height", geo.H, vec(d["height"])[p]; tol = Tolerance(1e-10, 1e-9))
+    check!(rep, "perm", rock.perm, vec(d["perm"])[p]; tol = rel)
+    check!(rep, "poro", rock.poro, vec(d["poro"])[p]; tol = rel)
+
+    # global coordinates: the top cells' centroids
+    g = tpfv_geometry(m)
+    tops = [cols.cells[cols.pos[k]] for k in 1:number_of_columns(cols)]
+    check!(rep, "top cell centroids (global x, y, z)", vec(g.cell_centroids[:, tops]'),
+           vec(d["top_centroids"][p, :]); tol = rel)
+    # column volumes from the 3D cells, on both sides (with porosity checked
+    # above, this fixes the pore volume)
+    check!(rep, "column volumes (3D cells)", ve.domain[:volumes],
+           vec(d["column_volume"])[p]; tol = Tolerance(1e-10, 0.0))
+    # pore volume = column volume x thickness-weighted porosity (co2lab's
+    # averageRock); recorded: against co2lab's VE pore volume (top-face area
+    # x H, by design) and against the volume-weighted sum over the 3D cells
+    pv = ve.domain[:volumes] .* ve.domain[:porosity]
+    check!(rep, "co2lab's area x H pore volume (recorded)", pv,
+           vec(d["pore_volume"])[p]; tol = Tolerance(Inf, 0.0))
+    check!(rep, "sum of 3D cell pore volumes (recorded)", pv,
+           vec(d["pore_volume_3d"])[p]; tol = Tolerance(Inf, 0.0))
+    check!(rep, "bulk volume", sum(g.volumes), d["bulk_volume"]; tol = rel)
     return rep
 end

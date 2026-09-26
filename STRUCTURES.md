@@ -96,12 +96,14 @@ Constants: `_WELL_CONSTANT_RATIO`, `_WELL_CONSTANT_VALUE` (MRST's
 | 43 | *Atlas mesh* (NamedTuple) | `atlas_domain.jl` | `(mesh, columns, grid, petro)`: 42 without the VE domain and rock (also for formations without Atlas rock) | 41, 1 (`atlas_mesh`) |
 | 44 | *Top surface* (NamedTuple) | `ve_top_surface.jl` (`src/ve`) | `(x, y, z, polygons, xc, yc, outline)`: node coordinates and caprock depths, each column's top-face node indices, polygon centres, boundary edges (node pairs) | mesh, 1 (`ve_top_surface`); an Atlas map as a lattice (`_atlas_map_surface`) |
 | 45 | *Contour lines* (Vector) | `ve_top_surface.jl` (`src/ve`) | per level, a vector of segments `(x1, y1, x2, y2)` | 44 (`ve_contour_lines`) |
+| 46 | *Sleipner VE model* (NamedTuple) | `sleipner.jl` | `(mesh, columns, ve, grid, sides)`: 3D mesh (discarded cells removed), `VEColumns` (1), `ve_domain`'s result, the grid section (GeoEnergyIO `Dict`, global coordinates, rock arrays), the lateral boundary sides (co2lab's `bcIxVE`) | the Sleipner benchmark files (`sleipner_ve_domain`) |
 
 Constants: `_ATLAS_DATASETS` (the three data-set directories),
 `_ATLAS_AVERAGE_ROCK` (co2lab's `getAvgRock` table), `_JURASSIC_MID`,
 `_JURASSIC_TOP` (formations taking the `Jurassicmid` and `Jurassic` top maps,
 `atlas_grid.jl`), `_UTM_A`, `_UTM_F`, `_UTM_K0` (GRS80 semi-major axis and
-flattening, UTM scale factor; `projection.jl`).
+flattening, UTM scale factor; `projection.jl`), `_SLEIPNER_FILES` (the
+benchmark files read, `sleipner.jl`).
 
 ## F. MRST comparison harness (`JutulCO2Lab.Oracle`), independent of A–E
 
