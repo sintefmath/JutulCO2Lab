@@ -13,8 +13,10 @@ structures Stage 8 (hybrid) extends — stackable columns cut by connectivity
 and per-cell VE/fine branch points; Stage 3: co2lab's hysteresis (residual
 trapping); and Stage 4: dissolution, rate-driven and instantaneous, each
 gated against co2lab to solver precision.
-Readable walkthroughs: `examples/sloping_aquifer.jl` (Stage 2) and
-`examples/residual_trapping.jl` (Stage 3, residual trapping). The plan
+Readable walkthroughs: `examples/sloping_aquifer.jl` (Stage 2),
+`examples/residual_trapping.jl` (Stage 3, residual trapping) and
+`examples/dissolution.jl` (Stage 4, rate-driven and instantaneous
+dissolution). The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
