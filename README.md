@@ -163,6 +163,8 @@ src/co2lab_fluid.jl  co2lab's fluid system: black-oil with a :co2lab formulation
                      unknowns by configuration; dissolution transfer, hysteresis;
                      model, state and simulator setup
 src/instant_dissolution.jl  co2lab's instantaneous dissolution: switching unknown
+src/atlas.jl         CO2 Storage Atlas: data location, map reader, formation names,
+                     average rock (Stage 5)
 src/vewells.jl       VE wells: co2lab's well index, pressure datum option, CO2 injector
 src/vebc.jl          VE boundary conditions: co2lab's pressure BC as a force, side
                      selection, exited mass

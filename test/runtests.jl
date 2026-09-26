@@ -73,6 +73,64 @@ function _capfringe_si_vs_mrst(d)
     return rep
 end
 
+# atlas_maps.mat (scripts/mrst_dump_atlas_maps.m): every Atlas map as co2lab's
+# readAAIGrid reads it, getAtlasGrid's maps for five formations at coarsening 1
+# and 3, and their average rock. Julia reads with co2lab's row handling here;
+# its default reading is the same map one row further south.
+function _atlas_vs_mrst(d)
+    rep = OracleReport("Atlas maps vs co2lab")
+    # NaN count, sum and position-weighted sum, as the dump's fingerprint
+    weighted(x) = sum(x[i, j] * (i + 7j) for i in axes(x, 1), j in axes(x, 2)
+                      if !isnan(x[i, j]))
+    fp(x) = (count(isnan, x), sum(filter(!isnan, x)), weighted(x))
+    exact = Tolerance(0.0, 0.0)
+
+    for e in d["files"]
+        path = joinpath(atlas_data_directory(), e["dataset"], e["file"])
+        g = read_aai_grid(path; co2lab_rows = true)
+        m = g.meta
+        label = e["file"]
+        check!(rep, "$label: header", [m.ncols, m.nrows, m.xllcorner, m.yllcorner,
+                                      m.cellsize, m.nodata], vec(e["meta"]); tol = exact)
+        f = fp(g.data)
+        check!(rep, "$label: NaN count", f[1], e["nan_count"]; tol = exact)
+        # summation order differs (MATLAB's sum, Julia's pairwise sum)
+        check!(rep, "$label: sums", [f[2], f[3]], [e["sum"], e["weighted_sum"]];
+               tol = Tolerance(1e-12, 0.0))
+        if !isempty(e["data"])
+            same = isequal(g.data, e["data"])
+            check!(rep, "$label: values", same ? 0 : 1, 0; tol = exact)
+        end
+    end
+
+    for (key, maps) in d["maps"]
+        name, c = split(key, "_c")
+        ours = read_atlas_maps([name, "Jurassic", "Jurassicmid"];
+                               coarsening = parse(Int, c), co2lab_rows = true)
+        for e in maps
+            o = only(filter(x -> x.name == e["name"] &&
+                                 string(x.variant) == e["variant"], ours))
+            f = fp(o.data)
+            check!(rep, "$key $(e["name"]) $(e["variant"])",
+                   [f[1], f[2], f[3], o.meta.cellsize, o.meta.dims...],
+                   [e["nan_count"], e["sum"], e["weighted_sum"], e["cellsize"],
+                    vec(e["dims"])...]; tol = Tolerance(1e-12, 0.0))
+        end
+    end
+
+    # getAtlasGrid replaces the table's values by the averages of heterogeneous
+    # rock maps where a formation has them (Sto): step 2
+    rock_suffixes = ("perm", "poro", "ntg")
+    with_rock_maps = Set(f.name[1:end-length(x)] for f in atlas_map_files()
+                         for x in rock_suffixes if endswith(f.name, x))
+    for (name, v) in d["petro"]
+        name in with_rock_maps && continue
+        r = atlas_average_rock(name)
+        check!(rep, "$name: average perm, poro", [r.perm, r.poro], vec(v); tol = exact)
+    end
+    return rep
+end
+
 # mrst_ref_{rate,bhp,src}.mat (scripts/stage2_mrst_comparison.jl): co2lab's
 # sloping aquifer run by MRST on Julia's geometry, same report steps, tight
 # tolerances. With a source term instead of the well, Julia matches to solver
@@ -1153,6 +1211,36 @@ end
             passed(rep) || display(rep)
             @test passed(rep)
         end
+    end
+
+    @testset "CO2 Storage Atlas maps vs co2lab (Stage 5 step 1)" begin
+        f = joinpath(refdir, "atlas_maps.mat")
+        if !isfile(f) || !isdir(atlas_data_directory())
+            @info "Skipping: Atlas data or $f (scripts/mrst_dump_atlas_maps.m) missing"
+        else
+            rep = _atlas_vs_mrst(matread(f))
+            passed(rep) || display(rep)
+            @test passed(rep)
+        end
+
+        # co2lab's row handling: its map is ours one row further north, with
+        # the southernmost row empty
+        if isdir(atlas_data_directory())
+            path = first(atlas_map_files()).path
+            a = read_aai_grid(path).data
+            b = read_aai_grid(path; co2lab_rows = true).data
+            @test all(isnan, b[:, 1]) && isequal(b[:, 2:end], a[:, 1:end-1])
+            @test all(isnan, a[:, end])       # the Atlas files' first row is empty
+        end
+
+        # names and variants as co2lab builds them; average rock by name
+        files = atlas_map_files()
+        @test any(f -> f.name == "Huginfmeast" && f.variant == :thickness, files)
+        @test any(f -> f.name == "Jurassicmid" && f.variant == :top, files)
+        @test atlas_average_rock("Tiljefm").ntg == 0.30
+        @test isnan(atlas_average_rock("Rorfm").perm)
+        @test length(atlas_formation_names()) == 31
+        @test_throws ArgumentError atlas_formation_names(:arctic)
     end
 
     @testset "VE fluid vs MRST co2lab (Stage 2 items 1, 3)" begin

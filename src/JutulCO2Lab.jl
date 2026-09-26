@@ -66,4 +66,8 @@ export ve_boundary_mass_fluxes
 include("vereconstruct.jl")
 export ve_reconstruct
 
+include("atlas.jl")
+export atlas_data_directory, atlas_formation_names, read_aai_grid, atlas_map_files
+export read_atlas_maps, atlas_average_rock
+
 end # module

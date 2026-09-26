@@ -80,6 +80,18 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 Constants: `_WELL_CONSTANT_RATIO`, `_WELL_CONSTANT_VALUE` (MRST's
 `wellConstant` table, `vewells.jl`).
 
+## G. CO2 Storage Atlas (roadmap Stage 5), independent of A–E
+
+| # | Name | File | What it is | Built from / depends on |
+|---|---|---|---|---|
+| 37 | *ESRI ASCII grid* (NamedTuple) | `atlas.jl` | `(meta, data)`: header `(ncols, nrows, xllcorner, yllcorner, cellsize, nodata)`; `data` ncols × nrows, x then y from the south, NaN for missing/zero | an Atlas file (`read_aai_grid`; `co2lab_rows` reproduces co2lab's one-row shift) |
+| 38 | *Atlas map file* (NamedTuple) | `atlas.jl` | `(name, variant, path)`: co2lab's naming (`Huginfm_east_thickness` → `Huginfmeast`, `:thickness` or `:top`) | the data directory (`atlas_map_files`) |
+| 39 | *Atlas map* (NamedTuple) | `atlas.jl` | `(name, variant, meta, data)`: 37 with tops as depths, coarsened; `meta` adds `dims` | 38, 37 (`read_atlas_maps`) |
+| 40 | *Atlas average rock* (NamedTuple) | `atlas.jl` | `(perm, poro, ntg)`: the Atlas reports' averages, perm in m², NaN where none, `ntg` `nothing` unless given | formation name (`atlas_average_rock`) |
+
+Constants: `_ATLAS_DATASETS` (the three data-set directories),
+`_ATLAS_AVERAGE_ROCK` (co2lab's `getAvgRock` table).
+
 ## F. MRST comparison harness (`JutulCO2Lab.Oracle`), independent of A–E
 
 | # | Name | File | What it is | Depends on |
