@@ -200,6 +200,7 @@ examples/            readable walkthroughs, with their own environment
 test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, wells,
                      boundary conditions and reconstruction (vs MRST), Atlas,
                      toolchain smoke test
+test/atlas_checks.jl the Atlas comparisons with co2lab, shared with the Stage 5 gate
 ../scripts/          MRST/Octave reference dumps, prototypes, gate scripts
 ```
 
