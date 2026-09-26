@@ -175,9 +175,7 @@ end
 # getFormationTopGrid's Gt and rock2D for eight formation/coarsening/layer
 # cases. Julia removes cells thinner than 1 mm, which co2lab keeps: its
 # columns must be co2lab's minus thin ones, matched by the logical index of
-# their top cell. Columns holding a cell with a corner collapsed by
-# GeoEnergyIO (isapprox on depths) get a wrong volume from Jutul's geometry
-# and are left out of the pore-volume check (counted in the report instead).
+# their top cell.
 function _atlas_domains_vs_mrst(d)
     rep = OracleReport("Atlas VE domains vs co2lab (getFormationTopGrid)")
     exact = Tolerance(0.0, 0.0)
@@ -225,29 +223,13 @@ function _atlas_domains_vs_mrst(d)
                tol = exact)
         has_ntg && check!(rep, "$label: ntg", rock.ntg, vec(e["ntg"])[p]; tol = rel)
 
-        ok = .!_merged_columns(o)
-        check!(rep, "$label: columns with collapsed corners (recorded)", count(.!ok),
-               count(.!ok); tol = exact)
         # pore volume: 3D cell volumes against MRST's area·H (Stage 1, ≤ 0.2 %)
         ntg = has_ntg ? rock.ntg : 1.0
         pv = dom[:volumes] .* dom[:porosity] .* ntg
-        check!(rep, "$label: pore volume (≤ 0.2 %)", pv[ok],
-               vec(e["pore_volume"])[p][ok]; tol = Tolerance(2e-3, 0.0))
+        check!(rep, "$label: pore volume (≤ 0.2 %)", pv, vec(e["pore_volume"])[p];
+               tol = Tolerance(2e-3, 0.0))
     end
     return rep
-end
-
-# Columns of an atlas_ve_domain holding a cell with a corner whose top and
-# bottom depths GeoEnergyIO merges (isapprox)
-function _merged_columns(o)
-    nx, ny, nz = o.grid["cartDims"]
-    Z = reshape(o.grid["ZCORN"], 2nx, 2ny, 2nz)
-    merged(i, j, k) = any(isapprox.(Z[2i-1:2i, 2j-1:2j, 2k-1], Z[2i-1:2i, 2j-1:2j, 2k]))
-    out = fill(false, number_of_columns(o.columns))
-    for c in 1:number_of_cells(o.mesh)
-        merged(cell_ijk(o.mesh, c)...) && (out[o.columns.partition[c]] = true)
-    end
-    return out
 end
 
 # mrst_ref_{rate,bhp,src}.mat (scripts/stage2_mrst_comparison.jl): co2lab's
