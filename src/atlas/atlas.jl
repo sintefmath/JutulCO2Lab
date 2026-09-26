@@ -24,7 +24,7 @@ Directory holding the Atlas data sets (`CO2Atlas`, `CO2AtlasNorwegianSea`,
 otherwise `mrst-data` next to the project directory.
 """
 atlas_data_directory() =
-    get(ENV, "CO2LAB_ATLAS_DATA", normpath(joinpath(@__DIR__, "..", "..", "..",
+    get(ENV, "CO2LAB_ATLAS_DATA", normpath(joinpath(@__DIR__, "..", "..", "..", "..",
                                                     "mrst-data")))
 
 """

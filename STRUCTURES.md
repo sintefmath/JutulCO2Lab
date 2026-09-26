@@ -9,6 +9,9 @@ them). Jutul/JutulDarcy supertypes are in brackets. Exported names are in
 Keep this file current: update it in the same commit as any change that adds,
 removes, renames or changes the meaning of a structure (see `../CLAUDE.md`).
 
+The *File* column gives file names only: sections A–E are in `src/ve/`,
+G in `src/atlas/`, F in `src/`.
+
 *Last updated: 2026-09-26.*
 
 ## A. Grid and domain

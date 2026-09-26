@@ -30,47 +30,47 @@ include("oracle.jl")
 using .Oracle
 export Oracle
 
-include("vegrid.jl")
+include("ve/vegrid.jl")
 export VEColumns, ve_mesh_from_mrst, ve_columns, ve_trim, ve_column_geometry
 export number_of_columns, column_cells
 
-include("vefaces.jl")
+include("ve/vefaces.jl")
 export VEColumnSides, ve_column_sides
 
-include("vedomain.jl")
+include("ve/vedomain.jl")
 export ve_average_rock, ve_domain, VEBoundarySides, ve_boundary_sides
 export ve_hydrostatic_pressure
 
-include("rock_compressibility.jl")
+include("ve/rock_compressibility.jl")
 export set_co2lab_rock_compressibility!
 
-include("ve_fluid.jl")
+include("ve/ve_fluid.jl")
 export co2lab_ve_fluid, CO2LabVEFluid, instantaneous_dissolution
 
-include("co2lab_fluid.jl")
+include("ve/co2lab_fluid.jl")
 export co2lab_system, has_dissolution
 export setup_co2lab_model, setup_co2lab_state, setup_co2lab_simulator
 export LinearShrinkage, ConstantViscosities, MaxGasSaturation, DissolvedCO2Equation
 export HysteresisEquation
 
-include("instant_dissolution.jl")
+include("ve/instant_dissolution.jl")
 export DissolvedOrFreeCO2
 
-include("vewells.jl")
+include("ve/vewells.jl")
 export ve_well_index, setup_ve_well, co2_injector_control
 
-include("vebc.jl")
+include("ve/vebc.jl")
 export VEBoundaryCondition, ve_select_sides, ve_boundary_conditions
 export ve_boundary_mass_fluxes
 
-include("vereconstruct.jl")
+include("ve/vereconstruct.jl")
 export ve_reconstruct
 
-include("atlas.jl")
+include("atlas/atlas.jl")
 export atlas_data_directory, atlas_formation_names, read_aai_grid, atlas_map_files
 export read_atlas_maps, atlas_average_rock
 
-include("atlas_grid.jl")
+include("atlas/atlas_grid.jl")
 export atlas_grid_section
 
 end # module

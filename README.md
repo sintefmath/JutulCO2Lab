@@ -13,8 +13,8 @@ structures Stage 8 (hybrid) extends — stackable columns cut by connectivity
 and per-cell VE/fine branch points; Stage 3: co2lab's hysteresis (residual
 trapping); and Stage 4: dissolution, rate-driven and instantaneous, each
 gated against co2lab to solver precision.
-Readable walkthroughs: `../scripts/example_sloping_aquifer.jl` (Stage 2) and
-`../scripts/example_residual_trapping.jl` (Stage 3, residual trapping). The plan
+Readable walkthroughs: `examples/sloping_aquifer.jl` (Stage 2) and
+`examples/residual_trapping.jl` (Stage 3, residual trapping). The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
@@ -25,7 +25,7 @@ VE columns over the 3D grid, and whose black-oil system carries co2lab's
 formulation and VE physics as replaced variables. Nothing in Jutul or
 JutulDarcy is patched except one Jutul bug fix (see Environment).
 
-**Data flow** (`../scripts/example_sloping_aquifer.jl` follows it step by step):
+**Data flow** (`examples/sloping_aquifer.jl` follows it step by step):
 
 1. *3D mesh*: a Jutul `UnstructuredMesh` with logical `(i, j, k)` and a
    direction tag on every boundary face — from MRST (`ve_mesh_from_mrst`) or
@@ -153,27 +153,36 @@ height-scaled well index.
 src/JutulCO2Lab.jl   module root
 src/oracle.jl        Oracle — MRST dump reader and the tolerance-checked comparison
 src/provenance.jl    source commits + dirty state, recorded in every report
-src/vegrid.jl        VE columns on the 3D mesh: partition, trimming, column geometry
-src/vefaces.jl       face directions (MRST tags / logical indices) and column sides — topology only
-src/vedomain.jl      VE domain on a CoarseMesh: upscaled rock, caprock datum, boundary sides
-src/rock_compressibility.jl  co2lab's linear pore volume, a model setting
-src/ve_fluid.jl      co2lab's VE fluid: plume heights, sharp-interface relperm, pcWG,
+
+src/ve/              the VE simulator
+  vegrid.jl          VE columns on the 3D mesh: partition, trimming, column geometry
+  vefaces.jl         face directions (MRST tags / logical indices) and column sides
+                     — topology only
+  vedomain.jl        VE domain on a CoarseMesh: upscaled rock, caprock datum,
+                     boundary sides
+  rock_compressibility.jl  co2lab's linear pore volume, a model setting
+  ve_fluid.jl        co2lab's VE fluid: plume heights, sharp-interface relperm, pcWG,
                      linear PVT; column height and rugosity parameters
-src/co2lab_fluid.jl  co2lab's fluid system: black-oil with a :co2lab formulation,
+  co2lab_fluid.jl    co2lab's fluid system: black-oil with a :co2lab formulation,
                      unknowns by configuration; dissolution transfer, hysteresis;
                      model, state and simulator setup
-src/instant_dissolution.jl  co2lab's instantaneous dissolution: switching unknown
-src/atlas.jl         CO2 Storage Atlas: data location, map reader, formation names,
-                     average rock (Stage 5)
-src/atlas_grid.jl    CO2 Storage Atlas: top and thickness maps to a corner-point grid
-                     section, rock maps (Stage 5)
-src/vewells.jl       VE wells: co2lab's well index, pressure datum option, CO2 injector
-src/vebc.jl          VE boundary conditions: co2lab's pressure BC as a force, side
+  instant_dissolution.jl  co2lab's instantaneous dissolution: switching unknown
+  vewells.jl         VE wells: co2lab's well index, pressure datum option, CO2
+                     injector
+  vebc.jl            VE boundary conditions: co2lab's pressure BC as a force, side
                      selection, exited mass
-src/vereconstruct.jl 3D states from VE states: saturation from plume heights,
+  vereconstruct.jl   3D states from VE states: saturation from plume heights,
                      hydrostatic pressure
+
+src/atlas/           the CO2 Storage Atlas (Stage 5)
+  atlas.jl           data location, map reader, formation names, average rock
+  atlas_grid.jl      top and thickness maps to a corner-point grid section, rock maps
+
+examples/            readable walkthroughs (run from the project root with
+                     scripts/julia --project=JutulCO2Lab JutulCO2Lab/examples/...)
 test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, wells,
-                     boundary conditions and reconstruction (vs MRST), toolchain smoke test
+                     boundary conditions and reconstruction (vs MRST), Atlas,
+                     toolchain smoke test
 ../scripts/          MRST/Octave reference dumps, prototypes, gate scripts
 ```
 
