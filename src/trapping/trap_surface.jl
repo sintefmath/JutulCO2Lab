@@ -1,4 +1,4 @@
-# The top surface as the trapping analysis sees it (roadmap Stage 9 item 1) —
+# The top surface as the trapping analysis sees it (roadmap Stage 8 item 1) —
 # what co2lab-spillpoint takes from the top-surface grid Gt: node coordinates
 # and depths, edges with the columns on either side, and per column its
 # caprock depth, height, area, centroid and corner nodes.

@@ -1,4 +1,4 @@
-# Surfaces from files for trap analysis (roadmap Stage 9 item 6): co2lab-
+# Surfaces from files for trap analysis (roadmap Stage 8 item 6): co2lab-
 # spillpoint's readIrapClassicAsciiSurf and readIGEMSIRAP — IRAP classic ASCII
 # surfaces, and the IGEMS data set's surfaces as one-layer grids.
 #

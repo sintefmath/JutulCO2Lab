@@ -819,7 +819,7 @@ end
         @test_logs (:warn, r"2 unconnected pieces") ve_domain(
             cut, cols; perm_x = fill(1e-13, 4), poro = fill(0.2, 4))
 
-        # fine 3D cells are Stage 8; below_holes must be a known mode
+        # fine 3D cells are Stage 12; below_holes must be a known mode
         @test_throws ArgumentError ve_columns(m; is_ve = [true; fill(false, nc(m) - 1)])
         @test first(ve_columns(m; is_ve = fill(true, nc(m)))).pos == [1, 2, 3, 6]
         @test_throws ArgumentError ve_columns(m; below_holes = :bridge)
@@ -1340,7 +1340,7 @@ end
         end
     end
 
-    @testset "trapping analysis vs co2lab-spillpoint (Stage 9)" begin
+    @testset "trapping analysis vs co2lab-spillpoint (Stage 8)" begin
         f = joinpath(refdir, "traps.mat")
         if !isfile(f) || !isdir(atlas_data_directory())
             @info "Skipping: Atlas data or $f (scripts/mrst_dump_traps.m) missing"

@@ -1,5 +1,5 @@
-# Comparisons of the trapping analysis with co2lab-spillpoint (roadmap Stage 9),
-# used by the package tests (runtests.jl) and the Stage 9 gate. Each takes the
+# Comparisons of the trapping analysis with co2lab-spillpoint (roadmap Stage 8),
+# used by the package tests (runtests.jl) and the Stage 8 gate. Each takes the
 # MRST export traps.mat (scripts/mrst_dump_traps.m, read with matread) and
 # returns an OracleReport.
 

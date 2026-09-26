@@ -9,7 +9,7 @@ columns, geometry, rock, caprock datum, boundary sides — all derived from the
 3D grid and verified against MRST), and Stage 2: co2lab's fluid system, VE
 relperm, `pcWG`, PVT, VE wells, VE boundary conditions and reconstruction of
 3D states, running end to end on co2lab's sloping aquifer, plus the
-structures Stage 8 (hybrid) extends — stackable columns cut by connectivity
+structures Stage 12 (hybrid) extends — stackable columns cut by connectivity
 and per-cell VE/fine branch points; Stage 3: co2lab's hysteresis (residual
 trapping); and Stage 4: dissolution, rate-driven and instantaneous, each
 gated against co2lab to solver precision.
@@ -68,7 +68,7 @@ JutulDarcy is patched except one Jutul bug fix (see Environment).
 | wells | none: JutulDarcy's wells with co2lab's well index and a CO2 wellbore column (`co2_injector_control`) | `vewells.jl` |
 
 The VE variables branch per cell on `is_ve`, and fluxes will branch per face
-through a custom `kgrad` type: these are where Stage 8 (hybrid) adds fine 3D
+through a custom `kgrad` type: these are where Stage 12 (hybrid) adds fine 3D
 cells (`../analysis/ve-meshing/isve-branch-proposal.md`).
 
 Deliberate differences from co2lab are listed in the roadmap's standing
@@ -192,7 +192,7 @@ src/plotting.jl      plotting functions (declared and documented; implemented in
 ext/JutulCO2LabMakieExt/  Makie extension: VE map views, Atlas maps, coastline;
                      loaded with GLMakie or CairoMakie
 
-src/trapping/        structural traps (Stage 9, co2lab-spillpoint)
+src/trapping/        structural traps (Stage 8, co2lab-spillpoint)
   trap_surface.jl    the caprock as trap analysis sees it (co2lab's Gt quantities)
   cell_traps.jl      the cell-based method: traps, spill depths, rivers, regions
   node_traps.jl      the node-based method: spill field, regions, cycle merging
@@ -212,7 +212,7 @@ test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, we
                      boundary conditions and reconstruction (vs MRST), Atlas,
                      toolchain smoke test
 test/atlas_checks.jl the Atlas comparisons with co2lab, shared with the Stage 5 gate
-test/trap_checks.jl  the trapping comparisons with co2lab, shared with the Stage 9 gate
+test/trap_checks.jl  the trapping comparisons with co2lab, shared with the Stage 8 gate
 ../scripts/          MRST/Octave reference dumps, prototypes, gate scripts
 ```
 

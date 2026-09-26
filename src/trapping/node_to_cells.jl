@@ -1,6 +1,6 @@
 # The node-based traps projected to columns: co2lab-spillpoint's n2cTraps,
 # nodeFieldToCellField, shortestPath, subregionConnectivityMatrix (roadmap
-# Stage 9 item 3). A column takes the value of its shallowest corner; a trap
+# Stage 8 item 3). A column takes the value of its shallowest corner; a trap
 # whose columns all lie at or below its spill depth disappears, its region
 # and rivers passing on to the next remaining trap downstream.
 

@@ -85,14 +85,14 @@ Stacked columns (`ve_columns(...; below_holes = :stack)`) are built fully:
 coarse faces between stacked columns of one pillar (sealed by construction)
 get zero transmissibility, and a warning is given if the columns fall apart
 into unconnected pieces (model them separately instead). Such a domain
-cannot be simulated before roadmap Stage 8 ([`setup_co2lab_model`](@ref)
+cannot be simulated before roadmap Stage 12 ([`setup_co2lab_model`](@ref)
 rejects it).
 
 Returns the NamedTuple `(domain, coarse, geometry, rock)`, all new:
 - `domain`: the `DataDomain` on the `CoarseMesh` (from `reservoir_domain`),
   with the averaged `:permeability`, `:porosity` (and `:net_to_gross`),
   `:column_height` and `:rugosity` per column, `:is_ve` (all true: fine
-  cells are Stage 8) and `:pillar_columns` (number of columns in the
+  cells are Stage 12) and `:pillar_columns` (number of columns in the
   column's pillar; 1 unless stacked), and `:gdz` on `Faces()` from the
   caprock depths; `:transmissibilities` only if stacked columns need sealed
   faces;

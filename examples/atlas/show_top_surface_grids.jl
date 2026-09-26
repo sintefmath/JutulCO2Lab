@@ -69,7 +69,7 @@ println("after ve_trim: ", number_of_cells(mesh), " cells in ",
         number_of_columns(columns), " columns")
 
 # Alternatively the part below a hole becomes a column of its own, in the same
-# pillar ("stacked"); such domains need the hybrid model of roadmap Stage 8.
+# pillar ("stacked"); such domains need the hybrid model of roadmap Stage 12.
 untrimmed = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(section(.!cut))
 stacked, _ = ve_columns(untrimmed; below_holes = :stack)
 println("with below_holes = :stack: ", number_of_columns(stacked), " columns")

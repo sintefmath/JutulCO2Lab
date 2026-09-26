@@ -1,6 +1,6 @@
 # Structural traps along the surface's nodes and edges: co2lab-spillpoint's
 # node-based method, trapAnalysis(Gt, false) — findUpslopeNeighbor,
-# nodeSpillField, computeNodeTraps (roadmap Stage 9 item 3). Results per node;
+# nodeSpillField, computeNodeTraps (roadmap Stage 8 item 3). Results per node;
 # node_to_cells.jl projects them to columns (n2cTraps).
 #
 # Every node drains to its steepest upslope neighbour (over edges and quad

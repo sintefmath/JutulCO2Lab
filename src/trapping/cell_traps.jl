@@ -1,6 +1,6 @@
 # Structural traps from column depths and column adjacency: co2lab-spillpoint's
 # cell-based method, trapAnalysis(Gt, true) — findTrappingStructure,
-# findTrapConnections, maxTPFAGravityMatrix (roadmap Stage 9 item 2).
+# findTrapConnections, maxTPFAGravityMatrix (roadmap Stage 8 item 2).
 #
 # Depths are positive down: CO2 rises to smaller z. A "top" column has no
 # shallower neighbour; a trap is the set of columns reached downhill from a top

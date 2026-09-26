@@ -1,4 +1,4 @@
-# The trapping analysis's front end (roadmap Stage 9 item 4): co2lab's
+# The trapping analysis's front end (roadmap Stage 8 item 4): co2lab's
 # trapAnalysis(Gt, method, ...), on a trap surface.
 
 """

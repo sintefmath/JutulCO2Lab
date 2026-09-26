@@ -55,7 +55,7 @@ show_figure(fig, "north_sea_grids")
 
 # Full resolution: number of cells, depth range of the caprock and bulk
 # volume. co2lab adds the volume in structural traps; that needs the trap
-# analysis of roadmap Stage 9.
+# analysis of roadmap Stage 8.
 println("\nNorth Sea formations, full resolution:")
 println("  name          |  cells | top min | top max | bulk volume (m³)")
 println("  --------------|--------|---------|---------|-----------------")

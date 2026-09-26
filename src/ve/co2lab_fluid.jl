@@ -649,7 +649,7 @@ configuration decides the unknowns (see the top of `co2lab_fluid.jl`):
 - each well's CO2 counts as supply for dissolution in its cells
   ([`DissolutionWellSupplyCT`](@ref)).
 - stacked columns (`ve_columns(...; below_holes = :stack)`, `domain`'s
-  `:pillar_columns` above 1) need the transition flux of Stage 8: throws.
+  `:pillar_columns` above 1) need the transition flux of Stage 12: throws.
 
 With dissolution on, the wellbores use JutulDarcy's equilibrium formulation
 of the same fluid, while the reservoir uses co2lab's (the dissolved-CO2 law
@@ -671,7 +671,7 @@ function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve
                                                     compressibility = 1e-10))
     haskey(domain, :pillar_columns) && any(>(1), domain[:pillar_columns]) &&
         error("stacked columns connect through partial faces, which need the " *
-              "transition flux of roadmap Stage 8; not implemented yet")
+              "transition flux of roadmap Stage 12; not implemented yet")
     model = _co2lab_multimodel(domain, wells, fluid)
     rmodel = model[:Reservoir]
     instantaneous_dissolution(fluid) && _set_instant_dissolution!(rmodel, fluid)

@@ -203,7 +203,7 @@ end
 # ------------------------ VE / fine-cell branch points ------------------------
 #
 # The three VE variables below branch per cell on `is_ve` (`nothing` = all VE;
-# else one Bool per cell), so that roadmap Stage 8 (hybrid: fine 3D cells)
+# else one Bool per cell), so that roadmap Stage 12 (hybrid: fine 3D cells)
 # adds the fine side without reshaping them
 # (analysis/ve-meshing/isve-branch-proposal.md). With `nothing` the branch is
 # compiled away. Saturation regions, when they come, are a separate `regions`
@@ -213,10 +213,10 @@ end
 _is_ve(::Nothing, i) = true
 _is_ve(is_ve::AbstractVector{Bool}, i) = is_ve[i]
 
-# Fine-cell sides of the relperm and capillary pressure: roadmap Stage 8.
-_fine_relperm(fine, i) = error("fine 3D cells (relperm) are roadmap Stage 8")
+# Fine-cell sides of the relperm and capillary pressure: roadmap Stage 12.
+_fine_relperm(fine, i) = error("fine 3D cells (relperm) are roadmap Stage 12")
 _fine_capillary_pressure(i) = error("fine 3D cells (capillary pressure) are " *
-                                    "roadmap Stage 8")
+                                    "roadmap Stage 12")
 
 """
 Plume heights per column: row 1 `h`, row 2 `h_max` (m); zero in fine cells
@@ -251,7 +251,7 @@ end
 
 """
 co2lab's `'sharp_interface_simple'` relperm; phases (brine, CO2). In fine cells
-(`is_ve`) the 3D relperm `fine` — roadmap Stage 8, `nothing` until then.
+(`is_ve`) the 3D relperm `fine` — roadmap Stage 12, `nothing` until then.
 """
 struct VESharpInterfaceRelPerm{V, F} <: JutulDarcy.AbstractRelativePermeabilities
     krw::Float64
@@ -279,7 +279,7 @@ end
 
 """
 `pcWG = (ρ_brine − ρ_CO2)·g·h`, added to the brine pressure for CO2. Fine cells
-(`is_ve`): roadmap Stage 8.
+(`is_ve`): roadmap Stage 12.
 """
 struct VECapillaryPressure{V} <: JutulDarcy.AbstractCapillaryPressure
     is_ve::V

@@ -100,11 +100,11 @@ whose cells still share a face (a pinch-out) does not cut. Below a cut:
   discarded; one column per pillar.
 - `below_holes = :stack` — each connected stretch is its own column. Such
   columns connect laterally through partial faces, which need the transition
-  flux of roadmap Stage 8: the domain can be built, but `setup_co2lab_model`
+  flux of roadmap Stage 12: the domain can be built, but `setup_co2lab_model`
   rejects it.
 
 `is_ve` (one `Bool` per cell of `mesh`, `nothing` = all VE) marks fine 3D
-cells, which are roadmap Stage 8: any `false` is rejected for now.
+cells, which are roadmap Stage 12: any `false` is rejected for now.
 
 Returns `(columns, discarded)`: a new `VEColumns` of the cells kept (cell
 indices into `mesh`), and the discarded cells as a sorted `Vector{Int}` of
@@ -146,12 +146,12 @@ function ve_columns(mesh; below_holes::Symbol = :discard, sealed_faces = (),
     return (VEColumns(cells, pos, partition, pillar), sort!(discarded))
 end
 
-# Reject fine 3D cells (is_ve false) until roadmap Stage 8.
+# Reject fine 3D cells (is_ve false) until roadmap Stage 12.
 function _check_all_ve(is_ve, nc)
     isnothing(is_ve) && return nothing
     length(is_ve) == nc || throw(ArgumentError("is_ve: one value per cell expected"))
     all(is_ve) || throw(ArgumentError("fine 3D cells (is_ve false) need the hybrid " *
-                                      "model of roadmap Stage 8; not implemented yet"))
+                                      "model of roadmap Stage 12; not implemented yet"))
     return nothing
 end
 

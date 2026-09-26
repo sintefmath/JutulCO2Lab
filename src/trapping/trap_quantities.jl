@@ -1,4 +1,4 @@
-# Quantities derived from a trap analysis (roadmap Stage 9 item 5): trap
+# Quantities derived from a trap analysis (roadmap Stage 8 item 5): trap
 # volumes, downstream traps, capacity trees, the best injection point and the
 # flattened caprock — co2lab's volumesOfTraps, downstreamTraps,
 # maximizeTrapping, findOptimalInjectionPoint, flattenTraps.
