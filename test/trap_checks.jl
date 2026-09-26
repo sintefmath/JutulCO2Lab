@@ -4,10 +4,16 @@
 # returns an OracleReport.
 
 # The mesh and columns of one exported case: an Atlas formation as co2lab builds
-# it (co2lab_compatible, no thin-cell removal), or the synthetic sine surface
+# it (co2lab_compatible, no thin-cell removal), an IGEMS surface as co2lab
+# builds it ("IGEMS/<family>/<i>", transposed), or the synthetic sine surface
 function _trap_case_mesh(e)
     name, c = e["name"], Int(e["coarsening"])
     name == "sine" && return _sine_mesh()
+    if startswith(name, "IGEMS/")
+        _, family, i = split(name, "/")
+        m = igems_mesh(family, parse(Int, i); coarsening = c, co2lab_compatible = true)
+        return (m.mesh, m.columns)
+    end
     m = atlas_mesh(name; coarsening = c, co2lab_compatible = true, min_thickness = 0.0)
     return (m.mesh, m.columns)
 end
@@ -63,6 +69,16 @@ function _trap_surface_vs_mrst(d)
     return rep
 end
 
+# The trap surface of one exported case with co2lab's column depths: our depths
+# agree with co2lab's only to about an ulp (face centroids computed in a
+# different order), and on surfaces with rounded depths (IGEMS: 1 cm) exact
+# ties are common, so an ulp can decide a trap. The algorithms are therefore
+# compared on identical input; _trap_surface_vs_mrst checks the depths.
+function _trap_case_surface(e)
+    mesh, cols = _trap_case_mesh(e)
+    return (; trap_surface(mesh, cols)..., zc = _vecs(e["cell_z"]))
+end
+
 # Our trap numbers → co2lab's, matching traps by their columns (co2lab's trap
 # numbering follows dmperm and is arbitrary); nothing if the sets differ
 function _trap_mapping(ours, theirs)
@@ -80,17 +96,16 @@ end
 # co2lab's rivers per trap (exported as [trap; river; cells...]) as sets
 _mrst_rivers(t) = [(Int(r[1]), Int.(r[3:end])) for r in vec(t["rivers"]) if !isempty(r)]
 
-# Item 2 (cell-based) or 3 (node-based): trapAnalysis's result, traps matched
-# by their columns — trap membership, spill depths, spill regions, trap
-# connections, tops and rivers
+# Item 2 (cell-based) or 3 (node-based): trapAnalysis's result on identical
+# input (_trap_case_surface), traps matched by their columns — trap
+# membership, spill depths, spill regions, trap connections, tops and rivers
 function _traps_vs_mrst(d, method::Symbol)
     rep = OracleReport("Traps ($method-based) vs co2lab's trapAnalysis"; mrst = d)
     exact = Tolerance(0.0, 0.0)
     key = method == :cell ? "cell_based" : "node_based"
     for e in d["cases"]
         label = "$(e["name"]) c$(Int(e["coarsening"]))"
-        mesh, cols = _trap_case_mesh(e)
-        r = trap_analysis(trap_surface(mesh, cols); method)
+        r = trap_analysis(_trap_case_surface(e); method)
         t = e[key]
         theirs = Int.(vec(t["traps"]))
         check!(rep, "$label: number of traps", maximum(r.traps; init = 0),
@@ -130,14 +145,13 @@ _mrst_trees(T) = [(Int(r), Set(Int.(_vecs(t))), v) for (r, t, v) in
 function _trap_quantities_vs_mrst(d, method::Symbol)
     rep = OracleReport("Trap quantities ($method-based) vs co2lab"; mrst = d)
     exact, rel = Tolerance(0.0, 0.0), Tolerance(1e-12, 0.0)
-    # sums over up to thousands of columns: Julia sums pairwise, MATLAB in order
-    vol = Tolerance(1e-10, 0.0)
+    # sums over up to thousands of columns (measured 3e-15)
+    vol = Tolerance(1e-12, 0.0)
     for e in d["cases"]
         label = "$(e["name"]) c$(Int(e["coarsening"]))"
         t = e[method == :cell ? "cell_based" : "node_based"]
         isempty(t["volumes"]) && continue
-        mesh, cols = _trap_case_mesh(e)
-        s = trap_surface(mesh, cols)
+        s = _trap_case_surface(e)
         r = trap_analysis(s; method)
         m = _trap_mapping(r.traps, Int.(_vecs(t["traps"])))
         if isnothing(m)

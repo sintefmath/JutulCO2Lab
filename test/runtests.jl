@@ -1355,6 +1355,15 @@ end
         end
         @test_throws ArgumentError trap_analysis((;); method = :other)
         @test_throws ArgumentError trap_analysis((;); closed_fault_edges = [(1, 2)])
+
+        # IGEMS surfaces: the file's orientation by default, co2lab's transposed
+        if isdir(atlas_data_directory())
+            a = trap_surface(igems_mesh("OSS", 1; coarsening = 4)...)
+            b = trap_surface(igems_mesh("OSS", 1; coarsening = 4,
+                                        co2lab_compatible = true)...)
+            @test Set(zip(a.x, a.y, a.z)) == Set(zip(b.y, b.x, b.z))
+            @test_throws ArgumentError igems_surface_path("OSS", 1000)
+        end
     end
 
     @testset "VE fluid vs MRST co2lab (Stage 2 items 1, 3)" begin

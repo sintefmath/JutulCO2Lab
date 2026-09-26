@@ -89,8 +89,10 @@ include("trapping/node_traps.jl")
 include("trapping/node_to_cells.jl")
 include("trapping/trap_analysis.jl")
 include("trapping/trap_quantities.jl")
+include("trapping/surfaces.jl")
 export trap_surface, trap_analysis, trap_volumes, downstream_traps
 export maximize_trapping, optimal_injection_point, flatten_traps
+export read_irap_surface, igems_surface_path, igems_mesh
 
 include("plotting.jl")
 export plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!

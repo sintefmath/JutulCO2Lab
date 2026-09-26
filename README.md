@@ -200,6 +200,7 @@ src/trapping/        structural traps (Stage 9, co2lab-spillpoint)
   trap_analysis.jl   the front end, trap_analysis (co2lab's trapAnalysis)
   trap_quantities.jl trap volumes, downstream traps, capacity trees, injection
                      point, flattened caprock
+  surfaces.jl        IRAP surfaces and IGEMS grids
 
 examples/            readable walkthroughs, with their own environment
                      (examples/Project.toml: JutulCO2Lab, the Jutul fork,

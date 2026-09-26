@@ -113,6 +113,8 @@ benchmark files read, `sleipner.jl`).
 | 48 | *Trap analysis* (NamedTuple) | `trap_analysis.jl`, `cell_traps.jl`, `node_to_cells.jl` | `(traps, trap_z, trap_regions, trap_adj, rivers, top)`: trap index per column (0: none), spill depth per trap, the trap each column drains into (0: none), which trap spills into which (sparse `Bool`), rivers per trap (vectors of columns), trap tops — co2lab's `trapAnalysis` result | 47 (`trap_analysis`) |
 | 49 | *Capacity tree* (NamedTuple) | `trap_quantities.jl` | `(root, traps, value)`: a root trap, it and all traps downstream (sorted), their trap volume (unit porosity) — one of `maximize_trapping`'s results | 48, 47 (`maximize_trapping`) |
 | 50 | *Injection point* (NamedTuple) | `trap_quantities.jl` | `(column, volume, edges, traps)`: the shallowest column on the best interface between two spill regions, the trap volume downstream of them, the interface's edges, the two regions' traps (0: outside) | 48, 47 (`optimal_injection_point`) |
+| 51 | *IRAP surface* (NamedTuple) | `surfaces.jl` | `(x, y, z, angle)`: node positions along x and y, depths `nx × ny` (x along the first index; NaN missing), the header's rotation angle (not applied) | a file (`read_irap_surface`) |
+| 52 | *Surface grid* (NamedTuple) | `surfaces.jl` | `(mesh, columns)`: a one-layer `UnstructuredMesh` under a surface and its `VEColumns` (1) | 51 (`igems_mesh`) |
 
 ## F. MRST comparison harness (`JutulCO2Lab.Oracle`), independent of A–E
 
