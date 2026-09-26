@@ -21,7 +21,8 @@ const _JURASSIC_TOP = ("Sognefjordfm", "Fensfjordfm", "Krossfjordfm", "Huginfmea
 
 """
     atlas_grid_section(name; coarsening = 1, refining = 1, nz = 1,
-                       co2lab_compatible = false) -> NamedTuple
+                       min_thickness = 1e-3, co2lab_compatible = false)
+        -> NamedTuple
 
 Grid section of Atlas formation `name` (case-insensitive), as co2lab's
 `getAtlasGrid(name, 'coarsening', c, 'refining', r, 'nz', nz)`:
@@ -33,12 +34,15 @@ Grid section of Atlas formation `name` (case-insensitive), as co2lab's
 - one pillar at each value of the top map; top and thickness interpolated
   bilinearly onto the pillars, the thickness split into `nz` equal layers;
 - a cell is active when all four of its pillars have a top and a positive
-  thickness;
+  thickness, and the cell is at least `min_thickness` thick (in metres, the
+  mean over its four corners; the maps hold "zero" thickness as values down
+  to 1e-9 m, which co2lab keeps as cells micrometres thick);
 - rock maps of the formation (`PORO`, `PERMX` = `PERMY` = `PERMZ` in m²,
   `NTG`), where the Atlas has them, interpolated to the cell centres; `NaN`
   where the maps have no value.
 
-`co2lab_compatible = true` reproduces co2lab's deck exactly, for comparisons:
+`co2lab_compatible = true` with `min_thickness = 0` reproduces co2lab's deck
+exactly, for comparisons:
 co2lab's placement of the maps ([`read_atlas_maps`](@ref)) and its
 activity mask, which also removes the cells east and north of an undefined
 pillar and wraps around the lattice's edges (`co2lab-issues.org`).
@@ -55,6 +59,7 @@ Returns `(grid, petro)`, both new:
 """
 function atlas_grid_section(name::AbstractString; coarsening::Integer = 1,
                             refining::Integer = 1, nz::Integer = 1,
+                            min_thickness::Real = 1e-3,
                             co2lab_compatible::Bool = false)
     top, thick = _atlas_top_and_thickness(name, coarsening, co2lab_compatible)
     if refining > 1
@@ -64,6 +69,7 @@ function atlas_grid_section(name::AbstractString; coarsening::Integer = 1,
     Z = _atlas_node_depths(top, thick, nz)
     nx, ny = size(Z, 1) - 1, size(Z, 2) - 1
     active = _atlas_active_cells(Z, co2lab_compatible)
+    active .&= _mean_cell_thickness(Z) .>= min_thickness
     grid = Dict{String, Any}("cartDims" => (nx, ny, nz),
                              "COORD" => _atlas_coord(top, Z),
                              "ZCORN" => _atlas_zcorn(Z),
@@ -132,6 +138,14 @@ function _atlas_zcorn(Z)
     # corner index m of 2n → node 1 + m ÷ 2: 1, 2, 2, 3, 3, …, n + 1
     ind(d) = [1 + m ÷ 2 for m in 1:2*(size(Z, d) - 1)]
     return _zero_undefined!(vec(Z[ind(1), ind(2), ind(3)]))
+end
+
+# Mean thickness of each cell of one layer (nx × ny) over its four corners;
+# NaN where a corner is undefined
+function _mean_cell_thickness(Z)
+    dz = Z[:, :, 2] .- Z[:, :, 1]
+    return (dz[1:end-1, 1:end-1] .+ dz[2:end, 1:end-1] .+
+            dz[1:end-1, 2:end] .+ dz[2:end, 2:end]) ./ 4
 end
 
 "Set the non-finite entries of `v` to 0. Modifies: `v`. Returns `v`."

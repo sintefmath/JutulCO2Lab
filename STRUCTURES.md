@@ -92,6 +92,7 @@ Constants: `_WELL_CONSTANT_RATIO`, `_WELL_CONSTANT_VALUE` (MRST's
 | 39 | *Atlas map* (NamedTuple) | `atlas.jl` | `(name, variant, meta, data)`: 37 with tops as depths, coarsened (and refined, `atlas_grid.jl`); `meta` adds `dims` and `x0`, `y0`, the position of `data[1, 1]` (its cell centre, or co2lab's corner with `co2lab_compatible`); `cellsize` is the spacing of the values | 38, 37 (`read_atlas_maps`) |
 | 40 | *Atlas average rock* (NamedTuple) | `atlas.jl` | `(perm, poro, ntg)`: the Atlas reports' averages, perm in m², NaN where none, `ntg` `nothing` unless given | formation name (`atlas_average_rock`) |
 | 41 | *Atlas grid section* (NamedTuple) | `atlas_grid.jl` | `(grid, petro)`: `grid` a GeoEnergyIO grid section `Dict{String, Any}` (`cartDims`, `COORD`, `ZCORN` with 0 at undefined pillars, `ACTNUM` `Array{Bool, 3}`, and `PORO`, `PERMX/Y/Z`, `NTG` as `Array{Float64, 3}` where the Atlas has rock maps); `petro` 40 with map means where there are maps | 39, 40 (`atlas_grid_section`) |
+| 42 | *Atlas VE domain* (NamedTuple) | `atlas_domain.jl` | `(mesh, columns, ve, grid, petro)`: the 3D `UnstructuredMesh` of the largest connected piece, its `VEColumns` (1), `ve_domain`'s result, the grid section (41) with `ACTNUM` restricted to the mesh, the average rock (40) | 41, 1, `ve_domain` (`atlas_ve_domain`) |
 
 Constants: `_ATLAS_DATASETS` (the three data-set directories),
 `_ATLAS_AVERAGE_ROCK` (co2lab's `getAvgRock` table), `_JURASSIC_MID`,

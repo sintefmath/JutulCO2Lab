@@ -73,4 +73,7 @@ export read_atlas_maps, atlas_average_rock
 include("atlas/atlas_grid.jl")
 export atlas_grid_section
 
+include("atlas/atlas_domain.jl")
+export atlas_ve_domain
+
 end # module

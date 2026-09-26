@@ -142,7 +142,7 @@ function _atlas_grids_vs_mrst(d)
     for e in d["cases"]
         c, r, nz = Int(e["coarsening"]), Int(e["refining"]), Int(e["nz"])
         o = atlas_grid_section(e["name"]; coarsening = c, refining = r, nz,
-                               co2lab_compatible = true)
+                               min_thickness = 0.0, co2lab_compatible = true)
         g = o.grid
         label = "$(e["name"]) c$c r$r nz$nz"
         zero_inf(x) = (v = vec(x); ifelse.(isinf.(v), 0.0, v))
@@ -169,6 +169,85 @@ function _atlas_grids_vs_mrst(d)
         check!(rep, "$label: petroinfo", ours[has], q[has]; tol = Tolerance(1e-12, 0.0))
     end
     return rep
+end
+
+# atlas_formations.mat (scripts/mrst_dump_atlas_formations.m):
+# getFormationTopGrid's Gt and rock2D for eight formation/coarsening/layer
+# cases. Julia removes cells thinner than 1 mm, which co2lab keeps: its
+# columns must be co2lab's minus thin ones, matched by the logical index of
+# their top cell. Columns holding a cell with a corner collapsed by
+# GeoEnergyIO (isapprox on depths) get a wrong volume from Jutul's geometry
+# and are left out of the pore-volume check (counted in the report instead).
+function _atlas_domains_vs_mrst(d)
+    rep = OracleReport("Atlas VE domains vs co2lab (getFormationTopGrid)")
+    exact = Tolerance(0.0, 0.0)
+    for e in d["cases"]
+        c, L = Int(e["coarsening"]), Int(e["layers"])
+        o = atlas_ve_domain(e["name"]; coarsening = c, layers = L,
+                            co2lab_compatible = true)
+        m, cols, ve = o.mesh, o.columns, o.ve
+        label = "$(e["name"]) c$c layers $L"
+        LI = LinearIndices(Tuple(Int.(vec(e["cartDims"]))))
+        lin(cell) = LI[cell_ijk(m, cell)...]
+
+        mrst_cells = Set(Int.(vec(e["indexMap"])))
+        check!(rep, "$label: 3D cells not in co2lab's",
+               count(i -> !(lin(i) in mrst_cells), 1:number_of_cells(m)), 0; tol = exact)
+        top = Dict(t => k for (k, t) in enumerate(Int.(vec(e["top_cell"]))))
+        p = [get(top, lin(cols.cells[cols.pos[k]]), 0) for k in 1:number_of_columns(cols)]
+        check!(rep, "$label: columns not in co2lab's", count(==(0), p), 0; tol = exact)
+        any(==(0), p) && continue
+
+        # co2lab's columns that are not here: all thinner than 1 mm per layer
+        H_m = vec(e["height"])
+        gone = setdiff(1:Int(e["num_cells"]), p)
+        check!(rep, "$label: co2lab's columns removed (recorded)", length(gone),
+               length(gone); tol = exact)
+        check!(rep, "$label: removed columns thinner than 1 mm per layer",
+               count(>=(1e-3 * L), H_m[gone]), 0; tol = exact)
+
+        dom, geo, rock = ve.domain, ve.geometry, ve.rock
+        N = dom[:neighbors]
+        F = Int.(e["face_pairs"])
+        kept = Set(p)
+        pairs_m = Set(minmax(F[f, 1], F[f, 2]) for f in axes(F, 1)
+                      if F[f, 1] in kept && F[f, 2] in kept)
+        same_faces = Set(minmax(p[N[1, f]], p[N[2, f]]) for f in axes(N, 2)) == pairs_m
+        check!(rep, "$label: interior faces", same_faces ? 0 : 1, 0; tol = exact)
+
+        rel = Tolerance(1e-12, 0.0)
+        check!(rep, "$label: caprock depth", geo.z_top, vec(e["z_caprock"])[p]; tol = rel)
+        check!(rep, "$label: height", geo.H, H_m[p]; tol = Tolerance(1e-10, 1e-9))
+        check!(rep, "$label: perm", rock.perm, vec(e["perm"])[p]; tol = rel)
+        check!(rep, "$label: poro", rock.poro, vec(e["poro"])[p]; tol = rel)
+        has_ntg = !isempty(e["ntg"])
+        check!(rep, "$label: has ntg", isnothing(rock.ntg) ? 0 : 1, has_ntg ? 1 : 0;
+               tol = exact)
+        has_ntg && check!(rep, "$label: ntg", rock.ntg, vec(e["ntg"])[p]; tol = rel)
+
+        ok = .!_merged_columns(o)
+        check!(rep, "$label: columns with collapsed corners (recorded)", count(.!ok),
+               count(.!ok); tol = exact)
+        # pore volume: 3D cell volumes against MRST's area·H (Stage 1, ≤ 0.2 %)
+        ntg = has_ntg ? rock.ntg : 1.0
+        pv = dom[:volumes] .* dom[:porosity] .* ntg
+        check!(rep, "$label: pore volume (≤ 0.2 %)", pv[ok],
+               vec(e["pore_volume"])[p][ok]; tol = Tolerance(2e-3, 0.0))
+    end
+    return rep
+end
+
+# Columns of an atlas_ve_domain holding a cell with a corner whose top and
+# bottom depths GeoEnergyIO merges (isapprox)
+function _merged_columns(o)
+    nx, ny, nz = o.grid["cartDims"]
+    Z = reshape(o.grid["ZCORN"], 2nx, 2ny, 2nz)
+    merged(i, j, k) = any(isapprox.(Z[2i-1:2i, 2j-1:2j, 2k-1], Z[2i-1:2i, 2j-1:2j, 2k]))
+    out = fill(false, number_of_columns(o.columns))
+    for c in 1:number_of_cells(o.mesh)
+        merged(cell_ijk(o.mesh, c)...) && (out[o.columns.partition[c]] = true)
+    end
+    return out
 end
 
 # mrst_ref_{rate,bhp,src}.mat (scripts/stage2_mrst_comparison.jl): co2lab's
@@ -1321,6 +1400,28 @@ end
             @test size(s["PORO"]) == s["cartDims"]
             @test isequal(s["PORO"][:, :, 1], s["PORO"][:, :, 2])
             @test_throws ArgumentError atlas_grid_section("Paleocene")
+        end
+    end
+
+    @testset "CO2 Storage Atlas VE domains (Stage 5 step 3)" begin
+        f = joinpath(refdir, "atlas_formations.mat")
+        if !isfile(f) || !isdir(atlas_data_directory())
+            @info "Skipping: Atlas data or $f (scripts/mrst_dump_atlas_formations.m) missing"
+        else
+            rep = _atlas_domains_vs_mrst(matread(f))
+            passed(rep) || display(rep)
+            @test passed(rep)
+        end
+
+        if isdir(atlas_data_directory())
+            # one connected piece; with rock maps, no NaN left
+            o = atlas_ve_domain("Stofm"; coarsening = 4, layers = 2)
+            N = o.ve.domain[:neighbors]
+            g = JutulCO2Lab.Graphs.SimpleGraph(number_of_columns(o.columns))
+            foreach(f -> JutulCO2Lab.Graphs.add_edge!(g, N[1, f], N[2, f]), axes(N, 2))
+            @test JutulCO2Lab.Graphs.is_connected(g)
+            @test !any(isnan, o.ve.rock.perm) && !any(isnan, o.ve.rock.ntg)
+            @test all(==(2), diff(o.columns.pos))
         end
     end
 

@@ -179,6 +179,7 @@ src/ve/              the VE simulator
 src/atlas/           the CO2 Storage Atlas (Stage 5)
   atlas.jl           data location, map reader, formation names, average rock
   atlas_grid.jl      top and thickness maps to a corner-point grid section, rock maps
+  atlas_domain.jl    a formation as a VE domain: mesh, largest piece, columns, rock
 
 examples/            readable walkthroughs (run from the project root with
                      scripts/julia --project=JutulCO2Lab JutulCO2Lab/examples/...)
