@@ -85,6 +85,8 @@ export sleipner_data_directory, sleipner_grid_section, sleipner_ve_domain
 
 include("trapping/trap_surface.jl")
 include("trapping/cell_traps.jl")
+include("trapping/node_traps.jl")
+include("trapping/node_to_cells.jl")
 include("trapping/trap_analysis.jl")
 include("trapping/trap_quantities.jl")
 export trap_surface, trap_analysis, trap_volumes, downstream_traps

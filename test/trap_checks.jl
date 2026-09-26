@@ -171,3 +171,29 @@ function _trap_quantities_vs_mrst(d, method::Symbol)
     end
     return rep
 end
+
+# Closed boundary and fault edges (node-based): the sine surface with its west
+# boundary and a fault line closed, against co2lab (node numbers agree)
+function _closed_edges_vs_mrst(d)
+    rep = OracleReport("Closed edges (node-based) vs co2lab"; mrst = d)
+    exact = Tolerance(0.0, 0.0)
+    c = d["closed"]
+    s = trap_surface(_sine_mesh()...)
+    pairs(M) = [Tuple(sort(Int.(M[k, :]))) for k in axes(M, 1)]
+    r = trap_analysis(s; method = :node,
+                      closed_boundary_edges = pairs(c["closed_boundary"]),
+                      closed_fault_edges = pairs(c["closed_fault"]))
+    open = trap_analysis(s; method = :node)
+    m = _trap_mapping(r.traps, Int.(_vecs(c["traps"])))
+    check!(rep, "trap columns", isnothing(m) ? 1 : 0, 0; tol = exact)
+    isnothing(m) && return rep
+    check!(rep, "spill depths", r.trap_z, _vecs(c["trap_z"])[m];
+           tol = Tolerance(1e-12, 0.0))
+    regions = [g == 0 ? 0 : m[g] for g in r.trap_regions]
+    check!(rep, "spill regions", count(regions .!= Int.(_vecs(c["trap_regions"]))), 0;
+           tol = exact)
+    # the closed edges change the result (the check would be empty otherwise)
+    same = r.trap_regions == open.trap_regions
+    check!(rep, "differs from the open case", same ? 1 : 0, 0; tol = exact)
+    return rep
+end

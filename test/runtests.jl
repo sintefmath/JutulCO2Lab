@@ -1347,12 +1347,14 @@ end
         else
             d = matread(f)
             for rep in (_trap_surface_vs_mrst(d), _traps_vs_mrst(d, :cell),
-                        _trap_quantities_vs_mrst(d, :cell))
+                        _trap_quantities_vs_mrst(d, :cell), _traps_vs_mrst(d, :node),
+                        _trap_quantities_vs_mrst(d, :node), _closed_edges_vs_mrst(d))
                 passed(rep) || display(rep)
                 @test passed(rep)
             end
         end
         @test_throws ArgumentError trap_analysis((;); method = :other)
+        @test_throws ArgumentError trap_analysis((;); closed_fault_edges = [(1, 2)])
     end
 
     @testset "VE fluid vs MRST co2lab (Stage 2 items 1, 3)" begin

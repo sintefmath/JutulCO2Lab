@@ -23,7 +23,10 @@ H, area, cx, cy, outline)`, all new:
 - `corners`: `4 × ncol`, each column's west-south, east-south, west-north and
   east-north nodes (co2lab's `cellNodes`; for columns with four distinct
   top-face nodes, else 0);
-- `edges`: `2 × nedge` node pairs (smaller first, sorted), and
+- `edges`: `2 × nedge` node pairs (smaller first) in co2lab's order — when
+  every column has four corners, as its `cartesian_face_reordering`: each
+  column's west and east edges column by column, then all south edges,
+  then all north edges; otherwise sorted — and
   `edge_columns`: `2 × nedge`, the columns on either side (0 at the
   boundary);
 - `zc`, `H`: caprock depth and height per column
@@ -44,10 +47,16 @@ function trap_surface(mesh, columns::VEColumns)
     x, y, z = s.x[order], s.y[order], s.z[order]
 
     edges, edge_columns = _surface_edges(polygons)
+    corners = _polygon_corners(x, y, polygons)
+    # co2lab's order on lattice-like surfaces (ties in the node-based method)
+    if all(>(0), corners)
+        order = _co2lab_edge_order(edges, corners)
+        edges, edge_columns = edges[:, order], edge_columns[:, order]
+    end
     area, cx, cy = _polygon_geometry(x, y, polygons)
     outline = sort!([minmax(new[a], new[b]) for (a, b) in s.outline])
     return (x = x, y = y, z = z, polygons = polygons,
-            corners = _polygon_corners(x, y, polygons), edges = edges,
+            corners = corners, edges = edges,
             edge_columns = edge_columns, zc = geo.z_top, H = geo.H,
             area = area, cx = cx, cy = cy, outline = outline)
 end
@@ -72,6 +81,21 @@ function _surface_edges(polygons)
         cols[2, k] != 0 && (cols[:, k] = sort(cols[:, k]))
     end
     return (edges, cols)
+end
+
+# co2lab's edge order on a lattice (topSurfaceGrid's cartesian_face_reordering):
+# west and east edge of each column in turn, then the south edges, then the
+# north edges, each edge where it first appears
+function _co2lab_edge_order(edges, corners)
+    index = Dict((edges[1, k], edges[2, k]) => k for k in axes(edges, 2))
+    e(a, b) = index[minmax(a, b)]
+    ws, es, wn, en = (corners[i, :] for i in 1:4)
+    first = [k for c in axes(corners, 2) for k in (e(ws[c], wn[c]), e(es[c], en[c]))]
+    second = [[e(ws[c], es[c]) for c in axes(corners, 2)];
+              [e(wn[c], en[c]) for c in axes(corners, 2)]]
+    order = unique([unique(first); unique(second)])
+    length(order) == size(edges, 2) || return collect(axes(edges, 2))
+    return order
 end
 
 # West-south, east-south, west-north, east-north node of each column

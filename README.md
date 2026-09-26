@@ -195,6 +195,8 @@ ext/JutulCO2LabMakieExt/  Makie extension: VE map views, Atlas maps, coastline;
 src/trapping/        structural traps (Stage 9, co2lab-spillpoint)
   trap_surface.jl    the caprock as trap analysis sees it (co2lab's Gt quantities)
   cell_traps.jl      the cell-based method: traps, spill depths, rivers, regions
+  node_traps.jl      the node-based method: spill field, regions, cycle merging
+  node_to_cells.jl   node-based traps projected to columns (co2lab's n2cTraps)
   trap_analysis.jl   the front end, trap_analysis (co2lab's trapAnalysis)
   trap_quantities.jl trap volumes, downstream traps, capacity trees, injection
                      point, flattened caprock
