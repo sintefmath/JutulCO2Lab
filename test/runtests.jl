@@ -1388,7 +1388,11 @@ end
                   "mrst_dump_inventory.m) missing"
         else
             case = matread(c)
-            for rep in (_inventory_vs_mrst(case, matread(d)), _inventory_consistency(case))
+            reps = [_inventory_vs_mrst(case, matread(d)), _inventory_consistency(case)]
+            # co2lab's own run of the case, if exported (mrst_ref_inventory.m)
+            run = joinpath(refdir, "inventory_mrst_run.mat")
+            isfile(run) && push!(reps, _inventory_run_vs_mrst(case, matread(run)))
+            for rep in reps
                 passed(rep) || display(rep)
                 @test passed(rep)
             end

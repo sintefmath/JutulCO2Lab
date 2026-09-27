@@ -60,3 +60,48 @@ function _inventory_consistency(c)
            tol = Tolerance(0.0, 1e-10 * scale))
     return rep
 end
+
+# End to end: co2lab's own run of the case on Julia's geometry
+# (scripts/mrst_ref_inventory.m, inventory_mrst_run.mat) and its inventory of
+# its own states, against the Julia run and its inventory. Tolerances as the
+# Stage 4 gate's for runs on identical input (agreed 2026-09-26): 1e-8 —
+# relative for pressures, absolute for saturations and rs, relative to the
+# injected mass for masses. The injector's BHP is a known well-model
+# difference (researcher, 2026-09-28): JutulDarcy converts the injected
+# CO2's surface rate to reservoir volume at the wellbore pressure, co2lab at
+# the cell pressure, so with compressible CO2 the drawdown differs by c_G
+# times the drawdown; the check is that the difference stays within that.
+function _inventory_run_vs_mrst(c, r; tol = 1e-8)
+    rep = OracleReport("Inventory case: Julia run vs co2lab's run, end to end"; mrst = r)
+    rel, abs_ = Tolerance(tol, 0.0), Tolerance(0.0, tol)
+    check!(rep, "pressure", c["pressure"], r["pressure"]; tol = rel)
+    for k in ("sG", "sGmax", "rs")
+        check!(rep, k, c[k], r[k]; tol = abs_)
+    end
+    on = findall(>(0), vec(c["injected"]) .- [0.0; vec(c["injected"])[1:end-1]])
+    _bhp_vs_mrst!(rep, c, r, on)
+
+    scale = Tolerance(0.0, tol * maximum(c["injected"]))
+    for (j, name) in enumerate(TRAPPING_CATEGORIES)
+        check!(rep, "inventory: $name", c["inventory"][:, j], r["masses"][:, j];
+               tol = scale)
+    end
+    check!(rep, "injected", vec(c["injected"]), vec(r["injected"]); tol = scale)
+    check!(rep, "exited", vec(c["exited"]), vec(r["exited"]); tol = scale)
+    return rep
+end
+
+# The injector's BHP against co2lab's: the difference, relative to c_G times
+# the drawdown (BHP minus the well column's pressure), must not exceed 1.
+# Modifies: `rep` (a check added).
+function _bhp_vs_mrst!(rep, c, r, on)
+    col = Int(c["well_column"])
+    bhp, bhp_mrst = vec(c["bhp"])[on], vec(r["bhp"])[on]
+    drawdown = bhp .- c["pressure"][col, on]
+    diff = abs.(bhp .- bhp_mrst)
+    ratio = diff ./ (c["co2_rho_pvt"][1] .* drawdown .^ 2)
+    rel = round(maximum(diff ./ bhp_mrst); sigdigits = 2)
+    check!(rep, "injector BHP difference / (c_G × drawdown²) (well model; max " *
+           "rel $rel)", maximum(ratio), 0.0; tol = Tolerance(0.0, 1.0))
+    return rep
+end
