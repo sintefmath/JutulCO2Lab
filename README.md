@@ -15,8 +15,9 @@ trapping); and Stage 4: dissolution, rate-driven and instantaneous, each
 gated against co2lab to solver precision; Stage 5: the CO2 Storage Atlas
 and the Sleipner benchmark; Stage 8: co2lab-spillpoint's trapping analysis
 (both methods, the derived quantities, IRAP/IGEMS surfaces), identical to
-co2lab; Stage 9 item 2: the trapping inventory, identical to co2lab on
-identical input.
+co2lab (faults sealing by default); Stage 9 items 1–2: the trapping
+inventory, identical to co2lab on identical input and, end to end, against
+co2lab's own run of a Johansen case.
 Readable walkthroughs: `examples/sloping_aquifer.jl` (Stage 2),
 `examples/residual_trapping.jl` (Stage 3, residual trapping) and
 `examples/dissolution.jl` (Stage 4, rate-driven and instantaneous
