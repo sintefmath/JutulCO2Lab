@@ -28,17 +28,26 @@ function plot_ve_surface!(ax, surface; color = (:steelblue, 0.6), offset = 0.0,
     pts, tris, col = _surface_triangles(surface, offset)
     # one value or colour per column, or one colour for all
     c = color isa AbstractVector ? color[col] : color
-    mesh!(ax, pts, tris; color = c, colormap = colormap,
-          shading = shading)
+    # translucent colours must be flagged: GLMakie otherwise writes them to its
+    # depth buffer, hiding what lies behind them
+    mesh!(ax, pts, tris; color = c, colormap = colormap, shading = shading,
+          transparency = _translucent(color))
 
     if strokewidth > 0
         x, y, z = surface.x, surface.y, surface.z .+ offset
         edges = [Point3f(x[n], y[n], z[n]) for p in surface.polygons
                  for (k, a) in enumerate(p) for n in (a, p[mod1(k + 1, length(p))])]
-        linesegments!(ax, edges; color = strokecolor, linewidth = strokewidth)
+        linesegments!(ax, edges; color = strokecolor, linewidth = strokewidth,
+                      transparency = _translucent(strokecolor))
     end
     return ax
 end
+
+# Whether a colour (or any colour of a vector of colours) is translucent;
+# values drawn through a colormap are not
+_translucent(c::AbstractVector{<:Real}) = false
+_translucent(c::AbstractVector) = any(_translucent, c)
+_translucent(c) = Makie.to_color(c).alpha < 1
 
 # Each polygon as a fan of triangles around its node mean: points, triangles
 # and the column of each point. The triangles turn the same way in map view
