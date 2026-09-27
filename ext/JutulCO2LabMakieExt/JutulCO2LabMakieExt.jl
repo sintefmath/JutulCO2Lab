@@ -1,17 +1,19 @@
 """
 Makie extension of JutulCO2Lab: map views of VE domains and CO2 Storage Atlas
-data (roadmap Stage 5 item 5). Loaded with any Makie backend (GLMakie,
-CairoMakie). The functions are documented where they are declared, in
-`src/plotting.jl`.
+data (roadmap Stage 5 item 5), and of trapping analyses (Stage 8). Loaded
+with any Makie backend (GLMakie, CairoMakie). The functions are documented
+where they are declared, in `src/plotting.jl`.
 """
 module JutulCO2LabMakieExt
 
 using JutulCO2Lab, Makie
 import JutulCO2Lab: plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!,
-    plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure
+    plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure,
+    plot_traps, plot_traps!
 
 include("map_plots.jl")
 include("atlas_plots.jl")
+include("trap_plots.jl")
 
 # ------------------------------ Figures, backends -----------------------------
 

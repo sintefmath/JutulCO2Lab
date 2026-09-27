@@ -1,6 +1,7 @@
 # Surfaces from files for trap analysis (roadmap Stage 8 item 6): co2lab-
 # spillpoint's readIrapClassicAsciiSurf and readIGEMSIRAP — IRAP classic ASCII
-# surfaces, and the IGEMS data set's surfaces as one-layer grids.
+# surfaces, and the IGEMS data set's surfaces as one-layer grids — and
+# one-layer grids under any surface given on a lattice (synthetic caprocks).
 #
 # co2lab's IGEMS grids swap the file's x and y (the depth matrix is built with
 # y along the grid's x); here the surface keeps the file's orientation, and
@@ -80,22 +81,41 @@ function igems_mesh(name::AbstractString, i::Integer; coarsening::Integer = 1,
     z[1, :], z[end, :] = z[2, :], z[end-1, :]
     co2lab_compatible && (z = permutedims(z))
     h = (s.x[2] - s.x[1]) * coarsening
-    return _surface_mesh(z, h, 100.0)
+    x, y = [h * i for i in 0:size(z, 1)-1], [h * j for j in 0:size(z, 2)-1]
+    return surface_mesh(x, y, z; bottom = z .+ 100.0)
 end
 
-# A one-layer corner-point grid under a surface of depths `z` (nodes, spacing
-# h from the origin), `thickness` thick; cells with an undefined corner removed
-function _surface_mesh(z, h, thickness)
-    nx, ny = size(z, 1) - 1, size(z, 2) - 1
+# ------------------------------ Surface grids ---------------------------------
+
+"""
+    surface_mesh(x, y, top; bottom = top .+ 100.0) -> NamedTuple
+
+A one-layer corner-point grid between two surfaces given at the nodes of a
+lattice — for synthetic caprocks (co2lab's examples perturb a `cartGrid`'s
+nodes) and read surfaces: `x` (`nx + 1` values) and `y` (`ny + 1`) the node
+positions, `top` and `bottom` `(nx + 1) × (ny + 1)` depths (positive down).
+Cells with an undefined (`NaN`) corner on `top` are left out.
+
+Returns `(mesh, columns)`: a new `UnstructuredMesh` (GeoEnergyIO's) and its
+`VEColumns`.
+"""
+function surface_mesh(x::AbstractVector, y::AbstractVector, top::AbstractMatrix;
+                      bottom::AbstractMatrix = top .+ 100.0)
+    nx, ny = length(x) - 1, length(y) - 1
+    size(top) == size(bottom) == (nx + 1, ny + 1) ||
+        throw(ArgumentError("top and bottom must be $(nx + 1) × $(ny + 1)"))
+    defined = isfinite.(top)
+    # undefined nodes: a pillar from 0 to 100 m (touching inactive cells only)
+    zt, zb = ifelse.(defined, top, 0.0), ifelse.(defined, bottom, 100.0)
     coord = Float64[]
     for j in 0:ny, i in 0:nx
-        top = isfinite(z[i+1, j+1]) ? z[i+1, j+1] : 0.0
-        append!(coord, [h * i, h * j, top, h * i, h * j, top + thickness])
+        append!(coord, [x[i+1], y[j+1], zt[i+1, j+1], x[i+1], y[j+1], zb[i+1, j+1]])
     end
-    zt(a, b) = z[1 + a ÷ 2, 1 + b ÷ 2]
-    zcorn = [zt(a, b) + thickness * (c - 1) for c in 1:2 for b in 1:2ny for a in 1:2nx]
-    active = [all(isfinite, z[i:i+1, j:j+1]) for i in 1:nx, j in 1:ny, _ in 1:1]
-    zcorn[.!isfinite.(zcorn)] .= 0.0
+
+    # corner a of 2n along x lies on node 1 + a ÷ 2; layer c: top, bottom
+    zcorn = [(c == 1 ? zt : zb)[1 + a ÷ 2, 1 + b ÷ 2]
+             for c in 1:2 for b in 1:2ny for a in 1:2nx]
+    active = [all(defined[i:i+1, j:j+1]) for i in 1:nx, j in 1:ny, _ in 1:1]
     grid = Dict("cartDims" => (nx, ny, 1), "COORD" => coord, "ZCORN" => zcorn,
                 "ACTNUM" => active)
     mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)

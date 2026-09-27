@@ -12,13 +12,17 @@ relperm, `pcWG`, PVT, VE wells, VE boundary conditions and reconstruction of
 structures Stage 12 (hybrid) extends — stackable columns cut by connectivity
 and per-cell VE/fine branch points; Stage 3: co2lab's hysteresis (residual
 trapping); and Stage 4: dissolution, rate-driven and instantaneous, each
-gated against co2lab to solver precision.
+gated against co2lab to solver precision; Stage 5: the CO2 Storage Atlas
+and the Sleipner benchmark; Stage 8: co2lab-spillpoint's trapping analysis
+(both methods, the derived quantities, IRAP/IGEMS surfaces), identical to
+co2lab.
 Readable walkthroughs: `examples/sloping_aquifer.jl` (Stage 2),
 `examples/residual_trapping.jl` (Stage 3, residual trapping) and
 `examples/dissolution.jl` (Stage 4, rate-driven and instantaneous
 dissolution), and `examples/atlas/` (Stage 5, the CO2 Storage Atlas with
 plots: `show_co2_atlas.jl`, `models_from_atlas.jl`,
-`show_top_surface_grids.jl`, `sleipner_model.jl`). The plan
+`show_top_surface_grids.jl`, `sleipner_model.jl`) and `examples/trapping/`
+(Stage 8, co2lab-spillpoint's seven static examples). The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
@@ -184,23 +188,26 @@ src/atlas/           the CO2 Storage Atlas (Stage 5)
                      coastline and wells
   projection.jl      UTM zone conversion (coastline to the Atlas's zone)
   sleipner.jl        the Sleipner benchmark (IEAGHG, layer 9) as a VE model
+  johansen.jl        the Johansen NPD models (sector, full field), cut as co2lab
   atlas_grid.jl      top and thickness maps to a corner-point grid section, rock maps
-  atlas_domain.jl    a formation as a VE domain: mesh, largest piece, columns, rock
+  atlas_domain.jl    a formation as a VE domain: mesh, largest piece, columns,
+                     rock; subsets of grid sections
 
 src/plotting.jl      plotting functions (declared and documented; implemented in
                      the Makie extension)
-ext/JutulCO2LabMakieExt/  Makie extension: VE map views, Atlas maps, coastline;
-                     loaded with GLMakie or CairoMakie
+ext/JutulCO2LabMakieExt/  Makie extension: VE map views, Atlas maps, coastline,
+                     trap maps; loaded with GLMakie or CairoMakie
 
 src/trapping/        structural traps (Stage 8, co2lab-spillpoint)
-  trap_surface.jl    the caprock as trap analysis sees it (co2lab's Gt quantities)
+  trap_surface.jl    the caprock as trap analysis sees it (co2lab's Gt quantities),
+                     stitched across faults
   cell_traps.jl      the cell-based method: traps, spill depths, rivers, regions
   node_traps.jl      the node-based method: spill field, regions, cycle merging
   node_to_cells.jl   node-based traps projected to columns (co2lab's n2cTraps)
   trap_analysis.jl   the front end, trap_analysis (co2lab's trapAnalysis)
   trap_quantities.jl trap volumes, downstream traps, capacity trees, injection
                      point, flattened caprock
-  surfaces.jl        IRAP surfaces and IGEMS grids
+  surfaces.jl        IRAP surfaces, IGEMS grids, grids under lattice surfaces
 
 examples/            readable walkthroughs, with their own environment
                      (examples/Project.toml: JutulCO2Lab, the Jutul fork,
@@ -208,8 +215,10 @@ examples/            readable walkthroughs, with their own environment
                      scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/...
   atlas/             CO2 Storage Atlas scripts; JUTULCO2LAB_BACKEND=CairoMakie
                      writes figures to ./figures instead of opening windows
+  trapping/          co2lab-spillpoint's examples (static figures; the
+                     interactive viewer is roadmap Stage 11)
 test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, wells,
-                     boundary conditions and reconstruction (vs MRST), Atlas,
+                     boundary conditions and reconstruction (vs MRST), Atlas, trapping,
                      toolchain smoke test
 test/atlas_checks.jl the Atlas comparisons with co2lab, shared with the Stage 5 gate
 test/trap_checks.jl  the trapping comparisons with co2lab, shared with the Stage 8 gate

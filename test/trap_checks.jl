@@ -5,16 +5,63 @@
 
 # The mesh and columns of one exported case: an Atlas formation as co2lab builds
 # it (co2lab_compatible, no thin-cell removal), an IGEMS surface as co2lab
-# builds it ("IGEMS/<family>/<i>", transposed), or the synthetic sine surface
+# builds it ("IGEMS/<family>/<i>", transposed), a synthetic surface, or one of
+# the grids of co2lab-spillpoint's examples (mrst_dump_traps.m, 'examples')
 function _trap_case_mesh(e)
     name, c = e["name"], Int(e["coarsening"])
     name == "sine" && return _sine_mesh()
+    name == "shoebox" && return _shoebox_mesh()
+    name == "synthetic101" && return _synthetic101_mesh()
     if startswith(name, "IGEMS/")
         _, family, i = split(name, "/")
         m = igems_mesh(family, parse(Int, i); coarsening = c, co2lab_compatible = true)
         return (m.mesh, m.columns)
+    elseif startswith(name, "Johansen/")
+        m = johansen_mesh(Symbol(split(name, "/")[2]); co2lab_compatible = true)
+        return (m.mesh, m.columns)
+    elseif startswith(name, "sleipner")
+        grid = sleipner_grid_section(; min_perm = 0.0)
+        mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+        return (mesh, first(ve_columns(mesh)))
+    elseif name == "Huginfmwest/south"
+        return _hugin_west_south(c)
+    elseif name == "Utsirafm/thick"
+        m = atlas_mesh("Utsirafm"; coarsening = c, co2lab_compatible = true)
+        return (m.mesh, m.columns)
     end
     m = atlas_mesh(name; coarsening = c, co2lab_compatible = true, min_thickness = 0.0)
+    return (m.mesh, m.columns)
+end
+
+# trapsHuginWest's subset: cells with centroids east of 435 km, south of 6450 km
+function _hugin_west_south(c)
+    m = atlas_mesh("Huginfmwest"; coarsening = c, co2lab_compatible = true,
+                   min_thickness = 0.0)
+    x = tpfv_geometry(m.mesh).cell_centroids
+    sub = grid_section_subset(m.grid, m.mesh, (x[1, :] .> 4.35e5) .& (x[2, :] .< 6.45e6))
+    return (sub.mesh, sub.columns)
+end
+
+# firstTrappingExample's sandbox: 100 x 100 cells over 10 km x 5 km, 50 m
+# thick at 1000 m, dipping in x, the top perturbed (cartGrid, nodes moved)
+function _shoebox_mesh()
+    x = JutulCO2Lab._linspace(0.0, 10000.0, 101)
+    y = JutulCO2Lab._linspace(0.0, 5000.0, 101)
+    xn, yn = x ./ 10000, y ./ 5000
+    zt = [a - 0.2 * sin(5 * pi * a) * sin(5 * pi * b^1.5) - 0.075 * sin(1.25 * pi * b) +
+          0.15 * sin(a + b) for a in xn, b in yn]
+    zb = [1 + a for a in xn, b in yn]
+    m = surface_mesh(x, y, zt .* 50 .+ 1000; bottom = zb .* 50 .+ 1000)
+    return (m.mesh, m.columns)
+end
+
+# showTrapsInteractively's synthetic grid: 101 x 101 cells over 1 km, 10 m
+# thick at about 100 m, the top a sloping egg-box
+function _synthetic101_mesh()
+    x = JutulCO2Lab._linspace(0.0, 1000.0, 102)
+    f(a, b, z) = 100 + z + a * 0.01 - 2 * sin(pi * a / 200) * sin(pi * b / 200)
+    m = surface_mesh(x, x, [f(a, b, 0.0) for a in x, b in x];
+                     bottom = [f(a, b, 10.0) for a in x, b in x])
     return (m.mesh, m.columns)
 end
 
@@ -41,42 +88,110 @@ end
 # edges and their columns, caprock depths, heights, areas, centroids, corners
 function _trap_surface_vs_mrst(d)
     rep = OracleReport("Trap surface vs co2lab's Gt"; mrst = d)
-    exact = Tolerance(0.0, 0.0)
     for e in d["cases"]
         label = "$(e["name"]) c$(Int(e["coarsening"]))"
         mesh, cols = _trap_case_mesh(e)
         s = trap_surface(mesh, cols)
-
-        nodes = hcat(s.x, s.y, s.z)
-        check!(rep, "$label: nodes (co2lab's order)", nodes,
-               hcat(e["node_coords"], vec(e["node_z"])); tol = Tolerance(0.0, 1e-9))
-        E = sort(Int.(e["edge_nodes"]), dims = 2)
-        N = Int.(e["edge_neighbors"])
-        mrst_edges = Dict(Tuple(E[k, :]) => sort(N[k, :]) for k in axes(E, 1))
-        ours = Dict(Tuple(s.edges[:, k]) => sort(s.edge_columns[:, k])
-                    for k in axes(s.edges, 2))
-        check!(rep, "$label: edges and their columns", ours == mrst_edges ? 0 : 1, 0;
-               tol = exact)
-        same_corners = s.corners == permutedims(Int.(e["cell_corners"]))
-        check!(rep, "$label: corner nodes", same_corners ? 0 : 1, 0; tol = exact)
-
-        rel = Tolerance(1e-12, 1e-9)
-        check!(rep, "$label: caprock depth", s.zc, vec(e["cell_z"]); tol = rel)
-        check!(rep, "$label: height", s.H, vec(e["cell_H"]); tol = rel)
-        check!(rep, "$label: area", s.area, vec(e["cell_areas"]); tol = rel)
-        check!(rep, "$label: centroid", hcat(s.cx, s.cy), e["cell_centroids"]; tol = rel)
+        ncol = length(_vecs(e["cell_z"]))
+        check!(rep, "$label: number of columns", length(s.zc), ncol;
+               tol = Tolerance(0.0, 0.0))
+        length(s.zc) == ncol || continue
+        _surface_topology_vs_mrst!(rep, label, s, e)
+        _column_quantities_vs_mrst!(rep, label, s, e, _split_columns(mesh, cols))
     end
     return rep
 end
 
-# The trap surface of one exported case with co2lab's column depths: our depths
-# agree with co2lab's only to about an ulp (face centroids computed in a
-# different order), and on surfaces with rounded depths (IGEMS: 1 cm) exact
-# ties are common, so an ulp can decide a trap. The algorithms are therefore
-# compared on identical input; _trap_surface_vs_mrst checks the depths.
+# Nodes, edges with their columns, and corners of one case against co2lab's.
+# Modifies: `rep` (checks added).
+function _surface_topology_vs_mrst!(rep, label, s, e)
+    exact = Tolerance(0.0, 0.0)
+    # the detrended Sleipner surface: MRST's own depths (by design)
+    own = e["name"] == "sleipner/detrended"
+    nodes = own ? hcat(s.x, s.y) : hcat(s.x, s.y, s.z)
+    theirs = own ? e["node_coords"] : hcat(e["node_coords"], vec(e["node_z"]))
+    check!(rep, "$label: nodes (co2lab's order)", nodes, theirs;
+           tol = Tolerance(0.0, 1e-9))
+    E = sort(Int.(e["edge_nodes"]), dims = 2)
+    N = Int.(e["edge_neighbors"])
+    mrst_edges = Dict(Tuple(E[k, :]) => sort(N[k, :]) for k in axes(E, 1))
+    ours = Dict(Tuple(s.edges[:, k]) => sort(s.edge_columns[:, k])
+                for k in axes(s.edges, 2))
+    check!(rep, "$label: edges and their columns", ours == mrst_edges ? 0 : 1, 0;
+           tol = exact)
+    # co2lab exports corners only if every cell has four; their order (logical
+    # on co2lab's side, geometric here) differs on rotated grids
+    if haskey(e, "cell_corners")
+        C = permutedims(Int.(e["cell_corners"]))
+        same = all(sort(s.corners[:, c]) == sort(C[:, c]) for c in axes(C, 2))
+        check!(rep, "$label: corner nodes (as sets)", same ? 0 : 1, 0; tol = exact)
+    else
+        check!(rep, "$label: not all columns quadrilateral",
+               all(>(0), s.corners) ? 1 : 0, 0; tol = exact)
+    end
+    return rep
+end
+
+# Depth, height, area and centroid per column against co2lab's, leaving out
+# columns with fault-split faces (`split`: Jutul's centroids of the twisted
+# faces, with the extra nodes, differ from MRST's by design) and folded top
+# faces (crossing themselves in map view: co2lab adds the triangle areas
+# unsigned, the shoelace formula nets them). Modifies: `rep` (checks added).
+function _column_quantities_vs_mrst!(rep, label, s, e, split)
+    rel = Tolerance(1e-12, 1e-9)
+    kept, flat = .!split, .!_folded_columns(s)
+    e["name"] == "sleipner/detrended" ||
+        check!(rep, "$label: caprock depth ($(count(split)) fault-split columns " *
+               "left out)", s.zc[kept], vec(e["cell_z"])[kept]; tol = rel)
+    check!(rep, "$label: height", s.H[kept], vec(e["cell_H"])[kept]; tol = rel)
+    check!(rep, "$label: area ($(count(.!flat)) folded columns left out)",
+           s.area[flat], vec(e["cell_areas"])[flat]; tol = rel)
+    check!(rep, "$label: centroid", hcat(s.cx, s.cy)[flat, :],
+           e["cell_centroids"][flat, :]; tol = rel)
+    return rep
+end
+
+# Columns with a cell that has a face of more than four nodes: faces split
+# where a fault offsets the neighbouring cells (GeoEnergyIO)
+function _split_columns(mesh, cols)
+    big(nodes) = length(unique(nodes)) > 4
+    split = fill(false, length(cols.pos) - 1)
+    for col in eachindex(split), c in column_cells(cols, col)
+        split[col] |= any(f -> big(mesh.faces.faces_to_nodes[f]),
+                          mesh.faces.cells_to_faces[c]) ||
+                      any(f -> big(mesh.boundary_faces.faces_to_nodes[f]),
+                          mesh.boundary_faces.cells_to_faces[c])
+    end
+    return split
+end
+
+# Columns whose polygon folds over itself: the triangles from its node mean
+# to its edges do not all turn the same way
+function _folded_columns(s)
+    map(s.polygons) do p
+        q = unique(p)
+        x0, y0 = sum(s.x[q]) / length(q), sum(s.y[q]) / length(q)
+        turn(a, b) = (s.x[a] - x0) * (s.y[b] - y0) - (s.x[b] - x0) * (s.y[a] - y0)
+        signs = [sign(turn(q[k], q[mod1(k + 1, length(q))])) for k in eachindex(q)]
+        any(>(0), signs) && any(<(0), signs)
+    end
+end
+
+# The trap surface of one exported case with co2lab's column depths, heights,
+# areas and centroids: our depths agree with co2lab's only to about an ulp
+# (face centroids computed in a different order), and on surfaces with rounded
+# depths (IGEMS: 1 cm) exact ties are common, so an ulp can decide a trap; on
+# faulted grids split and folded faces differ by design. The algorithms are
+# therefore compared on identical input; _trap_surface_vs_mrst checks the
+# surface itself.
 function _trap_case_surface(e)
-    mesh, cols = _trap_case_mesh(e)
-    return (; trap_surface(mesh, cols)..., zc = _vecs(e["cell_z"]))
+    s = trap_surface(_trap_case_mesh(e)...)
+    c = e["cell_centroids"]
+    s = (; s..., zc = _vecs(e["cell_z"]), H = _vecs(e["cell_H"]),
+         area = _vecs(e["cell_areas"]), cx = c[:, 1], cy = c[:, 2])
+    # the detrended Sleipner surface: MRST's node depths too
+    e["name"] == "sleipner/detrended" && (s = (; s..., z = _vecs(e["node_z"])))
+    return s
 end
 
 # Our trap numbers → co2lab's, matching traps by their columns (co2lab's trap
@@ -105,8 +220,18 @@ function _traps_vs_mrst(d, method::Symbol)
     key = method == :cell ? "cell_based" : "node_based"
     for e in d["cases"]
         label = "$(e["name"]) c$(Int(e["coarsening"]))"
-        r = trap_analysis(_trap_case_surface(e); method)
         t = e[key]
+        # co2lab fails (node-based method, columns not quadrilateral): so must we
+        if haskey(t, "error")
+            fails = try
+                trap_analysis(_trap_case_surface(e); method); false
+            catch err
+                err isa ArgumentError
+            end
+            check!(rep, "$label: fails as co2lab", fails ? 0 : 1, 0; tol = exact)
+            continue
+        end
+        r = trap_analysis(_trap_case_surface(e); method)
         theirs = Int.(vec(t["traps"]))
         check!(rep, "$label: number of traps", maximum(r.traps; init = 0),
                maximum(theirs; init = 0); tol = exact)
@@ -150,7 +275,7 @@ function _trap_quantities_vs_mrst(d, method::Symbol)
     for e in d["cases"]
         label = "$(e["name"]) c$(Int(e["coarsening"]))"
         t = e[method == :cell ? "cell_based" : "node_based"]
-        isempty(t["volumes"]) && continue
+        (haskey(t, "error") || isempty(t["volumes"])) && continue
         s = _trap_case_surface(e)
         r = trap_analysis(s; method)
         m = _trap_mapping(r.traps, Int.(_vecs(t["traps"])))
@@ -164,8 +289,9 @@ function _trap_quantities_vs_mrst(d, method::Symbol)
         down = [Set(m[downstream_traps(r, i)]) for i in eachindex(m)]
         theirs = [Set(Int.(_vecs(t["downstream"][m[i]]))) for i in eachindex(m)]
         check!(rep, "$label: downstream traps", count(down .!= theirs), 0; tol = exact)
-        for (key, kw) in (("trees", (;)), ("trees_all", (remove_overlap = false,
-                                                         calculate_all = true)))
+        for (key, kw) in (("trees", (;)), ("trees_overlap", (remove_overlap = false,)),
+                          ("trees_all", (remove_overlap = false, calculate_all = true)))
+            haskey(t, key) || continue
             ours = maximize_trapping(s, r; kw...)
             mt = _mrst_trees(t[key])
             check!(rep, "$label: $key roots and traps",
@@ -209,5 +335,20 @@ function _closed_edges_vs_mrst(d)
     # the closed edges change the result (the check would be empty otherwise)
     same = r.trap_regions == open.trap_regions
     check!(rep, "differs from the open case", same ? 1 : 0, 0; tol = exact)
+    return rep
+end
+
+# trapsJohansen's injection point: the column nearest to the benchmark well,
+# on each Johansen grid exported with it
+function _well_columns_vs_mrst(d)
+    rep = OracleReport("Johansen injection columns vs co2lab"; mrst = d)
+    w = johansen_well_point()
+    for e in d["cases"]
+        haskey(e, "well_column") || continue
+        s = _trap_case_surface(e)
+        col = argmin((s.cx .- w[1]) .^ 2 .+ (s.cy .- w[2]) .^ 2)
+        check!(rep, "$(e["name"]) c$(Int(e["coarsening"]))", col, e["well_column"];
+               tol = Tolerance(0.0, 0.0))
+    end
     return rep
 end

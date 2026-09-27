@@ -75,13 +75,16 @@ export atlas_data_directory, atlas_formation_names, read_aai_grid, atlas_map_fil
 export read_atlas_maps, atlas_average_rock, atlas_coastline, atlas_wells
 
 include("atlas/atlas_grid.jl")
-export atlas_grid_section, atlas_grid_formations
+export atlas_grid_section, atlas_grid_formations, atlas_map_values
 
 include("atlas/atlas_domain.jl")
-export atlas_ve_domain, atlas_mesh
+export atlas_ve_domain, atlas_mesh, grid_section_subset
 
 include("atlas/sleipner.jl")
 export sleipner_data_directory, sleipner_grid_section, sleipner_ve_domain
+
+include("atlas/johansen.jl")
+export johansen_data_directory, johansen_mesh, johansen_well_point
 
 include("trapping/trap_surface.jl")
 include("trapping/cell_traps.jl")
@@ -92,10 +95,11 @@ include("trapping/trap_quantities.jl")
 include("trapping/surfaces.jl")
 export trap_surface, trap_analysis, trap_volumes, downstream_traps
 export maximize_trapping, optimal_injection_point, flatten_traps
-export read_irap_surface, igems_surface_path, igems_mesh
+export read_irap_surface, igems_surface_path, igems_mesh, surface_mesh
 
 include("plotting.jl")
 export plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!
 export plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure
+export plot_traps, plot_traps!
 
 end # module

@@ -84,6 +84,29 @@ function atlas_mesh(name::AbstractString; coarsening::Integer = 1,
     return (mesh = mesh, columns = columns, grid = grid, petro = s.petro)
 end
 
+"""
+    grid_section_subset(grid, mesh, keep) -> NamedTuple
+
+Part of a corner-point grid (co2lab's `extractSubgrid`): the grid section
+`grid` with only the cells of its mesh `mesh` for which `keep` (one `Bool`
+per cell of `mesh`) is true left active, meshed anew — e.g. the cells whose
+centroids lie in a region. `grid` and `mesh` are only read.
+
+Returns `(mesh, columns, grid)`, all new: the mesh, its `VEColumns` and the
+grid section (a copy of `grid` with a new `"ACTNUM"`).
+"""
+function grid_section_subset(grid, mesh, keep::AbstractVector{Bool})
+    length(keep) == number_of_cells(mesh) ||
+        throw(ArgumentError("keep must have one value per cell of mesh"))
+    active = fill(false, Tuple(grid["cartDims"]))
+    for c in findall(keep)
+        active[cell_ijk(mesh, c)...] = true
+    end
+    sub = merge(grid, Dict("ACTNUM" => active))
+    m = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(sub)
+    return (mesh = m, columns = first(ve_columns(m)), grid = sub)
+end
+
 # ACTNUM (new Array{Bool, 3}) keeping only the largest connected piece of the
 # section's mesh (co2lab: processGRDECL's pieces, the one with most cells)
 function _largest_piece(grid)

@@ -57,9 +57,7 @@ show_figure(fig, "sleipner_3d")
 # benchmark's caprock.
 surface = ve_top_surface(s.mesh, s.columns)
 top = only(filter(m -> m.variant == :top, read_atlas_maps(["Utsirafm"])))
-X, Y = JutulCO2Lab._map_positions(top.meta)
-atlas_depth = [JutulCO2Lab._interp2(X, Y, permutedims(top.data), x, y)
-               for (x, y) in zip(surface.xc, surface.yc)]
+atlas_depth = atlas_map_values(top, surface.xc, surface.yc)
 d = geo.z_top .- atlas_depth
 @printf("benchmark caprock minus Atlas top: mean %.1f m, range %.1f to %.1f m\n",
         sum(d) / length(d), extrema(d)...)

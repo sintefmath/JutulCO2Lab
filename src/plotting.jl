@@ -62,13 +62,40 @@ function plot_ve_outline! end
 
 """
     plot_ve_surface!(ax, surface; color = (:steelblue, 0.6), offset = 0.0,
-                     strokecolor = :black, strokewidth = 1) -> ax
+                     colormap = :viridis, strokecolor = :black, strokewidth = 1)
+        -> ax
 
 The top surface of a VE domain ([`ve_top_surface`](@ref)) in 3D: the
 columns' top faces at their node depths (plus `offset`, e.g. to lift it off
-the 3D grid), with their edges. Modifies: `ax` (an `Axis3`). Returns `ax`.
+the 3D grid), with their edges (none for `strokewidth = 0`). `color` is one
+colour, or one value per column, drawn in `colormap`. Modifies: `ax` (an `Axis3`). Returns `ax`.
 """
 function plot_ve_surface! end
+
+"""
+    plot_traps(s, res; title = "", colorbar = true, kwarg...) -> Figure
+    plot_traps!(ax, s, res; regions = true, trap_values = nothing,
+                colormap = :viridis, rivers = true, labels = false,
+                outline = true) -> ax
+
+Map view of a trapping analysis — the trap surface `s`
+([`trap_surface`](@ref)) and [`trap_analysis`](@ref)'s result `res`, as the
+static plots of co2lab's spill-point examples:
+
+- `regions`: each trap's spill region in a light colour (the region
+  draining out of the domain in grey);
+- the traps in their region's full colour, or coloured by `trap_values`
+  (one value per trap, e.g. volumes) in `colormap`;
+- `rivers`: the spill paths through the column centroids;
+- `labels`: trap numbers at the traps' top columns;
+- `outline`: the domain's lateral boundary.
+
+`plot_traps` returns a new `Figure` (a colour bar when `trap_values` is
+given); `plot_traps!` draws into the axis `ax` and returns it. Modifies
+(`!` version): `ax`. `s` and `res` are only read.
+"""
+function plot_traps end
+function plot_traps! end
 
 """
     show_figure(fig, name; dir = "figures") -> nothing

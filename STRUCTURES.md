@@ -97,24 +97,27 @@ Constants: `_WELL_CONSTANT_RATIO`, `_WELL_CONSTANT_VALUE` (MRST's
 | 44 | *Top surface* (NamedTuple) | `ve_top_surface.jl` (`src/ve`) | `(x, y, z, polygons, xc, yc, outline)`: node coordinates and caprock depths, each column's top-face node indices, polygon centres, boundary edges (node pairs) | mesh, 1 (`ve_top_surface`); an Atlas map as a lattice (`_atlas_map_surface`) |
 | 45 | *Contour lines* (Vector) | `ve_top_surface.jl` (`src/ve`) | per level, a vector of segments `(x1, y1, x2, y2)` | 44 (`ve_contour_lines`) |
 | 46 | *Sleipner VE model* (NamedTuple) | `sleipner.jl` | `(mesh, columns, ve, grid, sides)`: 3D mesh (discarded cells removed), `VEColumns` (1), `ve_domain`'s result, the grid section (GeoEnergyIO `Dict`, global coordinates, rock arrays), the lateral boundary sides (co2lab's `bcIxVE`) | the Sleipner benchmark files (`sleipner_ve_domain`) |
+| 53 | *Grid section subset* (NamedTuple) | `atlas_domain.jl` | `(mesh, columns, grid)`: the mesh of a grid section with only chosen cells active, its `VEColumns` (1), the section (a copy with a new `ACTNUM`) | a grid section and its mesh (`grid_section_subset`) |
+| 54 | *Johansen NPD mesh* (NamedTuple) | `johansen.jl` | `(mesh, columns, grid)`: the Johansen layers of the NPD sector or full-field deck (cut out, layer 1 the first Johansen layer; `co2lab_compatible`: no pinch-out connections), its `VEColumns` (1), the cut grid section (`cartDims`, `COORD`, `ZCORN`, `ACTNUM`) | the NPD decks (`johansen_mesh`) |
 
 Constants: `_ATLAS_DATASETS` (the three data-set directories),
 `_ATLAS_AVERAGE_ROCK` (co2lab's `getAvgRock` table), `_JURASSIC_MID`,
 `_JURASSIC_TOP` (formations taking the `Jurassicmid` and `Jurassic` top maps,
 `atlas_grid.jl`), `_UTM_A`, `_UTM_F`, `_UTM_K0` (GRS80 semi-major axis and
 flattening, UTM scale factor; `projection.jl`), `_SLEIPNER_FILES` (the
-benchmark files read, `sleipner.jl`).
+benchmark files read, `sleipner.jl`), `_JOHANSEN_MODELS` (deck file, Johansen
+layers and download address of the two NPD models, `johansen.jl`).
 
 ## H. Trapping analysis (roadmap Stage 8), on A
 
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
-| 47 | *Trap surface* (NamedTuple) | `trap_surface.jl` | `(x, y, z, polygons, corners, edges, edge_columns, zc, H, area, cx, cy, outline)`: 44 with co2lab's node order (sorted by x, y, z), each column's four corner nodes (west-south, east-south, west-north, east-north), edges as node pairs with the columns on either side (0: boundary), caprock depth, height, map area and centroid per column | mesh, 1 (`trap_surface`) |
+| 47 | *Trap surface* (NamedTuple) | `trap_surface.jl` | `(x, y, z, polygons, corners, edges, edge_columns, zc, H, area, cx, cy, xc, yc, outline)`: 44 (a superset of it) with only the top faces' corners (nodes that faults add on edges dropped), equal positions merged, stitched across faults as co2lab's `topSurfaceGrid`, co2lab's node order (sorted by x, y, z); each column's four corner nodes (west-south, east-south, west-north, east-north; 0 unless four), edges as node pairs with the columns on either side (0: boundary), caprock depth, height, map area and centroid per column | mesh, 1 (`trap_surface`) |
 | 48 | *Trap analysis* (NamedTuple) | `trap_analysis.jl`, `cell_traps.jl`, `node_to_cells.jl` | `(traps, trap_z, trap_regions, trap_adj, rivers, top)`: trap index per column (0: none), spill depth per trap, the trap each column drains into (0: none), which trap spills into which (sparse `Bool`), rivers per trap (vectors of columns), trap tops — co2lab's `trapAnalysis` result | 47 (`trap_analysis`) |
 | 49 | *Capacity tree* (NamedTuple) | `trap_quantities.jl` | `(root, traps, value)`: a root trap, it and all traps downstream (sorted), their trap volume (unit porosity) — one of `maximize_trapping`'s results | 48, 47 (`maximize_trapping`) |
 | 50 | *Injection point* (NamedTuple) | `trap_quantities.jl` | `(column, volume, edges, traps)`: the shallowest column on the best interface between two spill regions, the trap volume downstream of them, the interface's edges, the two regions' traps (0: outside) | 48, 47 (`optimal_injection_point`) |
 | 51 | *IRAP surface* (NamedTuple) | `surfaces.jl` | `(x, y, z, angle)`: node positions along x and y, depths `nx × ny` (x along the first index; NaN missing), the header's rotation angle (not applied) | a file (`read_irap_surface`) |
-| 52 | *Surface grid* (NamedTuple) | `surfaces.jl` | `(mesh, columns)`: a one-layer `UnstructuredMesh` under a surface and its `VEColumns` (1) | 51 (`igems_mesh`) |
+| 52 | *Surface grid* (NamedTuple) | `surfaces.jl` | `(mesh, columns)`: a one-layer `UnstructuredMesh` between two surfaces given on a lattice (cells with an undefined top corner left out) and its `VEColumns` (1) | node positions and depths (`surface_mesh`); 51 (`igems_mesh`) |
 
 ## F. MRST comparison harness (`JutulCO2Lab.Oracle`), independent of A–E
 

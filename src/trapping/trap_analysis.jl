@@ -16,6 +16,8 @@ Structural traps of a [`trap_surface`](@ref) `s`, as co2lab's
   `s.edges`) across which CO2 does not spill — node-based method only; the
   cell-based method throws if given any (co2lab only warns and ignores
   them).
+- The node-based method needs every column's top face to have four distinct
+  corners (co2lab's `activeCellNodes`); it throws otherwise.
 - `project_to_cells`: node-based method only (`false`: results per node —
   trap, spill region per node, rivers as node lists, `top` the top nodes).
 
@@ -38,6 +40,10 @@ function trap_analysis(s; method::Symbol = :cell, closed_boundary_edges = [],
     end
     method == :node ||
         throw(ArgumentError("method must be :cell or :node, got :$method"))
+    # co2lab's activeCellNodes: the node-based method needs quadrilaterals
+    bad = count(iszero, view(s.corners, 1, :))
+    bad == 0 || throw(ArgumentError("the node-based method needs four distinct " *
+        "corner nodes per column; $bad columns have fewer: use method = :cell"))
     nt = _node_traps(s, _closed_nodes(closed_boundary_edges),
                      _closed_nodes(closed_fault_edges))
     project_to_cells && return _node_to_cell_traps(s, nt)

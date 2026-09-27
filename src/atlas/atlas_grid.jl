@@ -256,6 +256,20 @@ function _map_positions(meta)
             _linspace(meta.y0, (ny - 1) * h + meta.y0, ny))
 end
 
+"""
+    atlas_map_values(map, x, y) -> Vector{Float64}
+
+An Atlas map (as [`read_atlas_maps`](@ref) returns it) at the positions
+`(x[k], y[k])`, interpolated bilinearly between its values (as Octave's
+`interp2`); `NaN` outside the map and where a neighbouring value is
+undefined. `map` is only read; returns a new vector.
+"""
+function atlas_map_values(map, x::AbstractVector, y::AbstractVector)
+    X, Y = _map_positions(map.meta)
+    Z = permutedims(map.data)
+    return [_interp2(X, Y, Z, a, b) for (a, b) in zip(x, y)]
+end
+
 # A map refined r times laterally by bilinear interpolation in index space
 # (co2lab's refineInfo); its first value stays in place.
 function _refine_map(m, r)
