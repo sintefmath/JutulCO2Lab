@@ -16,6 +16,9 @@ Structural traps of a [`trap_surface`](@ref) `s`, as co2lab's
   `s.edges`) across which CO2 does not spill — node-based method only; the
   cell-based method throws if given any (co2lab only warns and ignores
   them).
+- Sealed fault edges of the surface (`s.sealed`, [`trap_surface`](@ref)'s
+  default) are closed boundaries with both methods: no CO2 leaves the
+  domain over them.
 - The node-based method needs every column's top face to have four distinct
   corners (co2lab's `activeCellNodes`); it throws otherwise.
 - `project_to_cells`: node-based method only (`false`: results per node —
@@ -44,13 +47,21 @@ function trap_analysis(s; method::Symbol = :cell, closed_boundary_edges = [],
     bad = count(iszero, view(s.corners, 1, :))
     bad == 0 || throw(ArgumentError("the node-based method needs four distinct " *
         "corner nodes per column; $bad columns have fewer: use method = :cell"))
-    nt = _node_traps(s, _closed_nodes(closed_boundary_edges),
+    # sealed fault edges are closed boundary edges
+    closed = [collect(closed_boundary_edges); _sealed_pairs(s)]
+    nt = _node_traps(s, _closed_nodes(closed),
                      _closed_nodes(closed_fault_edges))
     project_to_cells && return _node_to_cell_traps(s, nt)
     top = findall(n -> nt.down[n] == 0 && nt.trap_regions[n] != 0, eachindex(s.z))
     return (traps = nt.traps, trap_z = nt.trap_z, trap_regions = nt.trap_regions,
             trap_adj = nt.trap_adj, rivers = nt.rivers, top = top)
 end
+
+# Whether edge k of surface s is sealed (a surface without the field: none)
+_is_sealed(s, k) = hasproperty(s, :sealed) && s.sealed[k]
+
+# The sealed edges of surface s as node pairs
+_sealed_pairs(s) = [Tuple(s.edges[:, k]) for k in axes(s.edges, 2) if _is_sealed(s, k)]
 
 # Nodes closed by a set of closed edges (node pairs): those in more than one
 # of them (co2lab: the duplicates), so that the chain's end nodes stay open

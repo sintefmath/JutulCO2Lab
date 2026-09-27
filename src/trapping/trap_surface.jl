@@ -6,15 +6,17 @@
 # Nodes are numbered as co2lab numbers them (sorted by x, then y, then depth),
 # so that ties between equally steep neighbours are broken the same way.
 #
-# Across faults the columns' top faces do not share edges; co2lab's
-# topSurfaceGrid stitches the surface there (stitch_neighbors): for each pair
-# of columns connected in the 3D grid but not along an edge, the two closest
-# node pairs in map view are merged into their mean. The same is done here.
+# Across faults the columns' top faces do not share edges. By default a fault
+# is sealing: its edges on the surface are marked `sealed`, and the trapping
+# analysis treats them as closed boundaries. With open faults the surface is
+# stitched there as co2lab's topSurfaceGrid does (stitch_neighbors): for each
+# pair of columns connected in the 3D grid but not along an edge, the two
+# closest node pairs in map view are merged into their mean.
 
 # ---------------------------------- Surface -----------------------------------
 
 """
-    trap_surface(mesh, columns::VEColumns) -> NamedTuple
+    trap_surface(mesh, columns::VEColumns; faults = :sealing) -> NamedTuple
 
 The caprock of a VE domain for trap analysis: [`ve_top_surface`](@ref)'s
 polygons with co2lab's numbering and the quantities co2lab-spillpoint reads
@@ -22,13 +24,21 @@ from its top-surface grid `Gt`.
 
 Each column's polygon has only the corners of its top face (at most four;
 nodes that faults add on the edges are left out, as co2lab's faces have
-none). The surface is continuous: nodes at the same position are one node, and
-across faults (columns connected in the 3D grid without a shared edge) it
-is stitched as co2lab's `topSurfaceGrid` stitches it — the two closest node
-pairs of the two columns, in map view, merged at their mean position.
+none). Nodes at the same position are one node.
 
-Returns the NamedTuple `(x, y, z, polygons, corners, edges, edge_columns, zc,
-H, area, cx, cy, xc, yc, outline)`, all new — a superset of
+Faults — a column side whose logical neighbour pillar holds a column, but
+whose top edge the neighbour does not share — are
+- `faults = :sealing` (default): closed boundaries. Their edges are marked
+  in `sealed`; [`trap_analysis`](@ref) lets no CO2 spill across them.
+- `faults = :open`: stitched as co2lab's `topSurfaceGrid` stitches them (for
+  columns connected in the 3D grid without a shared edge, the two closest
+  node pairs of the two columns, in map view, merged at their mean
+  position); co2lab's surface. Columns not connected in 3D (a complete
+  offset) keep an open boundary between them, as in co2lab.
+A fault without throw leaves no gap in the grid and is not seen.
+
+Returns the NamedTuple `(x, y, z, polygons, corners, edges, edge_columns,
+sealed, zc, H, area, cx, cy, xc, yc, outline)`, all new — a superset of
 [`ve_top_surface`](@ref)'s result, so that the map plots and
 [`ve_contour_lines`](@ref) take it too:
 - `x`, `y`, `z`: node coordinates and caprock depths, nodes sorted by
@@ -43,6 +53,7 @@ H, area, cx, cy, xc, yc, outline)`, all new — a superset of
   then all north edges; otherwise sorted — and
   `edge_columns`: `2 × nedge`, the columns on either side (0 at the
   boundary);
+- `sealed`: per edge, whether it is a boundary edge along a sealing fault;
 - `zc`, `H`: caprock depth and height per column
   ([`ve_column_geometry`](@ref));
 - `area`, `cx`, `cy`: the area and centroid of each column's polygon in map
@@ -51,16 +62,24 @@ H, area, cx, cy, xc, yc, outline)`, all new — a superset of
 - `outline`: boundary edges as node pairs, as [`ve_top_surface`](@ref).
 `mesh` and `columns` are only read.
 """
-function trap_surface(mesh, columns::VEColumns)
+function trap_surface(mesh, columns::VEColumns; faults::Symbol = :sealing)
+    faults in (:sealing, :open) ||
+        throw(ArgumentError("faults must be :sealing or :open, got :$faults"))
     s = ve_top_surface(mesh, columns)
     geo = ve_column_geometry(mesh, columns)
 
-    # corners only (faults leave extra nodes on edges); co2lab's node order:
-    # sorted by x, y, z, equal positions one node
-    polygons = [_corner_nodes(s.x, s.y, s.z, p) for p in s.polygons]
-    x, y, z, polygons = _unique_nodes(s.x, s.y, s.z, polygons)
-    x, y, z, polygons = _stitch_faults(x, y, z, polygons,
-                                       _column_connections(mesh, columns))
+    # corners only (faults leave extra nodes on edges), and the edges on faults
+    keep = [_corner_positions(s.x, s.y, s.z, p) for p in s.polygons]
+    at_fault = _fault_edges(mesh, columns, s, keep)
+    polygons = [p[k] for (p, k) in zip(s.polygons, keep)]
+    # co2lab's node order: sorted by x, y, z, equal positions one node
+    x, y, z, polygons, renum = _unique_nodes(s.x, s.y, s.z, polygons)
+    fault_pairs = Set(minmax(renum[a], renum[b]) for (a, b) in at_fault)
+    if faults == :open
+        x, y, z, polygons = _stitch_faults(x, y, z, polygons,
+                                           _column_connections(mesh, columns))
+        empty!(fault_pairs)
+    end
 
     edges, edge_columns = _surface_edges(polygons)
     corners = _polygon_corners(x, y, polygons)
@@ -69,31 +88,37 @@ function trap_surface(mesh, columns::VEColumns)
         order = _co2lab_edge_order(edges, corners)
         edges, edge_columns = edges[:, order], edge_columns[:, order]
     end
+    sealed = [edge_columns[2, k] == 0 && Tuple(edges[:, k]) in fault_pairs
+              for k in axes(edges, 2)]
     area, cx, cy = _polygon_geometry(x, y, polygons)
     xc = [sum(x[p]) / length(p) for p in polygons]
     yc = [sum(y[p]) / length(p) for p in polygons]
     return (x = x, y = y, z = z, polygons = polygons,
-            corners = corners, edges = edges,
-            edge_columns = edge_columns, zc = geo.z_top, H = geo.H,
+            corners = corners, edges = edges, edge_columns = edge_columns,
+            sealed = sealed, zc = geo.z_top, H = geo.H,
             area = area, cx = cx, cy = cy, xc = xc, yc = yc,
             outline = _outline_edges(polygons))
 end
 
 # The nodes used by the polygons, sorted by (x, y, z), equal positions merged
-# (co2lab's uniqueNodes): new coordinate vectors and polygons
+# (co2lab's uniqueNodes): new coordinate vectors and polygons, and each old
+# node's new number (0 if unused)
 function _unique_nodes(x, y, z, polygons)
     pts = collect(zip(x, y, z))
     upts = sort!(unique(pts[unique(reduce(vcat, polygons))]))
     index = Dict(p => k for (k, p) in enumerate(upts))
+    renum = [get(index, p, 0) for p in pts]
     return (first.(upts), getindex.(upts, 2), last.(upts),
-            [[index[pts[n]] for n in p] for p in polygons])
+            [renum[p] for p in polygons], renum)
 end
 
-# A top face's corner nodes: a corner-point cell's top face has at most four;
-# where a fault splits the faces beside it, GeoEnergyIO adds nodes on its
-# edges. The node closest to the line through its two neighbours is dropped,
-# repeatedly, until four distinct nodes are left (co2lab's faces have none).
-function _corner_nodes(x, y, z, p)
+# The positions in a top face's node list of its corners: a corner-point
+# cell's top face has at most four; where a fault splits the faces beside it,
+# GeoEnergyIO adds nodes on its edges. The node closest to the line through its
+# two neighbours is dropped, repeatedly, until four distinct nodes are left
+# (co2lab's faces have none).
+function _corner_positions(x, y, z, p)
+    pos = collect(eachindex(p))
     p = copy(p)
     while length(unique(p)) > 4
         dev = map(eachindex(p)) do k
@@ -104,9 +129,62 @@ function _corner_nodes(x, y, z, p)
             w = (u[2]v[3] - u[3]v[2], u[3]v[1] - u[1]v[3], u[1]v[2] - u[2]v[1])
             sqrt(sum(abs2, w)) / sum(abs2, u)
         end
-        deleteat!(p, argmin(dev))
+        k = argmin(dev)
+        deleteat!(p, k); deleteat!(pos, k)
     end
-    return p
+    return pos
+end
+
+# -------------------------------- Fault edges ---------------------------------
+
+# The edges of the corner polygons that lie on a fault, as pairs of surface
+# nodes of `s` (ve_top_surface): an edge on a side of its column whose logical
+# neighbour pillar holds a column; the side from the top cell's lateral faces
+# that contain the edge's raw pieces (`keep`: each polygon's corner positions)
+function _fault_edges(mesh, columns, s, keep)
+    ijk = [cell_ijk(mesh, c) for c in 1:number_of_cells(mesh)]
+    bdir = _boundary_directions(mesh)
+    pillars = Set(columns.pillar)
+    out = Set{Tuple{Int, Int}}()
+    for (col, p) in enumerate(s.polygons)
+        top = columns.cells[columns.pos[col]]
+        sides = _lateral_face_nodes(mesh, ijk, bdir, top)
+        fault(d) = _logical_neighbour_pillar(columns.pillar[col], d) in pillars
+        k, n = keep[col], length(p)
+        for (i, a) in enumerate(k)
+            b = k[mod1(i + 1, length(k))]
+            # the raw pieces from corner a to corner b, cyclically
+            chain = [p[mod1(t, n)] for t in a:(b > a ? b : b + n)]
+            on_fault = any(zip(chain[1:end-1], chain[2:end])) do (u, v)
+                d = _edge_side(sides, s.mesh_nodes[u], s.mesh_nodes[v])
+                d > 0 && fault(d)
+            end
+            on_fault && push!(out, minmax(p[a], p[b]))
+        end
+    end
+    return out
+end
+
+# The lateral faces of cell c as (direction, nodes) — boundary faces by their
+# tag, interior faces by the logical position of the cell beyond
+function _lateral_face_nodes(mesh, ijk, bdir, c)
+    out = Tuple{Int, Vector{Int}}[]
+    for f in mesh.boundary_faces.cells_to_faces[c]
+        nodes = collect(mesh.boundary_faces.faces_to_nodes[f])
+        bdir[f] <= 4 && push!(out, (bdir[f], nodes))
+    end
+    for f in mesh.faces.cells_to_faces[c]
+        d, _ = _interior_face_direction(mesh, ijk, c, f)
+        d <= 4 && push!(out, (d, collect(mesh.faces.faces_to_nodes[f])))
+    end
+    return out
+end
+
+# The direction of the lateral face holding mesh nodes u and v (0: none)
+function _edge_side(sides, u, v)
+    u == v && return 0
+    i = findfirst(((d, nodes),) -> u in nodes && v in nodes, sides)
+    return isnothing(i) ? 0 : first(sides[i])
 end
 
 # ------------------------------- Fault stitching ------------------------------
@@ -150,7 +228,7 @@ function _stitch_faults(x, y, z, polygons, connections)
         y[group] .= foldl((s, n) -> s + w * y[n], group; init = 0.0)
         z[group] .= foldl((s, n) -> s + w * z[n], group; init = 0.0)
     end
-    return _unique_nodes(x, y, z, polygons)
+    return _unique_nodes(x, y, z, polygons)[1:4]
 end
 
 # A polygon's nodes as co2lab lists them (padded_nodelist): each edge's nodes,

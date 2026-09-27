@@ -20,13 +20,22 @@ using Printf
 
 # ---------------------------- 1. The three models -----------------------------
 
-# The NPD models are faulted corner-point grids; their top surfaces are
-# stitched across the faults (as co2lab's topSurfaceGrid does), so that
-# columns connected across a fault are neighbours on the surface too.
+# The NPD models are faulted corner-point grids. Their faults are sealing by
+# default: closed boundaries of the trap analysis, so CO2 collects against
+# them (drawn red on the maps). co2lab instead stitches the top surface
+# across faults, as if they were open (`faults = :open`).
 models = ["NPD sector" => johansen_mesh(:sector),
           "NPD full field" => johansen_mesh(:full_field),
           "Atlas" => atlas_mesh("Johansenfm")]
 surfaces = [name => trap_surface(m.mesh, m.columns) for (name, m) in models]
+
+# The trapping capacity with sealing and with open faults.
+for (name, m) in models[1:2]
+    capacity(f) = (s = trap_surface(m.mesh, m.columns; faults = f);
+                   sum(trap_volumes(s, trap_analysis(s))))
+    @printf("%-15s capacity with sealing faults %.2e m3, with open faults %.2e m3\n",
+            name, capacity(:sealing), capacity(:open))
+end
 
 # The injection well of the benchmark, and on each model the column nearest
 # to it.

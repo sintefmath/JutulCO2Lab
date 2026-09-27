@@ -11,7 +11,7 @@ end
 
 function plot_traps!(ax, s, res; regions = true, trap_values = nothing,
                      colormap = :viridis, rivers = true, labels = false,
-                     outline = true)
+                     outline = true, faults = true)
     polys = _polygons(s)
     palette = Makie.to_colormap(:tab20)
     colour(k) = palette[mod1(k, length(palette))]
@@ -45,5 +45,10 @@ function plot_traps!(ax, s, res; regions = true, trap_values = nothing,
               fontsize = 11)
     end
     outline && plot_ve_outline!(ax, s)
+    # sealing faults over the outline
+    if faults && hasproperty(s, :sealed) && any(s.sealed)
+        pts = [Point2f(s.x[n], s.y[n]) for k in findall(s.sealed) for n in s.edges[:, k]]
+        linesegments!(ax, pts; color = :red3, linewidth = 3)
+    end
     return ax
 end

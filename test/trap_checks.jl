@@ -33,6 +33,25 @@ function _trap_case_mesh(e)
     return (m.mesh, m.columns)
 end
 
+# A faulted synthetic grid: 10 x 7 cells of 100 m, 20 m thick, an anticline
+# rising east (crest along y = 350 m); a fault between cells 5 and 6 with the
+# east block `throw` metres down (40: complete offset)
+function _faulted_mesh(throw)
+    nx, ny, h = 10, 7, 100.0
+    f(x, y) = 1000 - 0.02x + 2e-4 * (y - 350)^2
+    coord = Float64[]
+    for j in 0:ny, i in 0:nx
+        append!(coord, [h * i, h * j, 900.0, h * i, h * j, 1200.0])
+    end
+    # corner a of 2nx along x: pillar 1 + a ÷ 2, cell 1 + (a - 1) ÷ 2
+    top(a, b) = f(h * (a ÷ 2), h * (b ÷ 2)) + ((a + 1) ÷ 2 > nx ÷ 2 ? throw : 0.0)
+    zcorn = [top(a, b) + 20.0 * (c - 1) for c in 1:2 for b in 1:2ny for a in 1:2nx]
+    grid = Dict("cartDims" => (nx, ny, 1), "COORD" => coord, "ZCORN" => zcorn,
+                "ACTNUM" => fill(true, nx, ny, 1))
+    mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+    return (mesh, first(ve_columns(mesh)))
+end
+
 # trapsHuginWest's subset: cells with centroids east of 435 km, south of 6450 km
 function _hugin_west_south(c)
     m = atlas_mesh("Huginfmwest"; coarsening = c, co2lab_compatible = true,
@@ -91,7 +110,8 @@ function _trap_surface_vs_mrst(d)
     for e in d["cases"]
         label = "$(e["name"]) c$(Int(e["coarsening"]))"
         mesh, cols = _trap_case_mesh(e)
-        s = trap_surface(mesh, cols)
+        # co2lab stitches faults (open)
+        s = trap_surface(mesh, cols; faults = :open)
         ncol = length(_vecs(e["cell_z"]))
         check!(rep, "$label: number of columns", length(s.zc), ncol;
                tol = Tolerance(0.0, 0.0))
@@ -185,7 +205,7 @@ end
 # therefore compared on identical input; _trap_surface_vs_mrst checks the
 # surface itself.
 function _trap_case_surface(e)
-    s = trap_surface(_trap_case_mesh(e)...)
+    s = trap_surface(_trap_case_mesh(e)...; faults = :open)
     c = e["cell_centroids"]
     s = (; s..., zc = _vecs(e["cell_z"]), H = _vecs(e["cell_H"]),
          area = _vecs(e["cell_areas"]), cx = c[:, 1], cy = c[:, 2])

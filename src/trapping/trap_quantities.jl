@@ -91,7 +91,9 @@ surface edges of the interface and the two regions' traps (0: outside).
 function optimal_injection_point(s, res)
     v = trap_volumes(s, res)
     region(c) = c == 0 ? 0 : res.trap_regions[c]
-    pairs = [Tuple(sort([region(s.edge_columns[1, k]), region(s.edge_columns[2, k])]))
+    # a sealed edge is no interface to the outside
+    pairs = [_is_sealed(s, k) ? (-1, -1) :
+             Tuple(sort([region(s.edge_columns[1, k]), region(s.edge_columns[2, k])]))
              for k in axes(s.edge_columns, 2)]
     candidates = sort!(unique(filter(p -> p[1] != p[2], pairs)))
     reach(p) = unique(vcat([downstream_traps(res, t) for t in p if t > 0]...))

@@ -11,7 +11,7 @@
 # --------------------------------- Adjacency ----------------------------------
 
 # Neighbour lists of the columns (sorted), and whether each column touches the
-# domain boundary, from the surface's edges
+# open domain boundary (sealed edges are closed), from the surface's edges
 function _column_neighbours(s)
     n = length(s.zc)
     nbrs = [Int[] for _ in 1:n]
@@ -20,7 +20,7 @@ function _column_neighbours(s)
         a, b = s.edge_columns[1, k], s.edge_columns[2, k]
         if a > 0 && b > 0
             push!(nbrs[a], b); push!(nbrs[b], a)
-        else
+        elseif !_is_sealed(s, k)
             on_boundary[max(a, b)] = true
         end
     end

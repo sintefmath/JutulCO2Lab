@@ -76,7 +76,7 @@ function plot_ve_surface! end
     plot_traps(s, res; title = "", colorbar = true, kwarg...) -> Figure
     plot_traps!(ax, s, res; regions = true, trap_values = nothing,
                 colormap = :viridis, rivers = true, labels = false,
-                outline = true) -> ax
+                outline = true, faults = true) -> ax
 
 Map view of a trapping analysis — the trap surface `s`
 ([`trap_surface`](@ref)) and [`trap_analysis`](@ref)'s result `res`, as the
@@ -88,7 +88,8 @@ static plots of co2lab's spill-point examples:
   (one value per trap, e.g. volumes) in `colormap`;
 - `rivers`: the spill paths through the column centroids;
 - `labels`: trap numbers at the traps' top columns;
-- `outline`: the domain's lateral boundary.
+- `outline`: the domain's lateral boundary;
+- `faults`: the sealing faults (`s.sealed`) as thick red lines.
 
 `plot_traps` returns a new `Figure` (a colour bar when `trap_values` is
 given); `plot_traps!` draws into the axis `ax` and returns it. Modifies

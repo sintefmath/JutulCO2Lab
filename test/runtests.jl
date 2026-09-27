@@ -1356,6 +1356,20 @@ end
         @test_throws ArgumentError trap_analysis((;); method = :other)
         @test_throws ArgumentError trap_analysis((;); closed_fault_edges = [(1, 2)])
 
+        # sealing faults (default) close the surface; open ones leave a complete
+        # offset an open boundary, as co2lab: the west block's fault trap
+        mesh, cols = _faulted_mesh(40.0)
+        sealing = trap_surface(mesh, cols)
+        stitched = trap_surface(mesh, cols; faults = :open)
+        @test count(sealing.sealed) == 14 && !any(stitched.sealed)
+        @test all(==(0), sealing.edge_columns[2, sealing.sealed])
+        crest = 5 + 3 * 10
+        for method in (:cell, :node)
+            @test trap_analysis(sealing; method).traps[crest] == 1
+            @test maximum(trap_analysis(stitched; method).traps; init = 0) == 0
+        end
+        @test_throws ArgumentError trap_surface(mesh, cols; faults = :leaky)
+
         # IGEMS surfaces: the file's orientation by default, co2lab's transposed
         if isdir(atlas_data_directory())
             a = trap_surface(igems_mesh("OSS", 1; coarsening = 4)...)

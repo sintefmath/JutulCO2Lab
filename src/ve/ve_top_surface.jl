@@ -15,13 +15,14 @@
 The caprock of a VE domain in map view: each column's top face (the top face
 of its top cell) as a polygon.
 
-Returns the NamedTuple `(x, y, z, polygons, xc, yc, outline)`, all new:
-`x`, `y`, `z` the coordinates of the surface's nodes (`z` the caprock depth
-there); `polygons[col]` the node indices of column `col`'s top face, in the
-face's order (a collapsed pillar edge gives a triangle); `xc`, `yc` the mean
-of each polygon's nodes; `outline` the node pairs of the edges used by only
-one polygon (the domain's lateral boundary, holes included). `mesh` and
-`columns` are only read.
+Returns the NamedTuple `(x, y, z, polygons, xc, yc, outline, mesh_nodes)`,
+all new: `x`, `y`, `z` the coordinates of the surface's nodes (`z` the caprock
+depth there); `polygons[col]` the node indices of column `col`'s top face, in
+the face's order (a collapsed pillar edge gives a triangle); `xc`, `yc` the
+mean of each polygon's nodes; `outline` the node pairs of the edges used by
+only one polygon (the domain's lateral boundary, holes included);
+`mesh_nodes` the node of `mesh` each surface node is. `mesh` and `columns`
+are only read.
 """
 function ve_top_surface(mesh, columns::VEColumns)
     bdir = _boundary_directions(mesh)
@@ -44,7 +45,7 @@ function ve_top_surface(mesh, columns::VEColumns)
     xc = [sum(x[p]) / length(p) for p in polygons]
     yc = [sum(y[p]) / length(p) for p in polygons]
     return (x = x, y = y, z = z, polygons = polygons, xc = xc, yc = yc,
-            outline = _outline_edges(polygons))
+            outline = _outline_edges(polygons), mesh_nodes = nodes)
 end
 
 # Nodes of cell c's top face (boundary face, or interior face if stacked)
