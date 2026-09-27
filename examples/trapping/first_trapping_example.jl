@@ -5,14 +5,15 @@
 #
 #   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/first_trapping_example.jl
 #
-# Plotting backend: GLMakie (a window per figure; close it to continue) by
-# default; JUTULCO2LAB_BACKEND=CairoMakie writes the figures to files instead.
-# co2lab ends with its interactive trap viewer; that is roadmap Stage 11.
+# Plotting backend: GLMakie (a window per figure, 3D views rotatable with the
+# mouse; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie
+# writes the figures to files instead. co2lab ends with its interactive trap
+# viewer; that is roadmap Stage 11.
 
 using JutulCO2Lab
 backend = Symbol(get(ENV, "JUTULCO2LAB_BACKEND", "GLMakie"))
 @eval using $backend
-using Printf
+using Jutul, Printf
 
 # ---------------------- 1. The grid and its top surface -----------------------
 
@@ -29,9 +30,6 @@ grid = surface_mesh(x, y, top; bottom)
 # The top surface as the trapping analysis sees it: column polygons, their
 # caprock depths, and the nodes and edges of the surface.
 s = trap_surface(grid.mesh, grid.columns)
-fig = plot_ve_map(s; background = s.zc, depth_contours = 20,
-                  title = "caprock depth (m)")
-show_figure(fig, "shoebox_depth")
 
 # -------------------------- 2. Traps and spill paths --------------------------
 
@@ -43,14 +41,16 @@ ntrap = maximum(res.traps)
 @printf("%d traps; %d of %d columns in traps\n", ntrap, count(>(0), res.traps),
         length(res.traps))
 
-# The traps in 3D, white on the caprock.
+# The 3D grid, and above it (lifted 15 m) the top surface coloured by caprock
+# depth with the traps in white — rotatable with the mouse in GLMakie.
 fig = Figure(size = (1100, 700))
-ax = Axis3(fig[1, 1]; title = "traps (white) on the caprock", zreversed = true,
-           aspect = (2, 1, 0.4))
-plot_ve_surface!(ax, s; color = s.zc, colormap = :turbo, strokewidth = 0)
-trap_polygons = (; s..., polygons = s.polygons[res.traps .> 0])
-plot_ve_surface!(ax, trap_polygons; color = :white, offset = -0.5, strokewidth = 0)
-show_figure(fig, "shoebox_traps_3d")
+ax = ve_axis3(fig[1, 1], s; view = (30, 25), exaggeration = 25,
+              title = "grid, caprock depth and traps (white)")
+plot_mesh!(ax, grid.mesh; color = :lightyellow, transparency = true, alpha = 0.3)
+plot_mesh_edges!(ax, grid.mesh; color = (:black, 0.1))
+plot_ve_map!(ax, (; s..., z = s.z .- 15); background = s.zc, colormap = :jet,
+             regions = res.traps .> 0, region_color = :white, outline = false)
+show_figure(fig, "shoebox_3d")
 
 # -------------------------- 3. The trapping capacity --------------------------
 
@@ -71,10 +71,11 @@ end
 @printf("\nthe five largest traps hold %.2e m3, %.1f %% of the capacity\n",
         sum(volumes[order[1:5]]), 100 * sum(volumes[order[1:5]]) / total)
 
-# Traps, rivers and spill regions on the map, with trap volumes and sizes.
+# Traps, rivers and spill regions, seen from above, with trap volumes and
+# sizes.
 fig = Figure(size = (1500, 650))
-ax = Axis(fig[1:2, 1]; title = "traps, spill paths and spill regions",
-          aspect = DataAspect())
+ax = ve_axis3(fig[1:2, 1], s; view = (90, 90), exaggeration = 25,
+              title = "traps, spill paths and spill regions")
 plot_traps!(ax, s, res; labels = true)
 labels = (1:ntrap, string.(order))
 barplot(fig[1, 2], 1:ntrap, volumes[order];
@@ -100,8 +101,8 @@ end
 # Each leaf's spill region and rivers in a colour of its own, the leaves white,
 # the other traps dark grey.
 fig = Figure(size = (1100, 650))
-ax = Axis(fig[1, 1]; title = "leaf traps (white), their spill regions and rivers",
-          aspect = DataAspect())
+ax = ve_axis3(fig[1, 1], s; view = (120, 25), exaggeration = 25,
+              title = "leaf traps (white), their spill regions and rivers")
 leaf_regions = [t in leaves ? t : 0 for t in res.trap_regions]
 drawn = (; res..., trap_regions = leaf_regions, traps = zeros(Int, length(res.traps)),
          rivers = [t in leaves ? res.rivers[t] : Vector{Int}[] for t in 1:ntrap])

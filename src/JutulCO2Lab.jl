@@ -100,6 +100,6 @@ export read_irap_surface, igems_surface_path, igems_mesh, surface_mesh
 include("plotting.jl")
 export plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!
 export plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure
-export plot_traps, plot_traps!
+export plot_traps, plot_traps!, ve_axis3
 
 end # module

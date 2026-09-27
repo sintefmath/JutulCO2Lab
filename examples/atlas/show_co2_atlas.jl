@@ -31,11 +31,15 @@ println("\nformations with a grid: ", join(names, ", "))
 # ------------------------------ 2. Utsira, raw ------------------------------
 
 # The maps are usable on their own. Note that the top and thickness maps of a
-# formation need not cover the same area or share a lattice.
+# formation need not cover the same area or share a lattice. Each is drawn as
+# a surface with its values as height (depth downwards), seen from above as
+# co2lab's surf(...) with view(0, 90) — rotatable with the mouse in GLMakie.
 fig = Figure(size = (900, 900))
 for (k, m) in enumerate(filter(m -> m.name == "Utsirafm", maps))
-    ax = Axis(fig[1, 2k - 1]; title = "Utsira $(m.variant) (m)", aspect = DataAspect(),
-              xticks = LinearTicks(3))
+    ax = Axis3(fig[1, 2k - 1]; title = "Utsira $(m.variant) (m)",
+               zreversed = m.variant == :top, aspect = (1, 3, 0.3),
+               azimuth = -pi / 2, elevation = pi / 2, xticks = LinearTicks(3),
+               zticklabelsvisible = false, zlabelvisible = false)
     plot_atlas_map!(ax, m)
     Colorbar(fig[1, 2k], ax.scene.plots[end])
 end
@@ -44,11 +48,14 @@ show_figure(fig, "utsira_raw_maps")
 
 # ----------------------- 3. The formations on the map -------------------------
 
-# Each formation as a grid, 5 x 5 map values per cell, drawn by its outline,
-# with Norway's coastline and the wells of the shelf for orientation.
+# Each formation as a grid, 5 x 5 map values per cell, drawn by its outline at
+# its depth, with Norway's coastline and the wells of the shelf (at sea level)
+# for orientation; seen from above, as co2lab's view(2).
 fig = Figure(size = (1100, 1000))
-ax = Axis(fig[1, 1]; title = "North Sea formations", aspect = DataAspect(),
-          limits = ((2.5e5, 8.5e5), (6.2e6, 6.95e6)))
+ax = Axis3(fig[1, 1]; title = "North Sea formations", zreversed = true,
+           aspect = (1, 1.25, 0.2), azimuth = -pi / 2, elevation = pi / 2,
+           limits = ((2.5e5, 8.5e5), (6.2e6, 6.95e6), nothing),
+           xticks = LinearTicks(3), zticklabelsvisible = false, zlabelvisible = false)
 colors = Makie.to_colormap(:tab20)                  # 20 distinct colours
 for (k, name) in enumerate(names)
     m = atlas_mesh(name; coarsening = 5)

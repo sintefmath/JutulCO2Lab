@@ -23,6 +23,11 @@ of `surface` ([`ve_top_surface`](@ref)) rather than a resampled raster:
 - `regions`: a per-column mask (e.g. traps) filled in `region_color`;
 - `outline`: the domain's lateral boundary.
 
+On a 3D axis (`Axis3`, e.g. [`ve_axis3`](@ref)) `plot_ve_map!` draws on the
+caprock at its depths, lit: `background` on the surface, depth contours at
+their depths, `regions` as an overlay, wells as vertical lines; `plumes`
+only on map views.
+
 `plot_ve_map` returns a new `Figure`; `plot_ve_map!` draws into the axis
 `ax` and returns it. Modifies (`!` version): `ax`. `surface` is only read.
 """
@@ -36,7 +41,9 @@ function plot_ve_map! end
 An Atlas map as read by [`read_atlas_maps`](@ref) (`(name, variant, meta,
 data)`), at the positions of its values: `style = :heatmap` colours the
 values, `:contour` draws `levels` contour lines (co2lab's `contourAtlas`).
-`plot_atlas_map` returns a new `Figure`, `plot_atlas_map!` the axis.
+On a 3D axis (`Axis3`) `plot_atlas_map!` draws the map as a surface with its
+values as height (co2lab's `surf`). `plot_atlas_map` returns a new `Figure`,
+`plot_atlas_map!` the axis.
 Modifies (`!` version): `ax`. `map` is only read.
 """
 function plot_atlas_map end
@@ -62,13 +69,14 @@ function plot_ve_outline! end
 
 """
     plot_ve_surface!(ax, surface; color = (:steelblue, 0.6), offset = 0.0,
-                     colormap = :viridis, strokecolor = :black, strokewidth = 1)
-        -> ax
+                     colormap = :viridis, shading = false, strokecolor = :black,
+                     strokewidth = 1) -> ax
 
 The top surface of a VE domain ([`ve_top_surface`](@ref)) in 3D: the
 columns' top faces at their node depths (plus `offset`, e.g. to lift it off
 the 3D grid), with their edges (none for `strokewidth = 0`). `color` is one
-colour, or one value per column, drawn in `colormap`. Modifies: `ax` (an `Axis3`). Returns `ax`.
+colour, one value per column (drawn in `colormap`) or one colour per
+column; `shading` lights the surface. Modifies: `ax` (an `Axis3`). Returns `ax`.
 """
 function plot_ve_surface! end
 
@@ -91,12 +99,29 @@ static plots of co2lab's spill-point examples:
 - `outline`: the domain's lateral boundary;
 - `faults`: the sealing faults (`s.sealed`) as thick red lines.
 
+On a 3D axis (`Axis3`, e.g. [`ve_axis3`](@ref)) `plot_traps!` colours the
+caprock at its depths, lit, with rivers, labels, outline and faults on it.
+
 `plot_traps` returns a new `Figure` (a colour bar when `trap_values` is
 given); `plot_traps!` draws into the axis `ax` and returns it. Modifies
 (`!` version): `ax`. `s` and `res` are only read.
 """
 function plot_traps end
 function plot_traps! end
+
+"""
+    ve_axis3(pos, surface; exaggeration = 10.0, view = (-37.5, 30.0), title = "")
+        -> Axis3
+
+A 3D axis for a VE top surface (e.g. [`trap_surface`](@ref),
+[`ve_top_surface`](@ref)) at figure position `pos` (e.g. `fig[1, 1]`): depth
+downwards, the surface's extent at equal lateral scale and its depth range
+`exaggeration` times enlarged, seen from `view = (az, el)` in degrees as
+MATLAB's `view` (so co2lab's views carry over). Rotatable with the mouse in
+GLMakie. Modifies: the figure of `pos` (the axis added). Returns the new
+`Axis3`. `surface` is only read.
+"""
+function ve_axis3 end
 
 """
     show_figure(fig, name; dir = "figures") -> nothing

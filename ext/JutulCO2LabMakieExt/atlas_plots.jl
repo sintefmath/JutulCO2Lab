@@ -32,6 +32,13 @@ function plot_atlas_map!(ax, map; style = :heatmap, levels = 10, colormap = :vir
     return ax
 end
 
+# In 3D: the map as a surface with its values as height (co2lab's surf)
+function plot_atlas_map!(ax::Axis3, map; colormap = :viridis, kwarg...)
+    x, y = JutulCO2Lab._map_positions(map.meta)
+    surface!(ax, x, y, map.data; colormap = colormap, nan_color = :transparent)
+    return ax
+end
+
 function plot_atlas_context!(ax; coastline = true, wells = true)
     if coastline
         for l in atlas_coastline()

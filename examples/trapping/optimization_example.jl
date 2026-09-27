@@ -6,8 +6,9 @@
 #
 #   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/optimization_example.jl
 #
-# Plotting backend: GLMakie (a window per figure; close it to continue) by
-# default; JUTULCO2LAB_BACKEND=CairoMakie writes the figures to files instead.
+# Plotting backend: GLMakie (a window per figure, 3D views rotatable with the
+# mouse; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie
+# writes the figures to files instead.
 
 using JutulCO2Lab
 backend = Symbol(get(ENV, "JUTULCO2LAB_BACKEND", "GLMakie"))
@@ -64,12 +65,13 @@ tree_value = zeros(maximum(res.traps))
 for t in reverse(trees)
     tree_value[t.traps] .= log10(t.value)
 end
-fig = Figure(size = (650, 1100))
-ax = Axis(fig[1, 1]; title = "Utsira: spill trees and injection points",
-          aspect = DataAspect(), xticks = LinearTicks(3))
+fig = Figure(size = (1100, 1000))
+ax = ve_axis3(fig[1, 1], s; view = (64, 72), exaggeration = 40,
+              title = "Utsira: spill trees and injection points")
 plot_traps!(ax, s, res; trap_values = tree_value, rivers = false)
 Colorbar(fig[1, 2]; limits = extrema(tree_value), label = "log₁₀ tree volume (m³)")
-xy(c) = (s.cx[c], s.cy[c])
+# the points a little above the caprock
+xy(c) = Point3f(s.cx[c], s.cy[c], s.zc[c] - 20)
 scatter!(ax, [xy(c) for c in points]; color = :red, strokecolor = :blue,
          strokewidth = 2, markersize = 12)
 text!(ax, [xy(c) for c in points]; text = [@sprintf("%.1f%%", 100 * v / sum(tv))

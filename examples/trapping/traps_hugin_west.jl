@@ -5,8 +5,9 @@
 #
 #   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/traps_hugin_west.jl
 #
-# Plotting backend: GLMakie (a window per figure; close it to continue) by
-# default; JUTULCO2LAB_BACKEND=CairoMakie writes the figures to files instead.
+# Plotting backend: GLMakie (a window per figure, 3D views rotatable with the
+# mouse; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie
+# writes the figures to files instead.
 
 using JutulCO2Lab
 backend = Symbol(get(ENV, "JUTULCO2LAB_BACKEND", "GLMakie"))
@@ -23,7 +24,10 @@ s = trap_surface(hugin.mesh, hugin.columns)
 res = trap_analysis(s; method = :node)
 @printf("Hugin West: %d columns, %d traps (node-based)\n", length(s.zc),
         maximum(res.traps))
-fig = plot_traps(s, res; title = "Hugin West: traps and spill regions (node-based)")
+fig = Figure(size = (1100, 900))
+ax = ve_axis3(fig[1, 1], s; view = (-70, 55), exaggeration = 20,
+              title = "Hugin West: traps and spill regions (node-based)")
+plot_traps!(ax, s, res)
 show_figure(fig, "hugin_west_traps")
 
 # ------------ 2. The southern part: node- against cell-based traps ------------
@@ -51,8 +55,8 @@ end
 
 fig = Figure(size = (1500, 750))
 for (k, (name, r)) in enumerate(("node-based" => node, "cell-based" => cell))
-    ax = Axis(fig[1, k]; title = "southern Hugin West: $name traps",
-              aspect = DataAspect(), xticks = LinearTicks(3))
-    plot_traps!(ax, s, r; labels = true)
+    a = ve_axis3(fig[1, k], s; view = (-20, 40), exaggeration = 20,
+                 title = "southern Hugin West: $name traps")
+    plot_traps!(a, s, r; labels = true)
 end
 show_figure(fig, "hugin_west_south")

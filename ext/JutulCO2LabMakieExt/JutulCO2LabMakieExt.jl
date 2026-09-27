@@ -9,11 +9,12 @@ module JutulCO2LabMakieExt
 using JutulCO2Lab, Makie
 import JutulCO2Lab: plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!,
     plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure,
-    plot_traps, plot_traps!
+    plot_traps, plot_traps!, ve_axis3
 
 include("map_plots.jl")
 include("atlas_plots.jl")
 include("trap_plots.jl")
+include("surface_3d.jl")
 
 # ------------------------------ Figures, backends -----------------------------
 

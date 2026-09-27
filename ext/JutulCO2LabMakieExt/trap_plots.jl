@@ -40,9 +40,10 @@ function plot_traps!(ax, s, res; regions = true, trap_values = nothing,
         linesegments!(ax, pts; color = :black, linewidth = 1)
     end
     if labels
-        text!(ax, s.cx[res.top], s.cy[res.top];
-              text = string.(res.traps[res.top]), align = (:center, :center),
-              fontsize = 11)
+        # one label per trap, at its first top column
+        top = unique(c -> res.traps[c], res.top)
+        text!(ax, s.cx[top], s.cy[top]; text = string.(res.traps[top]),
+              align = (:center, :center), fontsize = 11)
     end
     outline && plot_ve_outline!(ax, s)
     # sealing faults over the outline

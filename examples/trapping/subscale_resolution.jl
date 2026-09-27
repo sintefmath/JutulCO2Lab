@@ -9,8 +9,8 @@
 #
 # The Sleipner benchmark data are no longer downloadable: a local copy must be
 # in sleipner_data_directory(). Plotting backend: GLMakie (a window per
-# figure; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie
-# writes the figures to files instead.
+# figure, 3D views rotatable with the mouse; close it to continue) by default;
+# JUTULCO2LAB_BACKEND=CairoMakie writes the figures to files instead.
 
 using JutulCO2Lab
 
@@ -60,6 +60,17 @@ end
 println("Sleipner as it is:")
 unresolved(sleipner, res_sleipner)
 
+# The Utsira columns under Sleipner's extent (red) and Sleipner's traps.
+region = (minimum(sleipner.x) .< utsira.cx .< maximum(sleipner.x)) .&
+         (minimum(sleipner.y) .< utsira.cy .< maximum(sleipner.y))
+fig = Figure(size = (1100, 900))
+ax = ve_axis3(fig[1, 1], sleipner; view = (-40, 50), exaggeration = 5,
+              title = "Utsira under Sleipner (red) and Sleipner's traps")
+plot_ve_surface!(ax, (; utsira..., polygons = utsira.polygons[region]);
+                 color = (:red, 0.4), shading = true, strokewidth = 0)
+plot_traps!(ax, sleipner, res_sleipner; rivers = false)
+show_figure(fig, "sleipner_on_utsira")
+
 # ---------------------- 3. The large-scale trend removed ----------------------
 
 # Part of Sleipner's relief is Utsira's own large-scale trend, which the
@@ -67,9 +78,7 @@ unresolved(sleipner, res_sleipner)
 # (interpolated bilinearly; co2lab interpolates the Utsira columns' depths on
 # a Delaunay triangulation) and adding back its mean over Sleipner's extent.
 top = only(filter(m -> m.variant == :top, read_atlas_maps(["Utsirafm"])))
-inside = (minimum(sleipner.x) .< utsira.cx .< maximum(sleipner.x)) .&
-         (minimum(sleipner.y) .< utsira.cy .< maximum(sleipner.y))
-level = mean(utsira.zc[inside])
+level = mean(utsira.zc[region])
 trend(x, y) = atlas_map_values(top, x, y) .- level
 detrended = (; sleipner..., zc = sleipner.zc .- trend(sleipner.cx, sleipner.cy),
              z = sleipner.z .- trend(sleipner.x, sleipner.y))
@@ -82,10 +91,9 @@ lost = unresolved(detrended, res_detrended)
 fig = Figure(size = (1300, 750))
 for (k, (name, s, r)) in enumerate((("as it is", sleipner, res_sleipner),
                                     ("trend removed", detrended, res_detrended)))
-    ax = Axis(fig[1, k]; title = "Sleipner traps (red), $name", aspect = DataAspect(),
-              xticks = LinearTicks(3))
-    plot_ve_map!(ax, s; background = s.zc, depth_contours = 0)
-    plot_ve_map!(ax, s; regions = r.traps .> 0, region_color = :red, depth_contours = 0)
+    a = ve_axis3(fig[1, k], s; view = (-50, 40), exaggeration = 5,
+                 title = "Sleipner traps (red), $name")
+    plot_ve_map!(a, s; background = s.zc, regions = r.traps .> 0, region_color = :red)
 end
 ax = Axis(fig[1, 3][1, 1]; title = "Utsira trap volume", aspect = 1)
 pie!(ax, [lost, trapvol_utsira]; color = [:orange, :steelblue])

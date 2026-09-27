@@ -7,8 +7,9 @@
 #
 #   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/coarsening_effects.jl
 #
-# Plotting backend: GLMakie (a window per figure; close it to continue) by
-# default; JUTULCO2LAB_BACKEND=CairoMakie writes the figures to files instead.
+# Plotting backend: GLMakie (a window per figure, 3D views rotatable with the
+# mouse; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie
+# writes the figures to files instead.
 
 using JutulCO2Lab
 backend = Symbol(get(ENV, "JUTULCO2LAB_BACKEND", "GLMakie"))
@@ -36,9 +37,11 @@ end
 box = ((5.25e5, 5.30e5), (6.70e6, 6.75e6))
 inbox(s) = (box[1][1] .< s.cx .< box[1][2]) .& (box[2][1] .< s.cy .< box[2][2])
 s1 = cases[1].surface
-fig = plot_ve_map(s1; background = s1.zc, regions = inbox(s1),
-                  region_color = (:black, 0.5), depth_contours = 0,
-                  title = "Johansen: caprock depth (m), the subdomain shaded")
+fig = Figure(size = (900, 1000))
+ax = ve_axis3(fig[1, 1], s1; view = (0, 90), exaggeration = 5,
+              title = "Johansen: caprock depth, the subdomain shaded")
+plot_ve_map!(ax, s1; background = s1.zc, regions = inbox(s1),
+             region_color = (:black, 0.5))
 show_figure(fig, "johansen_subdomain")
 
 # The subdomain at each resolution, 1000 m apart in depth, with the traps
@@ -46,8 +49,10 @@ show_figure(fig, "johansen_subdomain")
 # small traps disappear as the resolution coarsens.
 colours = [:blue, :red, :green, :cyan, :magenta, :yellow]
 fig = Figure(size = (1500, 900))
+# (co2lab's view(86, 12): azimuth 86° − 90° from x)
 ax = Axis3(fig[1:2, 1]; title = "traps in the subdomain, coarsening 1 (top) to 6",
-           zreversed = true, aspect = (1, 4, 3), azimuth = 0.1pi, elevation = 0.1pi)
+           zreversed = true, aspect = (1, 4, 3), azimuth = deg2rad(-4),
+           elevation = deg2rad(12))
 for (c, case) in enumerate(cases)
     s, sub = case.surface, inbox(case.surface)
     part = (; s..., polygons = s.polygons[sub])

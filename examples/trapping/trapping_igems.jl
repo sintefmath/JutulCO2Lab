@@ -8,9 +8,10 @@
 #
 # Needs the IGEMS surfaces (files.nr.no/igems/surfaces.zip) or the IGEMS
 # sample in atlas_data_directory(). Plotting backend: GLMakie (a window per
-# figure; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie
-# writes the figures to files instead. co2lab builds the surface transposed
-# (x and y swapped); here it keeps the file's orientation.
+# figure, 3D views rotatable with the mouse; close it to continue) by default;
+# JUTULCO2LAB_BACKEND=CairoMakie writes the figures to files instead. co2lab
+# builds the surface transposed (x and y swapped); here it keeps the file's
+# orientation.
 
 using JutulCO2Lab
 backend = Symbol(get(ENV, "JUTULCO2LAB_BACKEND", "GLMakie"))
@@ -34,10 +35,15 @@ ntrap = maximum(res.traps)
 
 # The traps: long narrow ones along the crests of the ridges, and many small
 # scattered pockets; then the rivers leaving them.
-fig = plot_ve_map(s; regions = res.traps .> 0, region_color = :red,
-                  depth_contours = 20, title = "OSSNP1: traps (red) and caprock depth")
+fig = Figure(size = (1200, 900))
+ax = ve_axis3(fig[1, 1], s; view = (-65, 25), exaggeration = 20,
+              title = "OSSNP1: traps (red) on the caprock")
+plot_ve_map!(ax, s; background = s.zc, regions = res.traps .> 0, region_color = :red)
 show_figure(fig, "igems_traps")
-fig = plot_traps(s, res; regions = false, title = "OSSNP1: traps and rivers")
+fig = Figure(size = (1200, 900))
+ax = ve_axis3(fig[1, 1], s; view = (-90, 90), exaggeration = 20,
+              title = "OSSNP1: traps and rivers")
+plot_traps!(ax, s, res; regions = false)
 show_figure(fig, "igems_rivers")
 
 # ---------------------------- 2. Trapping capacity ----------------------------
@@ -57,12 +63,15 @@ end
 # The ten largest traps; all traps coloured by volume; the spill regions.
 largest = res.traps .∈ Ref(order[1:10])
 fig = Figure(size = (1800, 800))
-ax = Axis(fig[1, 1]; title = "the ten largest traps (red)", aspect = DataAspect())
-plot_ve_map!(ax, s; regions = res.traps .> 0, region_color = :gray40, depth_contours = 0)
-plot_ve_map!(ax, s; regions = largest, region_color = :red, depth_contours = 0)
-ax = Axis(fig[1, 2]; title = "trap volume (m³)", aspect = DataAspect())
+view3(k, title) = ve_axis3(fig[1, k], s; view = (-90, 90), exaggeration = 20,
+                           title = title)
+ax = view3(1, "the ten largest traps (red)")
+plot_ve_surface!(ax, s; color = :gray90, shading = true, strokewidth = 0)
+plot_ve_map!(ax, s; regions = res.traps .> 0, region_color = :gray40)
+plot_ve_map!(ax, s; regions = largest, region_color = :red, outline = false)
+ax = view3(2, "trap volume (m³)")
 plot_traps!(ax, s, res; regions = false, rivers = false, trap_values = volumes)
 Colorbar(fig[2, 2]; limits = extrema(volumes), vertical = false)
-ax = Axis(fig[1, 3]; title = "spill regions", aspect = DataAspect())
+ax = view3(3, "spill regions")
 plot_traps!(ax, s, res; rivers = false)
 show_figure(fig, "igems_capacity")

@@ -8,10 +8,10 @@
 #
 # Needs the NPD decks in johansen_data_directory() (downloadable from SINTEF:
 # the error message names the files). Plotting backend: GLMakie (a window per
-# figure; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie
-# writes the figures to files instead. co2lab shows each model in its
-# interactive trap viewer (roadmap Stage 11); here the traps reached from the
-# injection point are drawn on a map.
+# figure, 3D views rotatable with the mouse; close it to continue) by default;
+# JUTULCO2LAB_BACKEND=CairoMakie writes the figures to files instead. co2lab
+# shows each model in its interactive trap viewer (roadmap Stage 11); here
+# the traps reached from the injection point are drawn on the caprock.
 
 using JutulCO2Lab
 backend = Symbol(get(ENV, "JUTULCO2LAB_BACKEND", "GLMakie"))
@@ -42,15 +42,19 @@ end
 w = johansen_well_point()
 nearest(s) = argmin((s.cx .- w[1]) .^ 2 .+ (s.cy .- w[2]) .^ 2)
 
-# The three models' outlines on the Atlas's caprock depth, and the well.
+# The Atlas's caprock coloured by depth, the NPD models' outlines at their
+# depths, and the well.
 atlas = last(surfaces[3])
-fig = plot_ve_map(atlas; background = atlas.zc, depth_contours = 0,
-                  title = "Johansen: Atlas caprock depth (m), NPD models outlined")
-ax = current_axis()
+fig = Figure(size = (1200, 900))
+ax = ve_axis3(fig[1, 1], atlas; view = (-62, 60), exaggeration = 5,
+              title = "Johansen: Atlas caprock depth, NPD models outlined")
+plot_ve_map!(ax, atlas; background = atlas.zc, outline = false)
 plot_ve_outline!(ax, last(surfaces[2]); color = :red, label = "NPD full field")
 plot_ve_outline!(ax, last(surfaces[1]); color = :black, label = "NPD sector")
-scatter!(ax, [w[1]], [w[2]]; color = :blue, markersize = 14, label = "injection well")
-axislegend(ax; position = :rb)
+zmin, zmax = extrema(atlas.z)
+lines!(ax, [Point3f(w..., zmin), Point3f(w..., zmax)]; color = :blue, linewidth = 3,
+       label = "injection well")
+Legend(fig[2, 1], ax; orientation = :horizontal)
 show_figure(fig, "johansen_models")
 
 # ----------------- 2. Traps reached from the injection point ------------------
@@ -71,10 +75,10 @@ for (k, (name, s)) in enumerate(surfaces)
             sum(volumes[reached]; init = 0.0))
 
     # all traps and their spill regions; the traps reached in red, the well
-    a = Axis(fig[1, k]; title = "$name: traps reached (red)", aspect = DataAspect(),
-             xticks = LinearTicks(3))
+    a = ve_axis3(fig[1, k], s; view = (-80, 64), exaggeration = 5,
+                 title = "$name: traps reached (red)")
     plot_traps!(a, s, res; rivers = false)
     plot_ve_map!(a, s; regions = res.traps .∈ Ref(reached), region_color = :red,
-                 depth_contours = 0, wells = [col])
+                 wells = [col], outline = false)
 end
 show_figure(fig, "johansen_traps_from_well")

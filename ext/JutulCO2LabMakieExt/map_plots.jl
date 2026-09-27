@@ -75,33 +75,3 @@ function _background_plot(ax)
     i = findfirst(is_field, ax.scene.plots)
     return isnothing(i) ? nothing : ax.scene.plots[i]
 end
-
-# ------------------------------- Surface in 3D --------------------------------
-
-function plot_ve_surface!(ax, surface; color = (:steelblue, 0.6), offset = 0.0,
-                          colormap = :viridis, strokecolor = :black, strokewidth = 1)
-    x, y, z = surface.x, surface.y, surface.z .+ offset
-    per_column = color isa AbstractVector{<:Real}
-    Face = Makie.GeometryBasics.GLTriangleFace
-    pts, tris, values = Point3f[], Face[], Float64[]
-    # each polygon as a fan around its node mean
-    for (col, p) in enumerate(surface.polygons)
-        q = unique(p)
-        length(q) < 3 && continue
-        c = length(pts) + 1
-        push!(pts, Point3f(sum(x[q]) / length(q), sum(y[q]) / length(q),
-                           sum(z[q]) / length(q)))
-        append!(pts, Point3f.(x[q], y[q], z[q]))
-        per_column && append!(values, fill(color[col], length(q) + 1))
-        for k in eachindex(q)
-            push!(tris, Face(c, c + k, c + (k == length(q) ? 1 : k + 1)))
-        end
-    end
-    mesh!(ax, pts, tris; color = per_column ? values : color, colormap = colormap,
-          shading = NoShading)
-
-    edges = [Point3f(x[n], y[n], z[n]) for p in surface.polygons
-             for (k, a) in enumerate(p) for n in (a, p[k == length(p) ? 1 : k + 1])]
-    linesegments!(ax, edges; color = strokecolor, linewidth = strokewidth)
-    return ax
-end

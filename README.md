@@ -196,7 +196,8 @@ src/atlas/           the CO2 Storage Atlas (Stage 5)
 src/plotting.jl      plotting functions (declared and documented; implemented in
                      the Makie extension)
 ext/JutulCO2LabMakieExt/  Makie extension: VE map views, Atlas maps, coastline,
-                     trap maps; loaded with GLMakie or CairoMakie
+                     trap maps, in 2D or on the caprock in 3D (ve_axis3);
+                     loaded with GLMakie or CairoMakie
 
 src/trapping/        structural traps (Stage 8, co2lab-spillpoint)
   trap_surface.jl    the caprock as trap analysis sees it (co2lab's Gt quantities),
