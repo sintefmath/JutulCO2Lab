@@ -28,6 +28,7 @@ end
 
 include("atlas_checks.jl")
 include("trap_checks.jl")
+include("inventory_checks.jl")
 
 # The VE sloping-aquifer domain of an MRST dump (3D grid G3 and rock).
 function _ve_case(d)
@@ -1377,6 +1378,20 @@ end
                                         co2lab_compatible = true)...)
             @test Set(zip(a.x, a.y, a.z)) == Set(zip(b.y, b.x, b.z))
             @test_throws ArgumentError igems_surface_path("OSS", 1000)
+        end
+    end
+
+    @testset "trapping inventory vs co2lab (Stage 9 item 2)" begin
+        c, d = (joinpath(refdir, f) for f in ("inventory_case.mat", "inventory_mrst.mat"))
+        if !isfile(c) || !isfile(d) || !isdir(atlas_data_directory())
+            @info "Skipping: Atlas data or $c, $d (scripts/inventory_case.jl, " *
+                  "mrst_dump_inventory.m) missing"
+        else
+            case = matread(c)
+            for rep in (_inventory_vs_mrst(case, matread(d)), _inventory_consistency(case))
+                passed(rep) || display(rep)
+                @test passed(rep)
+            end
         end
     end
 

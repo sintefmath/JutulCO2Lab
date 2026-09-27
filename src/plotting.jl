@@ -110,6 +110,21 @@ function plot_traps end
 function plot_traps! end
 
 """
+    plot_trapping_history(history; title = "", kwarg...) -> Figure
+    plot_trapping_history!(ax, history; legend = true) -> ax
+
+The trapping inventory over a run ([`trapping_history`](@ref)'s result) as
+stacked areas, as co2lab's `plotTrappingDistribution`: time in years, mass
+in Mt, co2lab's categories, order and colours, the CO2 that has left the
+domain on top; categories that stay zero (dissolution, subscale) are left
+out of the legend. `plot_trapping_history` returns a new `Figure`,
+`plot_trapping_history!` draws into `ax` and returns it. Modifies (`!`
+version): `ax`. `history` is only read.
+"""
+function plot_trapping_history end
+function plot_trapping_history! end
+
+"""
     ve_axis3(pos, surface; exaggeration = 10.0, view = (-37.5, 30.0), title = "")
         -> Axis3
 

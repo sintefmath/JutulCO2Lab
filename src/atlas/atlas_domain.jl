@@ -10,8 +10,8 @@
 
 """
     atlas_ve_domain(name; coarsening = 1, layers = 1, min_thickness = 1e-3,
-                    perm = nothing, poro = nothing, co2lab_compatible = false)
-        -> NamedTuple
+                    perm = nothing, poro = nothing, rugosity = 0.0,
+                    co2lab_compatible = false) -> NamedTuple
 
 Atlas formation `name` as a VE domain, as co2lab's
 `getFormationTopGrid(name, coarsening, 'vertical_layers', layers)`:
@@ -33,8 +33,10 @@ Atlas formation `name` as a VE domain, as co2lab's
 `perm` (m²) and `poro`, if given, replace the formation's average values:
 needed where the Atlas has none (the Brent Group, Pliocene sand, Sleipner,
 and the sealing Rør and Not formations), for which co2lab builds grids with
-`NaN` rock; here they throw an `ArgumentError` instead. `min_thickness` (per
-layer) and `co2lab_compatible` are passed on to [`atlas_grid_section`](@ref).
+`NaN` rock; here they throw an `ArgumentError` instead. `rugosity` (m, a
+number or one value per column) is passed on to [`ve_domain`](@ref);
+`min_thickness` (per layer) and `co2lab_compatible` to
+[`atlas_grid_section`](@ref).
 
 Returns the NamedTuple `(mesh, columns, ve, grid, petro)`, all new: the 3D
 `UnstructuredMesh`, its `VEColumns`, [`ve_domain`](@ref)'s result, the grid
@@ -44,7 +46,7 @@ average rock (`(perm, poro, ntg)`, 40 in `STRUCTURES.md`, with `perm`,
 """
 function atlas_ve_domain(name::AbstractString; coarsening::Integer = 1,
                          layers::Integer = 1, min_thickness::Real = 1e-3,
-                         perm = nothing, poro = nothing,
+                         perm = nothing, poro = nothing, rugosity = 0.0,
                          co2lab_compatible::Bool = false)
     m = atlas_mesh(name; coarsening, layers, min_thickness, co2lab_compatible)
     petro = m.petro
@@ -55,7 +57,7 @@ function atlas_ve_domain(name::AbstractString; coarsening::Integer = 1,
                             "for $name: pass `perm` and `poro`"))
 
     rock = _atlas_cell_rock(m.grid, m.mesh, petro)
-    ve = ve_domain(m.mesh, m.columns; rock...)
+    ve = ve_domain(m.mesh, m.columns; rock..., rugosity = rugosity)
     return (mesh = m.mesh, columns = m.columns, ve = ve, grid = m.grid, petro = petro)
 end
 

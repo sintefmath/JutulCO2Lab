@@ -15,14 +15,16 @@ trapping); and Stage 4: dissolution, rate-driven and instantaneous, each
 gated against co2lab to solver precision; Stage 5: the CO2 Storage Atlas
 and the Sleipner benchmark; Stage 8: co2lab-spillpoint's trapping analysis
 (both methods, the derived quantities, IRAP/IGEMS surfaces), identical to
-co2lab.
+co2lab; Stage 9 item 2: the trapping inventory, identical to co2lab on
+identical input.
 Readable walkthroughs: `examples/sloping_aquifer.jl` (Stage 2),
 `examples/residual_trapping.jl` (Stage 3, residual trapping) and
 `examples/dissolution.jl` (Stage 4, rate-driven and instantaneous
 dissolution), and `examples/atlas/` (Stage 5, the CO2 Storage Atlas with
 plots: `show_co2_atlas.jl`, `models_from_atlas.jl`,
 `show_top_surface_grids.jl`, `sleipner_model.jl`) and `examples/trapping/`
-(Stage 8, co2lab-spillpoint's seven static examples). The plan
+(Stage 8, co2lab-spillpoint's seven static examples) and
+`examples/inventory/` (Stage 9, the trapping inventory of a run). The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
@@ -210,6 +212,9 @@ src/trapping/        structural traps (Stage 8, co2lab-spillpoint)
                      point, flattened caprock
   surfaces.jl        IRAP surfaces, IGEMS grids, grids under lattice surfaces
 
+src/inventory/       where the CO2 is (Stage 9)
+  trapping_inventory.jl  co2lab's trapping inventory per state and over a run
+
 examples/            readable walkthroughs, with their own environment
                      (examples/Project.toml: JutulCO2Lab, the Jutul fork,
                      GLMakie, CairoMakie), run from the project root with
@@ -218,11 +223,15 @@ examples/            readable walkthroughs, with their own environment
                      writes figures to ./figures instead of opening windows
   trapping/          co2lab-spillpoint's examples (static figures; the
                      interactive viewer is roadmap Stage 11)
+  inventory/         a run's trapping inventory
 test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, wells,
                      boundary conditions and reconstruction (vs MRST), Atlas, trapping,
+                     inventory,
                      toolchain smoke test
 test/atlas_checks.jl the Atlas comparisons with co2lab, shared with the Stage 5 gate
 test/trap_checks.jl  the trapping comparisons with co2lab, shared with the Stage 8 gate
+test/inventory_checks.jl  the inventory comparisons with co2lab, shared with the
+                     Stage 9 item 2 check
 ../scripts/          MRST/Octave reference dumps, prototypes, gate scripts
 ```
 

@@ -119,6 +119,15 @@ layers and download address of the two NPD models, `johansen.jl`).
 | 51 | *IRAP surface* (NamedTuple) | `surfaces.jl` | `(x, y, z, angle)`: node positions along x and y, depths `nx × ny` (x along the first index; NaN missing), the header's rotation angle (not applied) | a file (`read_irap_surface`) |
 | 52 | *Surface grid* (NamedTuple) | `surfaces.jl` | `(mesh, columns)`: a one-layer `UnstructuredMesh` between two surfaces given on a lattice (cells with an undefined top corner left out) and its `VEColumns` (1) | node positions and depths (`surface_mesh`); 51 (`igems_mesh`) |
 
+## I. Trapping inventory (roadmap Stage 9 item 2), on A–E and H
+
+| # | Name | File | What it is | Built from / depends on |
+|---|---|---|---|---|
+| 55 | *Trapping inventory* (NamedTuple) | `trapping_inventory.jl` | `(dissolved, structural_residual, residual, residual_in_plume, structural_subscale, structural_plume, free_plume)`: CO2 mass (kg) per trapping mechanism in one state, co2lab's categories and order, each ≥ 0 | a state, the model and fluid, 47, 48 (`trapping_inventory`) |
+| 56 | *Trapping history* (NamedTuple) | `trapping_inventory.jl` | `(t, inventory, injected, exited)`: report times (s), one 55 per step, cumulative net CO2 injected (from the wells' CO2 mass rates), CO2 that has left the domain | `simulate_reservoir`'s result, the model and fluid, 47, 48 (`trapping_history`) |
+
+Constants: **`TRAPPING_CATEGORIES`** (the names of 55, in order; exported).
+
 ## F. MRST comparison harness (`JutulCO2Lab.Oracle`), independent of A–E
 
 | # | Name | File | What it is | Depends on |

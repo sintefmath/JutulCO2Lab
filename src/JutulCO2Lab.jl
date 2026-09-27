@@ -97,9 +97,13 @@ export trap_surface, trap_analysis, trap_volumes, downstream_traps
 export maximize_trapping, optimal_injection_point, flatten_traps
 export read_irap_surface, igems_surface_path, igems_mesh, surface_mesh
 
+include("inventory/trapping_inventory.jl")
+export TRAPPING_CATEGORIES, trapping_inventory, trapping_history
+
 include("plotting.jl")
 export plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!
 export plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure
 export plot_traps, plot_traps!, ve_axis3
+export plot_trapping_history, plot_trapping_history!
 
 end # module
