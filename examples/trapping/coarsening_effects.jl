@@ -31,7 +31,7 @@ cases = map(1:N) do c
     (surface = s, res = res, volumes = volumes)
 end
 
-# --------------------- 2. A subdomain at every resolution ---------------------
+# ------------------------------ 2. The subdomain ------------------------------
 
 # A box of 5 km x 50 km, shown on the full-resolution caprock.
 box = ((5.25e5, 5.30e5), (6.70e6, 6.75e6))
@@ -43,6 +43,8 @@ ax = ve_axis3(fig[1, 1], s1; view = (0, 90), exaggeration = 5,
 plot_ve_map!(ax, s1; background = s1.zc, regions = inbox(s1),
              region_color = (:black, 0.5))
 show_figure(fig, "johansen_subdomain")
+
+# ---------------- 3. Traps and trap volumes against resolution ----------------
 
 # The subdomain at each resolution, 1000 m apart in depth, with the traps
 # filled to their spill depth (co2lab's flattenTraps) in solid colour: many
@@ -64,11 +66,10 @@ for (c, case) in enumerate(cases)
                      strokewidth = 0)
 end
 
-# --------------------- 3. Trap volumes against resolution ---------------------
-
-# The total volume first grows (the largest traps grow a little at lower
-# resolution), then shrinks as smaller traps vanish; the mean volume grows
-# quickly as the small traps are smoothed away.
+# Next to it, the trap volumes of the whole formation. The total volume first
+# grows (the largest traps grow a little at lower resolution), then shrinks as
+# smaller traps vanish; the mean volume grows quickly as the small traps are
+# smoothed away.
 labels = (1:N, string.(500 .* (1:N)))
 barplot(fig[1, 2], 1:N, [sum(c.volumes) for c in cases]; color = colours,
         axis = (title = "total trap volume (m³)", xticks = labels,
