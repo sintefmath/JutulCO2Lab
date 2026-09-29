@@ -47,13 +47,6 @@ one:
   saturated wherever CO2 is present); otherwise rate-driven, with co2lab's
   transfer rule (`computeDissolutionTransfer`).
 
-makeVEFluid's other options are not fluid properties and go elsewhere:
-- `rugosity` → [`ve_domain`](@ref)`(...; rugosity)`, per column;
-- `pvMult_p_ref`, `pvMult_fac` → [`setup_co2lab_model`](@ref)`(...;
-  rock_compressibility = (reference_pressure = pvMult_p_ref,
-  compressibility = pvMult_fac))`.
-Passing them here throws an `ArgumentError` that says so.
-
 Returns a new `CO2LabVEFluid`, with the endpoints resolved.
 """
 function co2lab_ve_fluid(; residual = (0.0, 0.0), krmax = (-1.0, -1.0),
@@ -61,10 +54,8 @@ function co2lab_ve_fluid(; residual = (0.0, 0.0), krmax = (-1.0, -1.0),
                            co2_rho_pvt = nothing, wat_rho_pvt = nothing,
                            co2_mu_ref = 6e-5, wat_mu_ref = 8e-4,
                            co2_mu_pvt = nothing, wat_mu_pvt = nothing,
-                           dissolution::Bool = false, dis_rate = 0.0, dis_max = 0.03,
-                           rugosity = nothing, pvMult_p_ref = nothing,
-                           pvMult_fac = nothing)
-    _refuse_moved_options(rugosity, pvMult_p_ref, pvMult_fac)
+                           dissolution::Bool = false, dis_rate = 0.0, dis_max = 0.03)
+    # makeVEFluid's rugosity goes to ve_domain, pvMult_* to setup_co2lab_model
     rw, rg = Float64.(residual)
     krw = krmax[1] < 0 ? 1 - rg : Float64(krmax[1])
     krg = krmax[2] < 0 ? 1 - rw : Float64(krmax[2])
@@ -76,19 +67,6 @@ function co2lab_ve_fluid(; residual = (0.0, 0.0), krmax = (-1.0, -1.0),
                          (Float64(wat_mu_ref), Float64(co2_mu_ref)),
                          (lin(wat_mu_pvt), lin(co2_mu_pvt)),
                          dissolution, Float64(dis_rate), Float64(dis_max))
-end
-
-# makeVEFluid options that belong to the grid or the model, not the fluid
-function _refuse_moved_options(rugosity, pvMult_p_ref, pvMult_fac)
-    isnothing(rugosity) ||
-        throw(ArgumentError("rugosity is a property of the VE grid: give it to " *
-                            "ve_domain(...; rugosity), per column or as a scalar"))
-    isnothing(pvMult_p_ref) && isnothing(pvMult_fac) ||
-        throw(ArgumentError("rock compressibility belongs to the model: give it to " *
-                            "setup_co2lab_model(...; rock_compressibility = " *
-                            "(reference_pressure = pvMult_p_ref, " *
-                            "compressibility = pvMult_fac))"))
-    return nothing
 end
 
 """

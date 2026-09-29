@@ -939,10 +939,6 @@ end
             # the VE fluid needs column heights
             plain = reservoir_domain(mesh, permeability = 0.5Darcy, porosity = 0.25)
             @test_throws ErrorException setup_co2lab_model(plain)
-
-            # makeVEFluid options that belong to the grid or the model
-            @test_throws ArgumentError co2lab_ve_fluid(rugosity = 1.0)
-            @test_throws ArgumentError co2lab_ve_fluid(pvMult_fac = 1e-10)
         end
 
         @testset "rugosity (grid) and rock compressibility (model)" begin
