@@ -17,6 +17,7 @@ function trap_volumes(s, res; traps = 1:maximum(res.traps; init = 0),
                       poro = ones(length(s.zc)))
     return map(traps) do t
         cells = findall(==(t), res.traps)
+        # CO2 column from the spill depth up, cut at the formation thickness
         h = min.(res.trap_z[t] .- s.zc[cells], s.H[cells])
         sum(s.area[cells] .* h .* poro[cells])
     end
@@ -61,6 +62,7 @@ function maximize_trapping(s, res; n = Inf, remove_overlap::Bool = true,
                            calculate_all::Bool = false)
     v = trap_volumes(s, res)
     nt = length(v)
+    # start points: every trap, or only those nothing spills into
     roots = calculate_all ? collect(1:nt) :
             [t for t in 1:nt if !any(res.trap_adj[:, t])]
     down = [sort(downstream_traps(res, r)) for r in roots]
@@ -71,6 +73,7 @@ function maximize_trapping(s, res; n = Inf, remove_overlap::Bool = true,
         # first of equal maxima, as co2lab's max
         k = argmax(vals)
         push!(trees, (root = roots[k], traps = down[k], value = vals[k]))
+        # a trap filled by this tree counts no more for later ones
         remove_overlap && (v[down[k]] .= 0.0)
         done[k] = true
     end
@@ -95,12 +98,14 @@ function optimal_injection_point(s, res)
     pairs = [_is_sealed(s, k) ? (-1, -1) :
              Tuple(sort([region(s.edge_columns[1, k]), region(s.edge_columns[2, k])]))
              for k in axes(s.edge_columns, 2)]
+    # candidates: every pair of different regions that share an edge
     candidates = sort!(unique(filter(p -> p[1] != p[2], pairs)))
     reach(p) = unique(vcat([downstream_traps(res, t) for t in p if t > 0]...))
     volumes = [sum(v[reach(p)]) for p in candidates]
     best = candidates[argmax(volumes)]
     edges = findall(==(best), pairs)
     cols = filter(>(0), sort!(unique(vec(s.edge_columns[:, edges]))))
+    # the shallowest column on the best interface
     return (column = cols[argmin(s.zc[cols])], volume = maximum(volumes),
             edges = edges, traps = best)
 end

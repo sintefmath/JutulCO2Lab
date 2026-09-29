@@ -4,6 +4,7 @@
 function plot_atlas_map(map; title = "$(map.name) $(map.variant)", kwarg...)
     fig, ax = _map_figure(title)
     plot_atlas_map!(ax, map; kwarg...)
+    # a heatmap just drawn gets a colour bar; contour lines none
     p = ax.scene.plots[end]
     p isa Heatmap && Colorbar(fig[1, 2], p)
     return fig

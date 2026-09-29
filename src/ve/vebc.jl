@@ -146,6 +146,7 @@ MRST's `qRes`: `dP = p_bc − p_ph − rho_ph·g·dz`; for `dP > 0` (inflow)
 """
 function _ve_bc_volume_flux(bc, p_ph, mob_ph, rho_ph, mob_t, sat_ph, g)
     dP = bc.pressure - p_ph - rho_ph * g * bc.dz
+    # inflow: the boundary's fluid at the column's total mobility (MRST's rule)
     return dP > 0 ? mob_t * bc.trans * dP * sat_ph : mob_ph * bc.trans * dP
 end
 
@@ -182,6 +183,7 @@ function _ve_bc_mass_outflow(bc, state, g)
     dissolved_per_volume = b[1, c] * rs * rho[2, c] / b[2, c]
     v = vol(1)
     dis = v > 0 ? dissolved_per_volume * v : zero(v)
+    # inflowing brine carries no CO2: only its brine part enters the brine row
     brine = v > 0 ? brine - dis : brine - dissolved_per_volume * v
     return (brine, co2 + dis, dis)
 end
@@ -219,6 +221,7 @@ function Jutul.apply_forces_to_equation!(
         eq_s, force::AbstractVector{<:VEBoundaryCondition}, time)
     state = storage.state
     for bc in force
+        # outflow adds to the residual, as accumulation does
         q = _ve_bc_mass_outflow(bc, state, Jutul.gravity_constant)
         acc[1, bc.cell] += q[1]
         acc[2, bc.cell] += q[2]

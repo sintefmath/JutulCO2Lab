@@ -6,6 +6,7 @@
 
 function ve_axis3(pos, surface; exaggeration = 10.0, view = (-37.5, 30.0), title = "")
     dx, dy, dz = (-(reverse(extrema(v))...) for v in (surface.x, surface.y, surface.z))
+    # x and y to scale, depth exaggerated
     m = max(dx, dy)
     # MATLAB's view(az, el) looks from azimuth az measured from −y
     az, el = view

@@ -117,6 +117,7 @@ function _mrst_boundary_directions(G, mesh)
     cf, fpos = G["cells"]["faces"], Int.(vec(G["cells"]["facePos"]))
     fnodes, npos = Int.(vec(G["faces"]["nodes"])), Int.(vec(G["faces"]["nodePos"]))
 
+    # MRST tags faces in each cell's face list; a boundary face has one cell
     tag = zeros(Int8, size(N, 1))
     for c in 1:(length(fpos) - 1), p in fpos[c]:(fpos[c+1] - 1)
         f = Int(cf[p, 1])
@@ -152,6 +153,7 @@ function _trimmed_boundary_directions(old, keep, new)
     ijk(c) = cell_ijk(old, c)
     dirs, cells, nodes = Int8[], Int[], Vector{Int}[]
 
+    # faces between a kept and a removed cell become boundary faces
     for f in 1:number_of_faces(old)
         l, r = old.faces.neighbors[f]
         active[l] == active[r] && continue
@@ -160,6 +162,7 @@ function _trimmed_boundary_directions(old, keep, new)
         push!(cells, c); push!(nodes, collect(old.faces.faces_to_nodes[f]))
     end
 
+    # boundary faces of kept cells keep their direction
     olddirs = _boundary_directions(old)
     for bf in eachindex(olddirs)
         c = old.boundary_faces.neighbors[bf]

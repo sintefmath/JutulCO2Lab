@@ -56,6 +56,7 @@ function johansen_mesh(model::Symbol = :sector; co2lab_compatible::Bool = false)
         JutulDarcy.GeoEnergyIO.parse_grdecl_file(path)
     end
     grid = _cut_layers(grid, m.layers)
+    # co2lab_compatible: no connections across pinched-out layers, as MRST
     mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(
         grid; process_pinch = !co2lab_compatible)
     return (mesh = mesh, columns = first(ve_columns(mesh)), grid = grid)
@@ -67,6 +68,7 @@ end
 # GeoEnergyIO splits them where the layer above is faulted.
 function _cut_layers(grid, layers)
     nx, ny, nz = grid["cartDims"]
+    # two ZCORN levels per layer (its top and bottom)
     zcorn = reshape(grid["ZCORN"], 2nx, 2ny, 2nz)[:, :, 2first(layers)-1:2last(layers)]
     active = reshape(Bool.(grid["ACTNUM"]), nx, ny, nz)[:, :, layers]
     return Dict{String, Any}("cartDims" => (nx, ny, length(layers)),

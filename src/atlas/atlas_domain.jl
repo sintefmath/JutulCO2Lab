@@ -50,6 +50,7 @@ function atlas_ve_domain(name::AbstractString; coarsening::Integer = 1,
                          co2lab_compatible::Bool = false)
     m = atlas_mesh(name; coarsening, layers, min_thickness, co2lab_compatible)
     petro = m.petro
+    # given values replace the Atlas's averages
     isnothing(perm) || (petro = (; petro..., perm = Float64(perm)))
     isnothing(poro) || (petro = (; petro..., poro = Float64(poro)))
     (isnan(petro.perm) || isnan(petro.poro)) &&
@@ -80,6 +81,7 @@ function atlas_mesh(name::AbstractString; coarsening::Integer = 1,
     s = atlas_grid_section(name; coarsening, nz = layers, min_thickness,
                            co2lab_compatible)
     grid = s.grid
+    # the largest connected piece only, as co2lab's G(1)
     grid["ACTNUM"] = _largest_piece(grid)
     mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
     columns, _ = ve_columns(mesh)
@@ -100,6 +102,7 @@ grid section (a copy of `grid` with a new `"ACTNUM"`).
 function grid_section_subset(grid, mesh, keep::AbstractVector{Bool})
     length(keep) == number_of_cells(mesh) ||
         throw(ArgumentError("keep must have one value per cell of mesh"))
+    # the kept cells active, all others not; then meshed anew
     active = fill(false, Tuple(grid["cartDims"]))
     for c in findall(keep)
         active[cell_ijk(mesh, c)...] = true
@@ -113,6 +116,7 @@ end
 # section's mesh (co2lab: processGRDECL's pieces, the one with most cells)
 function _largest_piece(grid)
     mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+    # pieces connected through faces
     N = get_neighborship(mesh)
     g = Graphs.SimpleGraph(number_of_cells(mesh))
     foreach(f -> Graphs.add_edge!(g, N[1, f], N[2, f]), axes(N, 2))
@@ -132,6 +136,7 @@ end
 # or the averages where there are no maps
 function _atlas_cell_rock(grid, mesh, petro)
     nc = number_of_cells(mesh)
+    # a map's value per cell, its gaps (and missing maps) filled with the average
     at(key) = [grid[key][cell_ijk(mesh, c)...] for c in 1:nc]
     from_map(key, avg) = haskey(grid, key) ? replace(at(key), NaN => avg) :
                          fill(avg, nc)

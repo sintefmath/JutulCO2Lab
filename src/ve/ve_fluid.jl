@@ -147,7 +147,9 @@ zone between `h` and `h_max`.
 """
 function _sharp_interface_relperm(h, h_max, H, krw, krg, dh)
     lost = min(dh, H)
+    # CO2 flows in the plume, below the accretion layer
     krG = _max_c(h - lost, 0.0) * krg / H
+    # brine: relperm 1 below h_max, krw in the residual-CO2 zone above it
     krW = (H - _max_c(h_max, lost) + _max_c(h_max - _max_c(h, lost), 0.0) * krw) / H
     return (krW, krG)
 end
@@ -222,6 +224,7 @@ Jutul.values_per_entity(model, ::PlumeHeights) = 2
             continue
         end
 
+        # sGmax as it stands within this step (see above)
         smax = max(min(sGmax[i], 1 - rw), sG[i])
         hh[1, i], hh[2, i] = _plume_heights(sG[i], smax, ColumnHeight[i], rw, rg)
     end
@@ -274,6 +277,7 @@ VECapillaryPressure(; is_ve = nothing) = VECapillaryPressure(is_ve)
             continue
         end
 
+        # the brine–CO2 density difference over the plume height
         pc[1, i] = (PhaseMassDensities[1, i] - PhaseMassDensities[2, i]) * g *
                    PlumeHeights[1, i]
     end

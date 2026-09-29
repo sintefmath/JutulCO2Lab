@@ -35,6 +35,7 @@ function _next_remaining(adj, traps, lost)
     isempty(down) && return 0
     rem = setdiff(down, lost)
     isempty(rem) || return minimum(rem)
+    # every trap downstream is lost too: look one step further
     return _next_remaining(adj, intersect(down, lost), lost)
 end
 
@@ -47,6 +48,7 @@ function _bypass(adj, i)
     n = size(adj, 1)
     keep = setdiff(1:n, i)
     C = Float64.(adj)
+    # L·C: a predecessor of i also spills wherever i spills
     L = sparse(1:n, 1:n, 1.0)[keep, :]
     L[:, i] = C[keep, i]
     return (L * C)[:, keep] .!= 0
@@ -63,12 +65,14 @@ on the columns of the trap surface `s`. Returns a new NamedTuple as
 """
 function _node_to_cell_traps(s, nt)
     rep = _column_rep_nodes(s)
+    # the regions' top nodes (no downstream node)
     top_nodes = findall(n -> nt.down[n] == 0 && nt.trap_regions[n] != 0,
                         eachindex(s.z))
     regions = nt.trap_regions[rep]
     tops = _column_tops(s, rep, top_nodes)
     ntrap = length(nt.trap_z)
     traps = zeros(Int, length(rep))
+    # a column is in a trap when in its region and above its spill depth
     for i in 1:ntrap
         traps[(regions .== i) .& (s.zc .< nt.trap_z[i])] .= i
     end
@@ -162,6 +166,7 @@ function _shortest_path(g, start, target)
             end
             arg > 0 && push!(new, (u, best, arg))
         end
+        # the target cannot be reached: the target alone
         isempty(new) && return [target]
         foreach(((u, d, a),) -> (D[u] = d; pred[u] = a), new)
     end
@@ -182,6 +187,7 @@ function _river_columns(s, nodes)
         ws, es, wn, en = s.corners[:, c]
         diag[minmax(ws, en)] = c; diag[minmax(es, wn)] = c
     end
+    # repeated nodes dropped
     nodes = nodes[[true; diff(nodes) .!= 0]]
     cells = Int[]
     for (a, b) in zip(nodes[1:end-1], nodes[2:end])

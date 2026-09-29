@@ -16,6 +16,7 @@ function _node_neighbours(s, closed)
     nbrs = [Int[] for _ in 1:nn]
     for k in axes(s.edges, 2)
         a, b = s.edges[1, k], s.edges[2, k]
+        # nodes on a closed fault connect to nothing
         (a in closed || b in closed) && continue
         push!(nbrs[a], b); push!(nbrs[b], a)
     end
@@ -30,6 +31,7 @@ function _upslope_neighbours(s, closed)
     nbrs = _node_neighbours(s, closed)
     up = zeros(Int, length(s.z))
     for n in eachindex(s.z)
+        # nodes sharing two neighbours with n: its quad diagonals
         common = Dict{Int, Int}()
         for k in nbrs[n], j in nbrs[k]
             j == n || (common[j] = get(common, j, 0) + 1)
@@ -39,6 +41,7 @@ function _upslope_neighbours(s, closed)
         for c in cand
             dx, dy, dz = s.x[n] - s.x[c], s.y[n] - s.y[c], s.z[n] - s.z[c]
             slope = sign(dz) * dz^2 / (dx^2 + dy^2 + dz^2)
+            # the node itself (0/0) counts as flat
             isnan(slope) && (slope = 0.0)
             slope > best && ((best, up[n]) = (slope, c))
         end
@@ -55,10 +58,12 @@ end
 # edges between regions, in edge order
 function _spill_field(s, up, closed_bnodes)
     nn = length(s.z)
+    # boundary nodes: on an edge with a column on one side only
     boundary = fill(false, nn)
     for k in axes(s.edges, 2)
         any(==(0), s.edge_columns[:, k]) && (boundary[s.edges[:, k]] .= true)
     end
+    # open boundary nodes drain out (region 0); each local top starts a region
     open = boundary .& .!in.(1:nn, Ref(Set(closed_bnodes)))
     tops = [up[n] == n && !open[n] for n in 1:nn]
 
@@ -78,6 +83,7 @@ function _spill_field(s, up, closed_bnodes)
 
     down = copy(up)
     down[open .| tops] .= 0
+    # edges between regions: where a region can spill
     rows = [(k, region[a], region[b], s.z[a], s.z[b], a, b)
             for (k, (a, b)) in enumerate(eachcol(s.edges)) if region[a] != region[b]]
     return (region = region, down = down, spill = rows)
@@ -92,6 +98,7 @@ end
 function _group_spill(members, group_of, spill)
     member_set = Set(members)
     inside(r) = r in member_set
+    # the group's rim edges, each at its deeper end's depth
     rim = [(i, max(e[4], e[5])) for (i, e) in enumerate(spill)
            if inside(e[2]) != inside(e[3])]
     # stable sort by depth, as co2lab's sortrows
@@ -139,15 +146,18 @@ function _merge_cycles(nreg, spill)
     group_of = collect(1:nreg)
     cmat = spzeros(nreg, nreg)
     z, edges = zeros(nreg), Vector{Vector{Int}}(undef, nreg)
+    # each region spills into the groups beyond its spill point
     for g in 1:nreg
         r = _group_spill(members[g], group_of, spill)
         cmat[g, r.groups] .= 1.0
         z[g], edges[g] = r.z, r.edges
     end
+    # walks of growing length; a group reachable from itself is on a cycle
     icmat, tmp = spzeros(nreg, nreg), copy(cmat)
     while nnz(tmp) > 0
         icmat = _spones(icmat + tmp)
         while (i = findfirst(!iszero, diag(icmat))) !== nothing
+            # the cycle merges into its first group, which spills anew
             cycle = [k for k in axes(icmat, 1) if icmat[i, k] != 0 && icmat[k, i] != 0]
             g = cycle[1]
             cmat, icmat, tmp = (_merge_groups(M, cycle) for M in (cmat, icmat, tmp))
@@ -185,6 +195,7 @@ function _node_traps(s, closed_bnodes, closed_fnodes)
         f.region[n] == 0 && continue
         t = group_of[f.region[n]]
         trap_regions[n] = t
+        # the trap: the region's nodes at or above its spill depth
         s.z[n] <= g.z[t] && (traps[n] = t)
     end
     rivers = [[_node_river(s, f.down, traps, t, e) for e in g.spill_edges[t]]
@@ -197,6 +208,7 @@ end
 # oriented to start in the trap (co2lab's trace_rivers)
 function _node_river(s, down, traps, t, e)
     river = [s.edges[1, e], s.edges[2, e]]
+    # both ends followed downstream, until a top or the open boundary
     while down[river[end]] != 0
         push!(river, down[river[end]])
     end

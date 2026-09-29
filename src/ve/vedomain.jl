@@ -30,6 +30,7 @@ function ve_average_rock(columns::VEColumns, dz::AbstractVector;
                          anisotropy_rtol = 1e-6)
     isnothing(perm_y) || _warn_lateral_anisotropy(perm_x, perm_y, anisotropy_rtol)
 
+    # thickness-weighted average over each column's cells
     avg(x) = [sum(x[columns.cells[r]] .* dz[r]) / sum(dz[r])
               for r in (columns.pos[c]:(columns.pos[c+1] - 1)
                         for c in 1:number_of_columns(columns))]
@@ -119,11 +120,13 @@ function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing, poro,
     geometry = ve_column_geometry(mesh, columns)
     rock = ve_average_rock(columns, geometry.dz; perm_x, perm_y, poro, ntg)
 
+    # the VE grid: one coarse cell per column
     coarse = CoarseMesh(mesh, columns.partition)
     kw = isnothing(rock.ntg) ? (;) : (net_to_gross = rock.ntg,)
     domain = reservoir_domain(coarse; permeability = rock.perm, porosity = rock.poro,
                               kw...)
 
+    # gravity between columns from caprock depths, not mid-column centroids
     domain[:gdz, Faces()] = Jutul.compute_face_gdz(domain[:neighbors], geometry.z_top)
     domain[:column_height, Cells()] = geometry.H
     ncol = number_of_columns(columns)
@@ -132,6 +135,7 @@ function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing, poro,
     domain[:is_ve, Cells()] = fill(true, ncol)
     domain[:pillar_columns, Cells()] = _pillar_columns(columns)
 
+    # stacked columns of one pillar exchange no flow directly
     any(>(1), domain[:pillar_columns]) && _seal_stacked!(domain, columns)
     return (domain = domain, coarse = coarse, geometry = geometry, rock = rock)
 end
@@ -160,6 +164,7 @@ function _seal_stacked!(domain, columns)
     end
     domain[:transmissibilities, Faces()] = T
 
+    # do the remaining connections still join all columns?
     g = SimpleGraph(number_of_columns(columns))
     foreach(f -> T[f] > 0 && add_edge!(g, N[1, f], N[2, f]), axes(N, 2))
     n = length(connected_components(g))
@@ -251,9 +256,11 @@ function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
            area = Float64[], cen = NTuple{3, Float64}[], nrm = NTuple{3, Float64}[],
            T = Float64[], faces = Vector{Int}[], fault = Bool[])
 
+    # pillars that hold a column (for the fault check below)
     occupied = Set(columns.pillar)
 
     for s in 1:length(cs)
+        # outer sides only: no column connected beyond
         cs.neighbour[s] == 0 || continue
         col, fs = cs.column[s], cs.boundary_faces[s]
 
@@ -321,6 +328,7 @@ end
 # the two-point half transmissibility k·A·(c·n)/|c|² from the column centroid.
 function _side_aggregate(g, fs, perm, col_centroid)
     A = sum(g.ba[f] for f in fs)
+    # area-weighted centroid and normal of the fine faces
     C = ntuple(d -> sum(g.ba[f] * g.bc[d, f] for f in fs) / A, 3)
     Nv = ntuple(d -> sum(g.ba[f] * g.bn[d, f] for f in fs), 3)
     N = Nv ./ sqrt(sum(abs2, Nv))

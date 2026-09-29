@@ -75,6 +75,7 @@ function trap_surface(mesh, columns::VEColumns; faults::Symbol = :sealing)
     # co2lab's node order: sorted by x, y, z, equal positions one node
     x, y, z, polygons, renum = _unique_nodes(s.x, s.y, s.z, polygons)
     fault_pairs = Set(minmax(renum[a], renum[b]) for (a, b) in at_fault)
+    # open faults: joined as co2lab's topSurfaceGrid does; nothing left to seal
     if faults == :open
         x, y, z, polygons = _stitch_faults(x, y, z, polygons,
                                            _column_connections(mesh, columns))
@@ -88,6 +89,7 @@ function trap_surface(mesh, columns::VEColumns; faults::Symbol = :sealing)
         order = _co2lab_edge_order(edges, corners)
         edges, edge_columns = edges[:, order], edge_columns[:, order]
     end
+    # boundary edges along a fault
     sealed = [edge_columns[2, k] == 0 && Tuple(edges[:, k]) in fault_pairs
               for k in axes(edges, 2)]
     area, cx, cy = _polygon_geometry(x, y, polygons)
@@ -248,6 +250,7 @@ end
 # Edges as sorted node pairs (2 × ne) and the columns on either side (2 × ne,
 # the smaller column first; 0 for a boundary edge)
 function _surface_edges(polygons)
+    # the columns on each edge (one at the boundary); collapsed edges skipped
     sides = Dict{Tuple{Int, Int}, Vector{Int}}()
     for (col, p) in enumerate(polygons), (k, a) in enumerate(p)
         b = p[k == length(p) ? 1 : k + 1]
@@ -272,10 +275,12 @@ function _co2lab_edge_order(edges, corners)
     index = Dict((edges[1, k], edges[2, k]) => k for k in axes(edges, 2))
     e(a, b) = index[minmax(a, b)]
     ws, es, wn, en = (corners[i, :] for i in 1:4)
+    # each column's west and east edges in turn, then all south, then all north
     first = [k for c in axes(corners, 2) for k in (e(ws[c], wn[c]), e(es[c], en[c]))]
     second = [[e(ws[c], es[c]) for c in axes(corners, 2)];
               [e(wn[c], en[c]) for c in axes(corners, 2)]]
     order = unique([unique(first); unique(second)])
+    # edges left over: not a lattice, keep the sorted order
     length(order) == size(edges, 2) || return collect(axes(edges, 2))
     return order
 end

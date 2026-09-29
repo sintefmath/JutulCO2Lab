@@ -73,6 +73,8 @@ function read_aai_grid(path::AbstractString; co2lab_rows::Bool = false)
     lines = readlines(path)
     header = Dict{String, Float64}()
     k = 0
+    # header lines (keyword, number) until the first data line; some files use
+    # decimal commas
     while k < length(lines)
         tok = split(replace(lines[k+1], ',' => '.'))
         (length(tok) == 2 && !isnothing(tryparse(Float64, tok[2]))) || break
@@ -84,6 +86,7 @@ function read_aai_grid(path::AbstractString; co2lab_rows::Bool = false)
     rows = _aai_rows(lines, k, nx, ny, co2lab_rows)
 
     nodata = header["NODATA_value"]
+    # zero counts as no data too (co2lab's rule)
     data = map(v -> (v == nodata || isinf(v) || v == 0) ? NaN : v, rows)
     meta = (ncols = nx, nrows = ny, xllcorner = header["xllcorner"],
             yllcorner = header["yllcorner"], cellsize = header["cellsize"],
@@ -96,6 +99,7 @@ end
 # skips the first data row and leaves the last one empty (zeros).
 function _aai_rows(lines, k, nx, ny, co2lab_rows)
     rows = zeros(ny, nx)
+    # co2lab skips the first data row, which shifts the map one row north
     first_row = co2lab_rows ? 2 : 1
     for (r, i) in enumerate(first_row:ny)
         vals = parse.(Float64, split(replace(lines[k+i], ',' => '.')))
@@ -127,6 +131,7 @@ function atlas_map_files()
                             "$(atlas_data_directory()) (set CO2LAB_ATLAS_DATA)")
         for f in sort(readdir(dir))
             _is_atlas_map(f) || continue
+            # e.g. Huginfm_east_thickness → Huginfmeast, :thickness
             parts = split(f, '_')
             thickness = any(p -> lowercase(p) == "thickness", parts)
             name = join(filter(p -> !(lowercase(p) in ("thickness", "top")), parts))
@@ -181,6 +186,7 @@ end
 # x0, y0 of its first value (see read_atlas_maps)
 function _coarsen_map(meta, data, coarsening, co2lab_compatible)
     data = data[1:coarsening:end, 1:coarsening:end]
+    # a value sits at its cell's centre (co2lab: at the corner)
     shift = co2lab_compatible ? 0.0 : meta.cellsize / 2
     meta = (; meta..., cellsize = meta.cellsize * coarsening, dims = size(data),
             x0 = meta.xllcorner + shift, y0 = meta.yllcorner + shift)
@@ -198,9 +204,11 @@ permeability in m², `NaN` where the Atlas gives none (sealing formations,
 unknown names), and `ntg` `nothing` unless the Atlas gives it.
 """
 function atlas_average_rock(name::AbstractString)
+    # the table's names drop the "fm"
     n = lowercase(name)
     endswith(n, "fm") && (n = n[1:end-2])
     v = get(_ATLAS_AVERAGE_ROCK, n, (NaN, NaN))
+    # mD to m², with MRST's darcy
     return (perm = v[1] * 1e-3 * _mrst_darcy(), poro = v[2],
             ntg = length(v) == 3 ? v[3] : nothing)
 end
@@ -208,6 +216,7 @@ end
 # MRST's darcy (core/utils/units/darcy.m), evaluated in its order so that
 # permeabilities agree to the last bit: 1 cP, 1 cm³/s through 1 cm² at 1 atm/cm.
 function _mrst_darcy()
+    # computed as MRST's darcy is, for identical rounding
     mu, cm = 1e-2 * (0.1 * 1.0 * 1.0), 1e-2 * 1.0
     p_grad = 101325.0 * 1.0 / cm
     vel = (cm^3 / 1.0) / cm^2
@@ -241,6 +250,7 @@ misplaces the coast by up to tens of kilometres. Returns new matrices.
 """
 function atlas_coastline()
     lines = matread(joinpath(atlas_data_directory(), "CO2Atlas", "norway.mat"))["norway"]
+    # the coastline is in UTM zone 33, the Atlas in 31
     rezone(l) = reduce(vcat, [collect(_utm_rezone(l[i, 1], l[i, 2], 33, 31))'
                               for i in axes(l, 1)])
     return [rezone(l) for l in vec(lines)]
@@ -255,5 +265,6 @@ North Sea data set (`welldata.mat`, from the NPD fact pages). Returns
 """
 function atlas_wells()
     w = matread(joinpath(atlas_data_directory(), "CO2Atlas", "welldata.mat"))["welldata"]
+    # stored as (y, x)
     return (x = w[:, 2], y = w[:, 1])
 end

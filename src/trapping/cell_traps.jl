@@ -18,6 +18,7 @@ function _column_neighbours(s)
     on_boundary = fill(false, n)
     for k in axes(s.edge_columns, 2)
         a, b = s.edge_columns[1, k], s.edge_columns[2, k]
+        # interior edge: neighbours; boundary edge: open unless sealed (a fault)
         if a > 0 && b > 0
             push!(nbrs[a], b); push!(nbrs[b], a)
         elseif !_is_sealed(s, k)
@@ -59,8 +60,10 @@ function _trap_from_top(nbrs, on_boundary, zf, zlevel, top)
     # rim: reached columns next to an unreached one or the domain boundary
     rim = [c for c in findall(reached)
            if on_boundary[c] || any(b -> !reached[b], nbrs[c])]
+    # the spill depth: the shallowest rim column
     z_spill = minimum(zf[rim])
     cells = [c for c in findall(reached) if zf[c] <= z_spill]
+    # a trap needs a column above its spill depth
     any(c -> zf[c] < z_spill, cells) || return (Int[], z_spill)
     return (cells, z_spill)
 end
@@ -83,11 +86,14 @@ function _trapping_structure(s, nbrs, on_boundary)
             if isempty(cells)
                 candidate[t] = false
             else
+                # the trap fills to its spill depth; its top may grow the next
+                # level, the other columns are done
                 candidate[cells] .= false; candidate[t] = true
                 zf[cells] .= z_spill
                 push!(level, (cells, z_spill))
             end
         end
+        # a column keeps the deepest spill depth it is filled to
         for (cells, z_spill) in level
             z_spill_loc[cells] .= max.(z_spill_loc[cells], z_spill)
         end
@@ -106,6 +112,7 @@ end
 function _number_traps(nbrs, z_spill_loc)
     traps = zeros(Int, length(z_spill_loc))
     n = 0
+    # a trap: connected columns with the same spill depth
     for c in eachindex(z_spill_loc)
         (z_spill_loc[c] > 0 && traps[c] == 0) || continue
         n += 1
@@ -136,6 +143,7 @@ function _trace_cell_rivers(nbrs, on_boundary, z, traps)
     while !all(visited)
         # deepest unvisited trap first (co2lab: max of traps_z)
         t = argmax(i -> visited[i] ? -Inf : trap_z[i], 1:ntrap)
+        # follow the rivers on, trap to trap, until one is visited or none
         while t > 0 && !visited[t]
             visited[t] = true
             r = _river_from_trap(nbrs, on_boundary, z, traps, t)
@@ -152,10 +160,12 @@ end
 function _river_from_trap(nbrs, on_boundary, z, traps, t)
     cells = findall(==(t), traps)
     rim = sort!(unique([b for c in cells for b in nbrs[c] if traps[b] != t]))
+    # it spills over the shallowest rim column at the trap's level
     up = filter(b -> z[b] <= z[cells[1]], rim)
     isempty(up) && return nothing
     cell = up[argmin(z[up])]
     line = [cell]
+    # then upwards, to the shallowest neighbour, until flat, a trap or the boundary
     while !on_boundary[cell]
         cc = sort!([cell; nbrs[cell]])
         next = cc[argmin(z[cc])]
@@ -194,6 +204,7 @@ function _drainage(nbrs, z, up, top)
     end
     reached = fill(false, length(z)); reached[top] = true
     stack = [top]
+    # downwards along the steepest-ascent links, and across level neighbours
     while !isempty(stack)
         c = pop!(stack)
         for b in [down[c]; filter(b -> z[b] == z[c], nbrs[c])]

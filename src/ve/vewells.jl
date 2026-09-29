@@ -36,8 +36,10 @@ function _mrst_well_constant(d1, d2, inner_product::Symbol)
         throw(ArgumentError("inner_product must be :ip_simple or :ip_tpf, " *
                             "got :$inner_product"))
 
+    # aspect ratio (≥ 1), rounded as MATLAB's round
     r = max(round(d1 / d2, RoundNearestTiesAway), round(d2 / d1, RoundNearestTiesAway))
     x, y = _WELL_CONSTANT_RATIO, _WELL_CONSTANT_VALUE
+    # linear in MRST's table, extrapolated beyond its ends
     i = clamp(searchsortedlast(collect(x), r), 1, length(x) - 1)
     return y[i] + (y[i+1] - y[i]) * (r - x[i]) / (x[i+1] - x[i])
 end

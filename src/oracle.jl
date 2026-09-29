@@ -192,6 +192,7 @@ function check!(report::OracleReport, name::AbstractString, julia, mrst;
                 note::AbstractString = "")
     a = _flatten(julia)
     b = _flatten(mrst)
+    # a bad perm or length is recorded as a failure, not thrown: the gate goes on
     if perm !== nothing
         if length(perm) != length(a)
             res = CheckResult(String(name), length(a), NaN, NaN, tol, false,

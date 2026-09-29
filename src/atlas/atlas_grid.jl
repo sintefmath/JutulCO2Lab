@@ -66,9 +66,11 @@ function atlas_grid_section(name::AbstractString; coarsening::Integer = 1,
         top, thick = _refine_map(top, refining), _refine_map(thick, refining)
     end
 
+    # node depths on the top map's lattice, nz + 1 layers of them
     Z = _atlas_node_depths(top, thick, nz)
     nx, ny = size(Z, 1) - 1, size(Z, 2) - 1
     active = _atlas_active_cells(Z, co2lab_compatible)
+    # cells thinner than min_thickness are dropped
     active .&= _mean_cell_thickness(Z) .>= min_thickness
     grid = Dict{String, Any}("cartDims" => (nx, ny, nz),
                              "COORD" => _atlas_coord(top, Z),
@@ -110,6 +112,7 @@ end
 # STRUCTURES.md); the Jurassic formations take the Jurassic top maps.
 function _atlas_top_and_thickness(name, coarsening, co2lab_compatible)
     is(n) = m -> lowercase(m) == lowercase(n)
+    # formations without a top map of their own take a Jurassic one
     top_name = any(is(name), _JURASSIC_MID) ? "Jurassicmid" :
                any(is(name), _JURASSIC_TOP) ? "Jurassic" : name
     maps = read_atlas_maps([name, top_name]; coarsening, co2lab_compatible)
@@ -134,8 +137,10 @@ function _atlas_node_depths(top, thick, nz)
     Zt, Zh = permutedims(top.data), permutedims(thick.data)
     Z = zeros(length(X), length(Y), nz + 1)
     for j in eachindex(Y), i in eachindex(X)
+        # the thickness map may lie on another lattice: interpolate it here
         z0 = _interp2(X, Y, Zt, X[i], Y[j])
         dz = _interp2(tx, ty, Zh, X[i], Y[j]) / nz
+        # no thickness: no formation at this node
         dz <= 0 && (dz = NaN)
         # (co2lab then sorts the layers; they are already in order)
         for k in 1:nz+1
@@ -149,6 +154,7 @@ end
 function _atlas_coord(top, Z)
     X, Y = _map_positions(top.meta)
     coord = zeros(6, length(X), length(Y))
+    # a vertical pillar per node, from the formation's top to its bottom
     for j in eachindex(Y), i in eachindex(X)
         coord[:, i, j] = [X[i], Y[j], Z[i, j, 1], X[i], Y[j], Z[i, j, end]]
     end
@@ -179,6 +185,7 @@ _zero_undefined!(v) = (v[.!isfinite.(v)] .= 0.0; v)
 function _atlas_active_cells(Z, co2lab_compatible)
     undef = isnan.(Z[:, :, 1])
     nx, ny = size(undef, 1) - 1, size(undef, 2) - 1
+    # co2lab: no cell next to an undefined node, wrapping round the edges
     if co2lab_compatible
         near = copy(undef)
         for di in -1:1, dj in -1:1
@@ -186,6 +193,7 @@ function _atlas_active_cells(Z, co2lab_compatible)
         end
         return .!near[1:nx, 1:ny]
     end
+    # here: a cell is active when its four nodes are defined
     return .!(undef[1:nx, 1:ny] .| undef[2:end, 1:ny] .|
               undef[1:nx, 2:end] .| undef[2:end, 2:end])
 end
@@ -209,6 +217,7 @@ function _add_atlas_rock_maps!(grid, petro, name, top_meta; coarsening, refining
     targets = Dict("poro" => ("PORO", :poro), "perm" => ("PERMX", :perm),
                    "ntg" => ("NTG", :ntg))
     for f in atlas_map_files()
+        # file names such as Utsirafm_poro: the formation and the property
         parts = split(basename(f.path), '_')
         kind = findfirst(p -> lowercase(p) in ("poro", "perm", "ntg"), parts)
         isnothing(kind) && continue
@@ -227,6 +236,7 @@ function _add_atlas_rock_maps!(grid, petro, name, top_meta; coarsening, refining
         grid[key] = repeat(layer, 1, 1, nz)
         petro = (; petro..., field => _nan_mean(layer))
     end
+    # one permeability map: y and z as x
     if haskey(grid, "PERMX")
         grid["PERMY"], grid["PERMZ"] = copy(grid["PERMX"]), copy(grid["PERMX"])
     end
@@ -235,6 +245,7 @@ end
 
 # A map interpolated to the cell centres of the lattice of `top_meta` (nx × ny)
 function _atlas_cell_values(m, top_meta, nx, ny)
+    # the map's values at the cell centres of the top map's lattice
     h, x0, y0 = top_meta.cellsize, top_meta.x0, top_meta.y0
     xc = _linspace(x0 + h / 2, nx * h + x0 - h / 2, nx)
     yc = _linspace(y0 + h / 2, ny * h + y0 - h / 2, ny)
@@ -287,6 +298,7 @@ end
 # Octave's linspace(a, b, n), built symmetrically from both ends
 function _linspace(a, b, n)
     n == 1 && return [Float64(b)]
+    # Octave's linspace: filled from both ends, for identical rounding
     v = zeros(n)
     v[1], v[n] = a, b
     d = (b - a) / (n - 1)
@@ -301,6 +313,7 @@ end
 # `ys` and columns along `xs`; NaN outside the data and next to NaN values.
 function _interp2(xs, ys, Z, x, y)
     (x < xs[1] || x > xs[end] || y < ys[1] || y > ys[end]) && return NaN
+    # bilinear in the lattice cell (i, j) holding (x, y)
     i = clamp(searchsortedlast(xs, x), 1, length(xs) - 1)
     j = clamp(searchsortedlast(ys, y), 1, length(ys) - 1)
     a = Z[j, i]
@@ -319,6 +332,7 @@ function _atlas_map_surface(map)
     nx, ny = size(map.data)
     x = [X[i] for i in 1:nx, j in 1:ny] |> vec
     y = [Y[j] for i in 1:nx, j in 1:ny] |> vec
+    # nodes at the values, a quadrilateral between each four
     L = LinearIndices((nx, ny))
     polygons = [[L[i, j], L[i+1, j], L[i+1, j+1], L[i, j+1]]
                 for i in 1:nx-1, j in 1:ny-1] |> vec

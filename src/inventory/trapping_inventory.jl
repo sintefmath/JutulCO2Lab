@@ -78,12 +78,14 @@ function _trapping_inventory(state, fluid, col)
     rw, rg = fluid.res_water, fluid.res_gas
     (cw, pw), (cg, pg) = fluid.rho_pvt
     p, S, Smax = state[:Pressure], state[:sG], state[:sGmax]
+    # no Rs in the state: a model without dissolution
     rs = haskey(state, :Rs) ? state[:Rs] : zeros(length(p))
 
     # pore volume and CO2 density at the state's pressure
     pv = col.pv .* col.pv_mult.(p)
     rho_ref = fluid.rho_ref[2]
     mfac = pv .* rho_ref .* (1 .+ cg .* (p .- pg))
+    # brine expansion factor: rs is surface CO2 per surface brine volume
     bW = 1 .+ cw .* (p .- pw)
 
     hh = [_plume_heights(S[i], Smax[i], col.H[i], rw, rg) for i in eachindex(S)]
@@ -91,6 +93,7 @@ function _trapping_inventory(state, fluid, col)
     h, h_max = first.(hh) .+ eps(), last.(hh) .+ eps()
     m = _category_saturations(S, Smax, h, h_max, col.zt, col.dh, rw, rg)
 
+    # residual below the plume; the rest of the free immobile part is in the plume
     residual = sum(mfac .* m.res)
     masses = (dissolved = sum(rho_ref .* bW .* pv .* rs .* (1 .- S)),
               structural_residual = sum(mfac .* m.immob_struct),
@@ -110,6 +113,7 @@ function _category_saturations(S, Smax, h, h_max, zt, dh, rw, rg)
     S_immob = Smax .* rg ./ (1 - rw)
     S_mob = S .- S_immob
     immob_sub = S_immob .* min.(dh, h_max) ./ h_max
+    # each part scaled by the fraction of its height in the zone
     mobile_sub = S_mob .* min.(dh, h) ./ h
     immob_struct = S_immob .* max.(min.(h_max, zt) .- dh, 0) ./ h_max
     mobile_struct = S_mob .* max.(min.(h, zt) .- dh, 0) ./ h
@@ -149,6 +153,7 @@ function trapping_history(result, model, fluid::CO2LabVEFluid, s, res;
         rate .+= w[:Vapor_mass_rate]
     end
     injected = cumsum(rate .* dt)
+    # what is neither in place nor unaccounted for has left through the boundary
     exited = initial .+ injected .- sum.(values.(inventory))
     return (t = t, inventory = inventory, injected = injected, exited = exited)
 end

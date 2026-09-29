@@ -54,6 +54,7 @@ function _top_face_nodes(mesh, ijk, bdir, c)
         bdir[f] == _TOP && return collect(mesh.boundary_faces.faces_to_nodes[f])
     end
 
+    # a stacked column's top face is an interior face
     for f in mesh.faces.cells_to_faces[c]
         d, _ = _interior_face_direction(mesh, ijk, c, f)
         d == _TOP && return collect(mesh.faces.faces_to_nodes[f])
@@ -92,6 +93,7 @@ function ve_contour_lines(surface, values::AbstractVector, levels)
     node, centre = _node_and_centre_values(surface, values)
     x, y = surface.x, surface.y
     out = [NTuple{4, Float64}[] for _ in levels]
+    # each polygon as a fan of triangles around its centre
     for (col, p) in enumerate(surface.polygons)
         xc, yc, vc = surface.xc[col], surface.yc[col], centre[col]
         for k in eachindex(p)
@@ -117,6 +119,7 @@ function _node_and_centre_values(surface, values)
     length(values) == ncol ||
         throw(ArgumentError("values must be per column ($ncol) or per node ($nn)"))
 
+    # per-column values: each node takes the mean of its columns'
     total, count = zeros(nn), zeros(Int, nn)
     for (col, p) in enumerate(surface.polygons), n in unique(p)
         total[n] += values[col]

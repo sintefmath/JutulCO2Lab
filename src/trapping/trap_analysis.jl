@@ -52,6 +52,7 @@ function trap_analysis(s; method::Symbol = :cell, closed_boundary_edges = [],
     nt = _node_traps(s, _closed_nodes(closed),
                      _closed_nodes(closed_fault_edges))
     project_to_cells && return _node_to_cell_traps(s, nt)
+    # node results: the region tops are the nodes with no downstream node
     top = findall(n -> nt.down[n] == 0 && nt.trap_regions[n] != 0, eachindex(s.z))
     return (traps = nt.traps, trap_z = nt.trap_z, trap_regions = nt.trap_regions,
             trap_adj = nt.trap_adj, rivers = nt.rivers, top = top)

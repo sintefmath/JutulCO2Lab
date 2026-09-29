@@ -27,6 +27,7 @@ all cells are filled). Negative `h` counts as 0.
 """
 function _fill_degree(h, zb)
     h = max(h, zero(h))
+    # n cells lie wholly above depth h (bottoms zb); t: the filled part of the next
     n = count(<=(h), zb)
     n == length(zb) && return (n, zero(h))
     # the two forms are MRST's, kept for identical rounding
@@ -54,10 +55,13 @@ function _column_saturations(zb, h, h_max, rw, rg)
     n_r == n && (t_r = max(t_r - t, 0.0))
 
     for k in 1:nk
+        # wholly in the residual zone
         if k <= n_r && k > n + 1
             s[k], smax[k] = rg, 1 - rw
+        # plume above, residual CO2 in the rest of the cell
         elseif k <= n_r && k == n + 1
             s[k], smax[k] = s[k] + (1 - t) * rg, 1 - rw
+        # h_max's partial cell
         elseif k == n_r + 1
             s[k], smax[k] = s[k] + t_r * rg, s[k] + t_r * (1 - rw)
         end
@@ -78,6 +82,7 @@ piecewise linear, so `h` is found exactly here; with no brine at all, `h` is
 co2lab's initial guess `frac·H`. Returns a new vector, top cell first.
 """
 function _column_dissolved(zb, dz, brine, frac)
+    # brine to saturate: the fraction frac of the column's, filled from the top
     target = frac * sum(brine .* dz)
     h = frac * zb[end]
     top, acc = 0.0, 0.0

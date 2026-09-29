@@ -64,6 +64,7 @@ function sleipner_grid_section(; min_perm::Real = 200.0)
     permz = rock("M9X1_perm_Z_mD_.inc", "PERMZ")
 
     md = 1e-3 * _mrst_darcy()                          # milli*darcy, MRST's order
+    # shale cells (x-permeability below min_perm) inactive; permeability in m²
     return Dict{String, Any}("cartDims" => dims,
         "COORD" => _map_axes(g["COORD"], g["MAPAXES"]), "ZCORN" => g["ZCORN"],
         "ACTNUM" => g["ACTNUM"] .& (permx .>= min_perm),
@@ -107,6 +108,7 @@ Returns the NamedTuple `(mesh, columns, ve, grid, sides)`, all new: the 3D
 function sleipner_ve_domain(; min_perm::Real = 200.0)
     grid = sleipner_grid_section(; min_perm)
     mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+    # cells below holes dropped, then the columns of the trimmed mesh
     columns, discarded = ve_columns(mesh)
     mesh = ve_trim(mesh, discarded)
     columns, _ = ve_columns(mesh)

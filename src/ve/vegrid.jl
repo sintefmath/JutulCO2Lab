@@ -122,11 +122,14 @@ function ve_columns(mesh; below_holes::Symbol = :discard, sealed_faces = (),
 
     nc = number_of_cells(mesh)
     ijk = [cell_ijk(mesh, c) for c in 1:nc]
+    # per cell, the cell it connects to directly below (0: none)
     below = _connected_below(mesh, ijk, sealed_faces)
 
     cells, pos, pillar, discarded = Int[], [1], Tuple{Int, Int}[], Int[]
     for col in _pillar_cells(mesh, ijk)
+        # a pillar falls apart where a cell is not connected to the one below
         stretches = _connected_stretches(col, below)
+        # :discard keeps each pillar's top stretch only (co2lab's default)
         if below_holes == :discard
             foreach(r -> append!(discarded, col[r]), stretches[2:end])
             stretches = stretches[1:1]
@@ -139,6 +142,7 @@ function ve_columns(mesh; below_holes::Symbol = :discard, sealed_faces = (),
         end
     end
 
+    # fine cell → column (0 for discarded cells)
     partition = zeros(Int, nc)
     for c in 1:(length(pos) - 1), m in pos[c]:(pos[c+1] - 1)
         partition[cells[m]] = c
@@ -166,6 +170,7 @@ function _pillar_cells(mesh, ijk)
     pillars = Dict{Int, Vector{Int}}()
     for c in eachindex(ijk)
         i, j, _ = ijk[c]
+        # pillar number with i fastest, MRST's column order
         push!(get!(pillars, i + nx*(j - 1), Int[]), c)
     end
     keys_sorted = sort!(collect(keys(pillars)))
@@ -184,6 +189,7 @@ function _connected_below(mesh, ijk, sealed_faces)
     for f in 1:number_of_faces(mesh)
         f in sealed && continue
         l, r = mesh.faces.neighbors[f]
+        # vertical connections only: both cells on the same pillar
         ijk[l][1:2] == ijk[r][1:2] || continue
 
         up, down = ijk[l][3] < ijk[r][3] ? (l, r) : (r, l)
@@ -239,9 +245,11 @@ function ve_trim(mesh::UnstructuredMesh, discarded)
     isempty(discarded) && return mesh
     keep = setdiff(1:number_of_cells(mesh), discarded)
     nc = number_of_cells(mesh)
+    # the kept cells keep their logical indices
     parent_map = isnothing(mesh.cell_map) ? collect(1:nc) : mesh.cell_map
     trimmed = extract_submesh(mesh, keep; cell_map = parent_map[keep],
                               z_is_depth = mesh.z_is_depth)
+    # extract_submesh drops the direction tags: carry them over
     dirs = _trimmed_boundary_directions(mesh, keep, trimmed)
     return _set_boundary_directions!(trimmed, dirs)
 end
@@ -278,6 +286,7 @@ function ve_column_geometry(mesh, columns::VEColumns)
     nc = number_of_cells(mesh)
     bdir = _boundary_directions(mesh)
     ijk = [cell_ijk(mesh, c) for c in 1:nc]
+    # each cell's top and bottom depth (face centroids)
     ztop_cell = zeros(nc)
     zbot_cell = zeros(nc)
     for c in 1:nc
@@ -290,6 +299,7 @@ function ve_column_geometry(mesh, columns::VEColumns)
     H, z_top, dx, dy = zeros(ncol), zeros(ncol), zeros(ncol), zeros(ncol)
     for col in 1:ncol
         r = columns.pos[col]:(columns.pos[col+1] - 1)
+        # depth of each cell's bottom below the caprock
         z[r] = cumsum(dz[r])
         H[col] = sum(dz[r])
         top = columns.cells[first(r)]

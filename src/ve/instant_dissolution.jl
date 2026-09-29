@@ -61,6 +61,7 @@ function Jutul.scalarize_primary_variable(model, source_vec, ::DissolvedOrFreeCO
                                           numeric::Bool = false)
     x = source_vec[index]
     xval = Jutul.value(x.val)
+    # numeric: the plain value alone (for the linear algebra)
     return numeric ? xval : BlackOilX(xval, x.phases_present, x.sat_close)
 end
 
@@ -74,6 +75,7 @@ end
 
 function Jutul.descalarize_primary_variable!(dest_array, model, V, ::DissolvedOrFreeCO2,
                                              index, ref = missing; F = identity)
+    # a plain number: new value, the cell's phase state kept
     V_old = dest_array[index]
     val = replace_value(V_old.val, F(V))
     dest_array[index] = BlackOilX(val, V_old.phases_present, V_old.sat_close)
@@ -85,6 +87,7 @@ function Jutul.initialize_primary_variable_ad!(state, model, ::DissolvedOrFreeCO
     vals = map(x -> x.val, pre)
     ad = Jutul.allocate_array_ad(vals, diag_pos = offset + 1, context = model.context,
                                  npartials = npartials; kwarg...)
+    # the value becomes AD, the phase state is kept
     state[symb] = map((v, x) -> BlackOilX(v, x.phases_present, false), ad, pre)
     return state
 end
@@ -92,6 +95,7 @@ end
 function Jutul.increment_norm(dX, state, model, X, ::DissolvedOrFreeCO2)
     sg = rs = zero(eltype(dX))
     sg_sum = rs_sum = zero(eltype(dX))
+    # saturated (sG) and undersaturated (rs) cells apart: different units
     for i in 1:length(dX)
         d = abs(dX[i])
         if X[i].phases_present == OilAndGas
@@ -161,6 +165,7 @@ end
                                             CO2X, ix)
     for i in ix
         x = CO2X[i]
+        # + zero(x.val): dis_max in X's number type (AD or plain)
         rs[i] = x.phases_present == OilAndGas ? v.dis_max + zero(x.val) : x.val
     end
 end
@@ -211,5 +216,6 @@ function _residual_depletion(eq::HysteresisEquation{<:Any, InstantDissolution}, 
     return _max_c(eq_dis, 0.0) * dt * fac
 end
 
+# the faces of the dissolved-CO2 balance (a law built for them only, rates unused)
 Jutul.local_discretization(eq::HysteresisEquation{<:Any, InstantDissolution}, i) =
     Jutul.local_discretization(DissolvedCO2Equation(eq.flow_discretization, 0.0, 0.0), i)

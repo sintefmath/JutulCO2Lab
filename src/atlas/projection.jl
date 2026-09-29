@@ -13,6 +13,7 @@ const _UTM_K0 = 0.9996                   # UTM scale on the central meridian
 
 # Third flattening n, rectifying radius A, and the series coefficients
 function _utm_constants()
+    # Krüger's series in the third flattening n, to third order (Karney 2011)
     n = _UTM_F / (2 - _UTM_F)
     A = _UTM_A / (1 + n) * (1 + n^2 / 4 + n^4 / 64)
     α = (n / 2 - 2n^2 / 3 + 5n^3 / 16, 13n^2 / 48 - 3n^3 / 5, 61n^3 / 240)
@@ -29,6 +30,7 @@ _central_meridian(zone) = 6zone - 183
 function _utm_forward(lat, lon, zone)
     c = _utm_constants()
     φ, λ = deg2rad(lat), deg2rad(lon - _central_meridian(zone))
+    # conformal latitude, then the transverse Mercator series
     t = sinh(atanh(sin(φ)) - c.e * atanh(c.e * sin(φ)))
     ξ, η = atan(t, cos(λ)), atanh(sin(λ) / sqrt(1 + t^2))
     x = η + sum(c.α[j] * cos(2j * ξ) * sinh(2j * η) for j in 1:3)
@@ -39,6 +41,7 @@ end
 "Latitude, longitude (degrees) of UTM `(x, y)` (m, northern hemisphere)."
 function _utm_inverse(x, y, zone)
     c = _utm_constants()
+    # the forward series reversed, then back from conformal latitude
     ξ1, η1 = y / (_UTM_K0 * c.A), (x - 500000) / (_UTM_K0 * c.A)
     ξ = ξ1 - sum(c.β[j] * sin(2j * ξ1) * cosh(2j * η1) for j in 1:3)
     η = η1 - sum(c.β[j] * cos(2j * ξ1) * sinh(2j * η1) for j in 1:3)

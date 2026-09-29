@@ -31,6 +31,7 @@ function read_irap_surface(path::AbstractString)
     (xmax - xmin) / (nx - 1) == dx && (ymax - ymin) / (ny - 1) == dy ||
         throw(ArgumentError("$path: inconsistent IRAP header (dx, dy against extent)"))
 
+    # values follow the 19 header entries; 9999900 marks undefined nodes
     data = parse.(Float64, tok[20:end])
     length(data) == nx * ny ||
         throw(ArgumentError("$path: expected $(nx * ny) values, found $(length(data))"))
@@ -54,6 +55,7 @@ function igems_surface_path(name::AbstractString, i::Integer)
     base = atlas_data_directory()
     full = joinpath(base, "IGEMS surfaces", "surfaces", name, "$(i)_$name.irap")
     sample = joinpath(base, "IGEMSsample", "one_of_each", "$(i)_$name.irap")
+    # the full set first; the bundled sample holds only surface 1
     isfile(full) && return full
     i == 1 && isfile(sample) && return sample
     throw(ArgumentError("IGEMS surface $full not found: download the IGEMS " *
@@ -80,6 +82,7 @@ function igems_mesh(name::AbstractString, i::Integer; coarsening::Integer = 1,
     # then, as co2lab, the first and last x-lines take their neighbours' values
     z[1, :], z[end, :] = z[2, :], z[end-1, :]
     co2lab_compatible && (z = permutedims(z))
+    # co2lab's grid: origin at 0, spacing from x alone
     h = (s.x[2] - s.x[1]) * coarsening
     x, y = [h * i for i in 0:size(z, 1)-1], [h * j for j in 0:size(z, 2)-1]
     return surface_mesh(x, y, z; bottom = z .+ 100.0)
@@ -115,6 +118,7 @@ function surface_mesh(x::AbstractVector, y::AbstractVector, top::AbstractMatrix;
     # corner a of 2n along x lies on node 1 + a ÷ 2; layer c: top, bottom
     zcorn = [(c == 1 ? zt : zb)[1 + a ÷ 2, 1 + b ÷ 2]
              for c in 1:2 for b in 1:2ny for a in 1:2nx]
+    # a cell is active only when all four corner nodes are defined
     active = [all(defined[i:i+1, j:j+1]) for i in 1:nx, j in 1:ny, _ in 1:1]
     grid = Dict("cartDims" => (nx, ny, 1), "COORD" => coord, "ZCORN" => zcorn,
                 "ACTNUM" => active)
