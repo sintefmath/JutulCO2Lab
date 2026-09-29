@@ -731,14 +731,18 @@ formulation). Arguments are only read.
 """
 function _co2lab_multimodel(domain, wells, fluid::CO2LabVEFluid)
     rho_ref = fluid.rho_ref
+    # nothing: no dissolved CO2 at all (rs is then not even a variable)
     rs_sat = fluid.dissolution ? fluid.dis_max : nothing
     sys = co2lab_system(reference_densities = rho_ref, rs_sat = rs_sat)
+    # without dissolution one system serves reservoir and wells alike
     isnothing(rs_sat) && return setup_reservoir_model(domain, sys; wells = wells)
 
+    # with it, the wellbores need JutulDarcy's own (variable-switching) formulation
     sys_well = co2lab_system(reference_densities = rho_ref, rs_sat = rs_sat,
                              formulation = :varswitch)
     full = setup_reservoir_model(domain, sys_well; wells = wells)
 
+    # the reservoir alone, in co2lab's formulation, plus the dissolved-CO2 law
     rmodel = setup_reservoir_model(domain, sys)[:Reservoir]
     flow = rmodel.domain.discretizations.mass_flow
     rmodel.equations[:dissolved_co2] = DissolvedCO2Equation(flow, fluid.dis_rate,
