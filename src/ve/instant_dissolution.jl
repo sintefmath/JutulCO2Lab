@@ -35,9 +35,9 @@ cells, `sG` in saturated ones, stored as JutulDarcy's `BlackOilX` (phase state
 `instant_dissolution.jl`); `ds_max` is co2lab's `dsMaxAbs`.
 """
 struct DissolvedOrFreeCO2 <: Jutul.ScalarVariable
-    dis_max::Float64
-    res_water::Float64
-    ds_max::Float64
+    dis_max::Float64    # saturated rs
+    res_water::Float64  # residual brine saturation
+    ds_max::Float64     # largest sG change per update
 end
 DissolvedOrFreeCO2(dis_max, res_water; ds_max = 0.2) =
     DissolvedOrFreeCO2(Float64(dis_max), Float64(res_water), Float64(ds_max))
@@ -144,7 +144,7 @@ struct InstantGasSaturation <: Jutul.ScalarVariable end
 
 "`rs` from co2lab's unknown `X`: `dis_max` where saturated, `X` elsewhere."
 struct InstantDissolvedGasRatio <: Jutul.ScalarVariable
-    dis_max::Float64
+    dis_max::Float64  # saturated rs
 end
 
 # Modifies: `sG`.

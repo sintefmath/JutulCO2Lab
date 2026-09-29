@@ -47,7 +47,7 @@ const CO2LabNoDissolutionModel =
 
 "Saturated dissolved-gas ratio, constant (co2lab's `rsSat` / `dis_max`)."
 struct ConstantRs
-    value::Float64
+    value::Float64  # saturated rs
 end
 (c::ConstantRs)(p) = c.value
 
@@ -130,7 +130,7 @@ states count. With hysteresis an unknown instead, governed by
 [`HysteresisEquation`](@ref).
 """
 struct MaxGasSaturation <: Jutul.ScalarVariable
-    res_water::Float64
+    res_water::Float64  # residual brine: sGmax ≤ 1 − res_water
 end
 Jutul.default_value(model, ::MaxGasSaturation) = 0.0
 Jutul.minimum_value(::MaxGasSaturation) = 0.0
@@ -178,14 +178,14 @@ end
 
 "b = b_ref (1 + c (p − p_ref)) per phase; b = reservoir density / surface density."
 struct LinearShrinkage <: PhaseVariables
-    b_ref::NTuple{2, Float64}
-    c::NTuple{2, Float64}
-    p_ref::NTuple{2, Float64}
+    b_ref::NTuple{2, Float64}  # b at p_ref, per phase
+    c::NTuple{2, Float64}      # compressibility (1/Pa), per phase
+    p_ref::NTuple{2, Float64}  # reference pressure (Pa), per phase
 end
 LinearShrinkage(b_ref, c, p_ref::Real) = LinearShrinkage(b_ref, c, (p_ref, p_ref))
 struct BlackOilDensities <: PhaseVariables end
 struct ConstantViscosities <: PhaseVariables
-    mu::NTuple{2, Float64}
+    mu::NTuple{2, Float64}  # viscosities (Pa·s), per phase
 end
 "Mass of CO2 dissolved in brine, per cell."
 struct DissolvedCO2Mass <: Jutul.ScalarVariable end
@@ -315,9 +315,9 @@ flux.jl`): `ρ_VS · rs_up · (bλ)_L,up · ∇ψ_L`. The transfer `η` is co2la
 `computeDissolutionTransfer` ([`_dissolution_transfer`](@ref)).
 """
 struct DissolvedCO2Equation{D} <: Jutul.JutulEquation
-    flow_discretization::D
-    dis_rate::Float64
-    dis_max::Float64
+    flow_discretization::D  # faces and stencil (TPFA)
+    dis_rate::Float64       # co2lab dis_rate
+    dis_max::Float64        # saturated rs
 end
 Jutul.number_of_equations_per_entity(::Jutul.SimulationModel, ::DissolvedCO2Equation) = 1
 function Jutul.local_discretization(eq::DissolvedCO2Equation, i)
@@ -441,8 +441,8 @@ cell, as co2lab's VE wells; several perforations in one cell would each be
 counted on their own.
 """
 struct DissolutionWellSupplyCT{I <: AbstractVector} <: Jutul.AdditiveCrossTerm
-    reservoir_cells::I
-    well_cells::I
+    reservoir_cells::I  # perforated reservoir cells
+    well_cells::I       # their well cells
 end
 
 Jutul.cross_term_entities(ct::DissolutionWellSupplyCT, eq::DissolvedCO2Equation, model) =
@@ -519,10 +519,10 @@ matrix pattern (see `declare_pattern` below) and, with dissolution, the faces
 the transfer needs.
 """
 struct HysteresisEquation{D, E} <: Jutul.JutulEquation
-    flow_discretization::D
-    res_water::Float64
-    res_gas::Float64
-    dissolution::E
+    flow_discretization::D  # faces and matrix pattern
+    res_water::Float64      # residual brine saturation
+    res_gas::Float64        # residual CO2 saturation
+    dissolution::E          # dissolved-CO2 law, or nothing
 end
 HysteresisEquation(flow, rw, rg) = HysteresisEquation(flow, rw, rg, nothing)
 Jutul.number_of_equations_per_entity(::Jutul.SimulationModel, ::HysteresisEquation) = 1

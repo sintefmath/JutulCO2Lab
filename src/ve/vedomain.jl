@@ -198,16 +198,16 @@ edges of MRST's top-surface grid. One entry per (column, side):
   sealing, `makeJohansenVEgrid.m:143-147`).
 """
 struct VEBoundarySides
-    column::Vector{Int}
-    direction::Vector{Int}
-    edge_depth::Vector{Float64}
-    edge_midpoint::Vector{NTuple{2, Float64}}
-    area::Vector{Float64}
-    centroid::Vector{NTuple{3, Float64}}
-    normal::Vector{NTuple{3, Float64}}
-    half_trans::Vector{Float64}
-    fine_faces::Vector{Vector{Int}}
-    across_fault::Vector{Bool}
+    column::Vector{Int}                        # VE column
+    direction::Vector{Int}                     # 1..4: left, right, lower, upper
+    edge_depth::Vector{Float64}                # caprock depth along the side
+    edge_midpoint::Vector{NTuple{2, Float64}}  # (x, y) midpoint of the top edge
+    area::Vector{Float64}                      # side area
+    centroid::Vector{NTuple{3, Float64}}       # side centroid
+    normal::Vector{NTuple{3, Float64}}         # outward unit normal
+    half_trans::Vector{Float64}                # half transmissibility to the side
+    fine_faces::Vector{Vector{Int}}            # 3D boundary faces
+    across_fault::Vector{Bool}                 # sealed full-offset fault side
 end
 
 Base.length(s::VEBoundarySides) = length(s.column)

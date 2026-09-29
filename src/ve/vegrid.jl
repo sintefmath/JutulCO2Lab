@@ -33,10 +33,10 @@ within a pillar — with one column per pillar the order MRST gives the cells
 of its top-surface grid.
 """
 struct VEColumns
-    cells::Vector{Int}
-    pos::Vector{Int}
-    partition::Vector{Int}
-    pillar::Vector{Tuple{Int, Int}}
+    cells::Vector{Int}               # fine cells, column by column, top first
+    pos::Vector{Int}                 # column c: cells[pos[c]:pos[c+1]-1]
+    partition::Vector{Int}           # fine cell → column
+    pillar::Vector{Tuple{Int, Int}}  # logical (i, j) per column
 end
 
 """

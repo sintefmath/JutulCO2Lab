@@ -43,12 +43,12 @@ dissolution, whether brine carries its dissolved CO2 across (see the top of
 `vebc.jl`). Build with [`ve_boundary_conditions`](@ref).
 """
 struct VEBoundaryCondition{T <: Real}
-    cell::Int
-    pressure::T
-    trans::T
-    dz::T
-    sat::NTuple{2, T}
-    carry_dissolved::Bool
+    cell::Int              # VE column
+    pressure::T            # boundary pressure (Pa)
+    trans::T               # half transmissibility (m³)
+    dz::T                  # edge depth − caprock depth (m)
+    sat::NTuple{2, T}      # inflow saturations
+    carry_dissolved::Bool  # brine carries its rs across
 end
 
 """

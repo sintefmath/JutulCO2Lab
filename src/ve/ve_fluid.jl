@@ -201,9 +201,9 @@ Plume heights per column: row 1 `h`, row 2 `h_max` (m); zero in fine cells
 (`is_ve`, see above), where nothing reads them.
 """
 struct PlumeHeights{V} <: Jutul.VectorVariables
-    res_water::Float64
-    res_gas::Float64
-    is_ve::V
+    res_water::Float64  # residual brine saturation
+    res_gas::Float64    # residual CO2 saturation
+    is_ve::V            # true for VE columns, per cell
 end
 PlumeHeights(rw, rg; is_ve = nothing) = PlumeHeights(Float64(rw), Float64(rg), is_ve)
 Jutul.values_per_entity(model, ::PlumeHeights) = 2
@@ -232,10 +232,10 @@ co2lab's `'sharp_interface_simple'` relperm; phases (brine, CO2). In fine cells
 (`is_ve`) the 3D relperm `fine` — roadmap Stage 12, `nothing` until then.
 """
 struct VESharpInterfaceRelPerm{V, F} <: JutulDarcy.AbstractRelativePermeabilities
-    krw::Float64
-    krg::Float64
-    is_ve::V
-    fine::F
+    krw::Float64  # brine relperm in the residual-CO2 zone
+    krg::Float64  # CO2 relperm in the plume
+    is_ve::V      # true for VE columns, per cell
+    fine::F       # 3D relperm of fine cells
 end
 VESharpInterfaceRelPerm(krw, krg; is_ve = nothing, fine = nothing) =
     VESharpInterfaceRelPerm(Float64(krw), Float64(krg), is_ve, fine)
@@ -260,7 +260,7 @@ end
 (`is_ve`): roadmap Stage 12.
 """
 struct VECapillaryPressure{V} <: JutulDarcy.AbstractCapillaryPressure
-    is_ve::V
+    is_ve::V  # true for VE columns, per cell
 end
 VECapillaryPressure(; is_ve = nothing) = VECapillaryPressure(is_ve)
 
@@ -281,8 +281,8 @@ end
 
 "Viscosities `μ_ref·(1 + c·(p − p_ref))` per phase (brine, CO2)."
 struct LinearViscosities <: JutulDarcy.PhaseVariables
-    mu_ref::NTuple{2, Float64}
-    pvt::NTuple{2, NTuple{2, Float64}}
+    mu_ref::NTuple{2, Float64}          # reference viscosities
+    pvt::NTuple{2, NTuple{2, Float64}}  # (c, p_ref) per phase
 end
 
 # Modifies: `mu` (phase viscosities).

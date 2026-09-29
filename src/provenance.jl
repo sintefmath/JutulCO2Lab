@@ -22,10 +22,10 @@ hash, and whether tracked files have uncommitted changes (`dirty`).
 unavailable; `dirty` is then `missing`.
 """
 struct SourceInfo
-    name::String
-    dir::String
-    commit::String
-    dirty::Union{Bool, Missing}
+    name::String                 # package
+    dir::String                  # checkout directory
+    commit::String               # short commit hash ("unknown" if none)
+    dirty::Union{Bool, Missing}  # uncommitted changes (missing if unknown)
 end
 
 function Base.show(io::IO, s::SourceInfo)

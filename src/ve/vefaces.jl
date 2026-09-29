@@ -202,12 +202,12 @@ but no neighbour at all.
   of a shale missing from the grid between stacked columns. They stay no-flow.
 """
 struct VEColumnSides
-    column::Vector{Int}
-    direction::Vector{Int8}
-    neighbour::Vector{Int}
-    interior_faces::Vector{Vector{Int}}
-    boundary_faces::Vector{Vector{Int}}
-    exposed_faces::Vector{Int}
+    column::Vector{Int}                  # VE column
+    direction::Vector{Int8}              # 1..4: left, right, lower, upper
+    neighbour::Vector{Int}               # column beyond, 0 if outer side
+    interior_faces::Vector{Vector{Int}}  # shared fine faces
+    boundary_faces::Vector{Vector{Int}}  # outer side's fine faces
+    exposed_faces::Vector{Int}           # boundary faces on sides with a neighbour
 end
 
 Base.length(s::VEColumnSides) = length(s.column)

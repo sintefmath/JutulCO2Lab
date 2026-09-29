@@ -41,8 +41,8 @@ A `.mat` file written by the MATLAB side of the harness (see
 Access with `d["name"]`; `keys(d)` lists what the dump contains.
 """
 struct MrstDump
-    path::String
-    data::Dict{String, Any}
+    path::String             # file it was read from
+    data::Dict{String, Any}  # the variables, by name
 end
 
 Base.getindex(d::MrstDump, k::AbstractString) = d.data[k]
@@ -84,8 +84,8 @@ Per-quantity comparison tolerance. A value passes when
 elementwise, with `b` the MRST reference.
 """
 struct Tolerance
-    rtol::Float64
-    atol::Float64
+    rtol::Float64  # relative tolerance
+    atol::Float64  # absolute tolerance
 end
 
 """
@@ -123,13 +123,13 @@ Outcome of one quantity comparison. `maxabs`/`maxrel` are reported even on a
 pass so that a gate can be watched drifting before it breaks.
 """
 struct CheckResult
-    name::String
-    n::Int
-    maxabs::Float64
-    maxrel::Float64
-    tol::Tolerance
-    ok::Bool
-    note::String
+    name::String     # quantity compared
+    n::Int           # number of values
+    maxabs::Float64  # largest absolute difference
+    maxrel::Float64  # largest relative difference
+    tol::Tolerance   # tolerance applied
+    ok::Bool         # passed
+    note::String     # remark shown in the report
 end
 
 """
@@ -149,9 +149,9 @@ either has uncommitted changes. Pass the MRST dump as `mrst` to record the MRST
 commit it was generated from as well. All of it is printed in the header.
 """
 struct OracleReport
-    title::String
-    results::Vector{CheckResult}
-    sources::Vector{SourceInfo}
+    title::String                 # heading of the report
+    results::Vector{CheckResult}  # one per check!
+    sources::Vector{SourceInfo}   # commits of Jutul, JutulDarcy, MRST
 end
 
 function OracleReport(title::AbstractString; mrst = nothing)

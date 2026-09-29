@@ -25,8 +25,8 @@ Pore volume `StaticFluidVolume·(1 + c·(p − p_ref))`, co2lab's `pvMultR`; set
 with [`set_co2lab_rock_compressibility!`](@ref).
 """
 struct LinearPoreVolume <: Jutul.ScalarVariable
-    p_ref::Float64
-    c::Float64
+    p_ref::Float64  # reference pressure (Pa)
+    c::Float64      # compressibility (1/Pa)
 end
 
 # Modifies: `pv` (fluid volume).
