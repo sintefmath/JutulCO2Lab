@@ -78,17 +78,17 @@ phase, `(0.0, 0.0)` for a constant property. `dissolution`, `dis_rate`,
 `dis_max` as makeVEFluid's options.
 """
 struct CO2LabVEFluid
-    res_water::Float64
-    res_gas::Float64
-    krw::Float64
-    krg::Float64
-    rho_ref::NTuple{2, Float64}
-    rho_pvt::NTuple{2, NTuple{2, Float64}}
-    mu_ref::NTuple{2, Float64}
-    mu_pvt::NTuple{2, NTuple{2, Float64}}
-    dissolution::Bool
-    dis_rate::Float64
-    dis_max::Float64
+    res_water::Float64                        # residual brine saturation
+    res_gas::Float64                          # residual CO2 saturation
+    krw::Float64                              # brine relperm in the residual-CO2 zone
+    krg::Float64                              # CO2 relperm in the plume
+    rho_ref::NTuple{2, Float64}               # reference ("surface") densities
+    rho_pvt::NTuple{2, NTuple{2, Float64}}    # (c, p_ref): ρ_ref·(1 + c·(p − p_ref))
+    mu_ref::NTuple{2, Float64}                # reference viscosities
+    mu_pvt::NTuple{2, NTuple{2, Float64}}     # (c, p_ref), as rho_pvt
+    dissolution::Bool                         # CO2 dissolves into brine
+    dis_rate::Float64                         # dissolution rate; 0 or Inf: instantaneous
+    dis_max::Float64                          # saturated dissolved-CO2 ratio rs
 end
 
 """
