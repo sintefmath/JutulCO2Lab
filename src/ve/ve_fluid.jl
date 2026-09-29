@@ -34,8 +34,10 @@
 co2lab's VE fluid for the `'sharp_interface_simple'` relperm model, with
 `makeVEFluid`'s option names and defaults, so an MRST case translates one to
 one:
-- `residual = (res_water, res_gas)`; `krmax = (krw, krg)` endpoint relperms,
-  where a negative value means one minus the other phase's residual;
+- `residual = (res_water, res_gas)`; `krmax = (krw, krg)`: `krw` the brine
+  relperm in the residual-CO2 zone (brine below it has relperm 1), `krg` the
+  CO2 relperm in the plume; a negative value means one minus the other
+  phase's residual saturation;
 - `*_rho_ref`: reference densities, which are also the black-oil "surface"
   densities (so `b = ρ(p)/ρ_ref`);
 - `*_rho_pvt`, `*_mu_pvt`: `nothing` (constant) or `(c, p_ref)` for
