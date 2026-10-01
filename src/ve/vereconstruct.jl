@@ -13,7 +13,8 @@
 #   the caprock down — saturated (dis_max) down to the depth where the brine
 #   volume above holds the column's fraction rs/dis_max of it, none below.
 #
-# Capillary-fringe fluids (cap_fringe_h2s) are Stage 6.
+# The saturations come from the fluid's vertical model (`_fine_saturations`);
+# capillary-fringe models (cap_fringe_h2s) are Stage 6.
 
 # ------------------------------ Filling a column ------------------------------
 
@@ -115,13 +116,16 @@ Returns the NamedTuple `(pressure, sG, sGmax, rs)` of new `Vector{Float64}`s,
 one value per cell of the 3D mesh, in the mesh's cell order: brine pressure
 extended hydrostatically from the caprock (Pa), CO2 saturation, maximum CO2
 saturation, and dissolved CO2 ratio (`rs`; `nothing` without dissolution).
-The plume heights are recomputed from `sG` and `sGmax` (co2lab's
-`upscaledSat2height`). Arguments are only read.
+The heights are recomputed from `sG` and `sGmax` by the fluid's vertical
+model (for the sharp interface co2lab's `upscaledSat2height`). Arguments are
+only read.
 """
 function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid;
                         poro3D = nothing)
     geo, rw, rg = ve.geometry, fluid.res_water, fluid.res_gas
     p, sG, sGmax = state[:Pressure], state[:sG], state[:sGmax]
+    rs_ve = haskey(state, :Rs) ? state[:Rs] : zeros(length(p))
+    m = _vertical_model(fluid.vertical, ve.domain)
     nc = length(columns.cells)
     out = (pressure = zeros(nc), sG = zeros(nc), sGmax = zeros(nc))
 
@@ -129,8 +133,9 @@ function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid;
         r = columns.pos[col]:(columns.pos[col+1] - 1)
         cells = columns.cells[r]
 
-        h, h_max = _plume_heights(sG[col], sGmax[col], geo.H[col], rw, rg)
-        s, smax = _column_saturations(view(geo.z, r), h, h_max, rw, rg)
+        drho = _density_difference(fluid, p[col], rs_ve[col])
+        h, h_max = _column_heights(m, col, sG[col], sGmax[col], geo.H[col], drho, rw, rg)
+        s, smax = _fine_saturations(m, col, view(geo.z, r), h, h_max, rw, rg)
         out.sG[cells], out.sGmax[cells] = s, smax
 
         # brine density at the caprock pressure, as co2lab's fluid.rhoW(pVE)

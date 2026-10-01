@@ -17,7 +17,8 @@ and the Sleipner benchmark; Stage 8: co2lab-spillpoint's trapping analysis
 (both methods, the derived quantities, IRAP/IGEMS surfaces), identical to
 co2lab (faults sealing by default); Stage 9 items 1–2: the trapping
 inventory, identical to co2lab on identical input and, end to end, against
-co2lab's own run of a Johansen case.
+co2lab's own run of a Johansen case; Stage 6 item 0: the vertical-model
+framework (`VerticalModel`; co2lab's sharp interface is `SharpInterface`).
 Readable walkthroughs: `examples/sloping_aquifer.jl` (Stage 2),
 `examples/residual_trapping.jl` (Stage 3, residual trapping) and
 `examples/dissolution.jl` (Stage 4, rate-driven and instantaneous
@@ -65,7 +66,7 @@ JutulDarcy is patched except one Jutul bug fix (see Environment).
 |---|---|---|
 | system type | `StandardBlackOilSystem` re-tagged with formulation `:co2lab` (`CO2LabSystem`); brine = liquid, CO2 = vapour | `co2lab_fluid.jl` |
 | `select_primary_variables!` | unknowns `p`, `sG` (and `rs` with dissolution; `sGmax` with hysteresis, added by `setup_co2lab_model`) | `co2lab_fluid.jl` |
-| `select_secondary_variables!` and `@jutul_secondary` | saturations, `TotalMasses`, dissolved CO2; plume heights, sharp-interface relperm, `pcWG`, linear PVT, pore volume | `co2lab_fluid.jl`, `ve_fluid.jl`, `rock_compressibility.jl` |
+| `select_secondary_variables!` and `@jutul_secondary` | saturations, `TotalMasses`, dissolved CO2; plume heights and relperm from the vertical model (`PlumeHeights`, `VERelPerm`; one method per model type, so the sharp interface reads no densities), `pcWG`, linear PVT, pore volume | `co2lab_fluid.jl`, `ve_fluid.jl`, `rock_compressibility.jl` |
 | parameters (`default_parameter_values`) | `ColumnHeight`, `Rugosity` from the domain; without hysteresis `sGmax`, updated after each converged step (`update_after_step!`) | `ve_fluid.jl`, `co2lab_fluid.jl` |
 | extra equations | `DissolvedCO2Equation` (rate-driven dissolution) and `HysteresisEquation` (`sGmax` with hysteresis), each with its own convergence criterion | `co2lab_fluid.jl` |
 | `update_primary_variable!` | co2lab's switching unknown for instantaneous dissolution (`DissolvedOrFreeCO2`, on JutulDarcy's `BlackOilX`) | `instant_dissolution.jl` |
@@ -172,8 +173,9 @@ src/ve/              the VE simulator
   vedomain.jl        VE domain on a CoarseMesh: upscaled rock, caprock datum,
                      boundary sides
   rock_compressibility.jl  co2lab's linear pore volume, a model setting
-  ve_fluid.jl        co2lab's VE fluid: plume heights, sharp-interface relperm, pcWG,
-                     linear PVT; column height and rugosity parameters
+  ve_fluid.jl        co2lab's VE fluid: vertical models (sharp interface), plume
+                     heights, relperm, pcWG, linear PVT; column height and
+                     rugosity parameters
   co2lab_fluid.jl    co2lab's fluid system: black-oil with a :co2lab formulation,
                      unknowns by configuration; dissolution transfer, hysteresis;
                      model, state and simulator setup

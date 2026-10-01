@@ -12,7 +12,7 @@ removes, renames or changes the meaning of a structure (see `../CLAUDE.md`).
 The *File* column gives file names only: sections A–E are in `src/ve/`,
 G in `src/atlas/`, H in `src/trapping/`, F in `src/`.
 
-*Last updated: 2026-09-26.*
+*Last updated: 2026-09-30.*
 
 ## A. Grid and domain
 
@@ -34,7 +34,9 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
-| 8 | **`CO2LabVEFluid`** | `ve_fluid.jl` | co2lab's VE fluid settings (makeVEFluid's fluid options): residual saturations, endpoints, reference densities and linear PVT, viscosities, dissolution (`dissolution`, `dis_rate`, `dis_max`; `dis_rate` 0 or `Inf` is instantaneous). Rugosity is in 4, rock compressibility in the model (20) | nothing (`co2lab_ve_fluid`); supplies the constants of the variables in C |
+| 7b | **`VerticalModel`** (abstract) | `ve_fluid.jl` | how a column's fine-scale profile follows from its upscaled state (Stage 6 item 0): heights `(h, h_max)`, relperm, fine-scale saturations and the inventory's split, by dispatch (`_column_heights`, `_column_relperm`, `_fine_saturations`, `_category_saturations`); `Pc = Δρ·g·h` for all. Given to the fluid as a grid-independent specification; `_vertical_model(spec, domain)` builds the column-specific object (the specification itself when there is no column data) | — |
+| 7c | **`SharpInterface`** [7b] | `ve_fluid.jl` | co2lab's `'sharp_interface_simple'`: sharp interface in a homogeneous column, residual zone between `h` and `h_max`, accretion layer from the rugosity; no fields | — |
+| 8 | **`CO2LabVEFluid{M}`** | `ve_fluid.jl` | co2lab's VE fluid settings (makeVEFluid's fluid options): the vertical model (7b, type parameter `M`; makeVEFluid's relperm model), residual saturations, endpoints, reference densities and linear PVT, viscosities, dissolution (`dissolution`, `dis_rate`, `dis_max`; `dis_rate` 0 or `Inf` is instantaneous). Rugosity is in 4, rock compressibility in the model (20) | nothing (`co2lab_ve_fluid`); supplies the constants of the variables in C |
 
 ## C. Jutul variables and equations, in the order they are computed
 
@@ -47,8 +49,8 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 | 12 | `DissolvedGasRatio` [ScalarVariable] | `co2lab_fluid.jl` | unknown `rs` (rate-driven dissolution) | — |
 | 12b | **`DissolvedOrFreeCO2`** [ScalarVariable, values JutulDarcy's `BlackOilX`] | `instant_dissolution.jl` | co2lab's switching unknown `:CO2X` for instantaneous dissolution: `rs` where brine is undersaturated, `sG` where saturated; co2lab's update rule | — |
 | 12c | `InstantGasSaturation`, `InstantDissolvedGasRatio` [ScalarVariable] | `instant_dissolution.jl` | secondary `sG`, `Rs` from 12b (instantaneous dissolution) | 12b |
-| 13 | `PlumeHeights` [VectorVariables] | `ve_fluid.jl` | secondary: row 1 `h`, row 2 `h_max`; field `is_ve` (`nothing` = all VE; 0 in fine cells) | 11, 10, 9 |
-| 14 | `VESharpInterfaceRelPerm` [AbstractRelativePermeabilities] | `ve_fluid.jl` | relative permeabilities (co2lab's `sharp_interface_simple`); fields `is_ve` and `fine` (3D relperm for fine cells, Stage 12) | 13, 9, 9b |
+| 13 | `PlumeHeights{M, V}` [VectorVariables] | `ve_fluid.jl` | secondary: row 1 `h`, row 2 `h_max` — capillary heights `Pc/(Δρ·g)`, the plume thickness for a sharp interface — from the column-specific vertical model (field `vertical`); field `is_ve` (`nothing` = all VE; 0 in fine cells) | 11, 10, 9; also 16 except for `SharpInterface` |
+| 14 | `VERelPerm{M, V, F}` [AbstractRelativePermeabilities] | `ve_fluid.jl` | relative permeabilities from the vertical model (field `vertical`); endpoints `krw`, `krg`; fields `is_ve` and `fine` (3D relperm for fine cells, Stage 12). Formerly `VESharpInterfaceRelPerm` | 13, 9, 9b; also 16 except for `SharpInterface` |
 | 15 | **`LinearShrinkage`** [PhaseVariables] | `co2lab_fluid.jl` | shrinkage factors `b` | pressure |
 | 16 | `BlackOilDensities` [PhaseVariables] | `co2lab_fluid.jl` | phase mass densities | 15 (and 12) |
 | 17 | `VECapillaryPressure` [AbstractCapillaryPressure] | `ve_fluid.jl` | `pcWG = Δρ·g·h`; field `is_ve` (fine cells: Stage 12) | 13, 16 |

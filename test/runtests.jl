@@ -24,6 +24,16 @@ function _cp_mesh(nx, nz, top; actnum = fill(true, nx, 1, nz))
     return JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
 end
 
+# ----------------- Helpers: a stand-in vertical model (Stage 6) -----------------
+
+# The sharp interface's formulas as a model of its own, so that it runs through
+# the generic path that later vertical models use (densities as an input)
+struct _StandInSharp <: JutulCO2Lab.VerticalModel end
+JutulCO2Lab._column_heights(::_StandInSharp, i, sG, sGmax, H, drho, rw, rg) =
+    JutulCO2Lab._plume_heights(sG, sGmax, H, rw, rg)
+JutulCO2Lab._column_relperm(::_StandInSharp, i, h, h_max, H, drho, dh, krw, krg) =
+    JutulCO2Lab._sharp_interface_relperm(h, h_max, H, krw, krg, dh)
+
 # --------------- Helpers: comparisons with MRST dumps and runs ----------------
 
 include("atlas_checks.jl")
@@ -995,6 +1005,27 @@ end
                      for i in zone]
             @test sG[zone, end] ≈ s_res
             @test co2_mass(states[end]) ≈ injected rtol = 1e-3
+        end
+
+        @testset "vertical-model interface (Stage 6 item 0)" begin
+            # the sharp interface reads no densities; a model through the generic
+            # path does, and a stand-in with the same formulas gives the same run
+            kw = (wat_rho_pvt = (4.3e-10, 100e5), co2_rho_pvt = (4.3e-9, 100e5),
+                  residual = (0.2, 0.2))
+            m1, s1 = run(fluid = co2lab_ve_fluid(; kw...))
+            m2, s2 = run(fluid = co2lab_ve_fluid(; vertical = _StandInSharp(), kw...))
+            dep(m, k) = Jutul.get_dependencies(m[:Reservoir].secondary_variables[k],
+                                               m[:Reservoir])
+            for k in (:PlumeHeights, :RelativePermeabilities)
+                @test !(:PhaseMassDensities in dep(m1, k))
+                @test :PhaseMassDensities in dep(m2, k)
+            end
+            @test m2[:Reservoir].secondary_variables[:PlumeHeights].vertical isa
+                  _StandInSharp
+            for k in (:Pressure, :sG, :sGmax, :PlumeHeights)
+                @test maximum(abs.(s1[end][k] .- s2[end][k]) ./
+                              max.(abs.(s1[end][k]), 1.0)) < 1e-12
+            end
         end
 
         @testset "sGmax update: running maximum, capped at 1 - res_water" begin

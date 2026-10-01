@@ -17,8 +17,8 @@ const TRAPPING_CATEGORIES = (:dissolved, :structural_residual, :residual,
 
 # What the inventory needs per column besides the state: static pore volume,
 # height, rugosity (the grid's, if it has one), trap height (from the trap
-# analysis `res` on the trap surface `s`), and the pressure dependence of
-# pore volume and densities
+# analysis `res` on the trap surface `s`), the pressure dependence of pore
+# volume, and the column-specific vertical model
 function _inventory_columns(model, fluid::CO2LabVEFluid, s, res)
     rmodel = JutulDarcy.reservoir_model(model)
     domain = JutulDarcy.reservoir_domain(rmodel)
@@ -32,7 +32,8 @@ function _inventory_columns(model, fluid::CO2LabVEFluid, s, res)
     spill(r) = r == 0 ? 0.0 : res.trap_z[r]
     zt = [min(max(spill(r) - z, 0.0), h) for (r, z, h) in zip(res.trap_regions, s.zc, H)]
     return (pv = JutulDarcy.pore_volume(domain), H = H, dh = dh, zt = zt,
-            pv_mult = _pore_volume_multiplier(rmodel))
+            pv_mult = _pore_volume_multiplier(rmodel),
+            vertical = _vertical_model(fluid.vertical, domain))
 end
 
 # The pore volume's pressure dependence as a function of pressure: co2lab's
@@ -88,27 +89,37 @@ function _trapping_inventory(state, fluid, col)
     # brine expansion factor: rs is surface CO2 per surface brine volume
     bW = 1 .+ cw .* (p .- pw)
 
-    hh = [_plume_heights(S[i], Smax[i], col.H[i], rw, rg) for i in eachindex(S)]
+    # heights from the vertical model, at each column's density difference
+    m = col.vertical
+    drho(i) = _density_difference(fluid, p[i], rs[i])
+    hh = [_column_heights(m, i, S[i], Smax[i], col.H[i], drho(i), rw, rg)
+          for i in eachindex(S)]
     # co2lab adds eps to avoid division by zero
     h, h_max = first.(hh) .+ eps(), last.(hh) .+ eps()
-    m = _category_saturations(S, Smax, h, h_max, col.zt, col.dh, rw, rg)
+    c = _category_saturations(m, S, Smax, h, h_max, col.zt, col.dh, rw, rg)
 
     # residual below the plume; the rest of the free immobile part is in the plume
-    residual = sum(mfac .* m.res)
+    residual = sum(mfac .* c.res)
     masses = (dissolved = sum(rho_ref .* bW .* pv .* rs .* (1 .- S)),
-              structural_residual = sum(mfac .* m.immob_struct),
+              structural_residual = sum(mfac .* c.immob_struct),
               residual = residual,
-              residual_in_plume = sum(mfac .* m.immob_free) - residual,
-              structural_subscale = sum(mfac .* (m.immob_sub .+ m.mobile_sub)),
-              structural_plume = sum(mfac .* m.mobile_struct),
-              free_plume = sum(mfac .* m.mobile_free))
+              residual_in_plume = sum(mfac .* c.immob_free) - residual,
+              structural_subscale = sum(mfac .* (c.immob_sub .+ c.mobile_sub)),
+              structural_plume = sum(mfac .* c.mobile_struct),
+              free_plume = sum(mfac .* c.mobile_free))
     return map(x -> max(x, 0.0), masses)
 end
 
-# co2lab's split of each column's CO2 saturation: immobile (residual) and
-# mobile parts, each in subscale traps (dh), in structural traps (zt) and free;
-# `res` the residual CO2 outside traps below the plume
-function _category_saturations(S, Smax, h, h_max, zt, dh, rw, rg)
+"""
+    _category_saturations(m, S, Smax, h, h_max, zt, dh, rw, rg) -> NamedTuple
+
+Each column's CO2 saturation split by vertical model `m` into immobile
+(residual) and mobile parts, each in subscale traps (`dh`), in structural
+traps (`zt`) and free; `res` the residual CO2 outside traps below the plume.
+For the sharp interface co2lab's `massTrappingDistributionVE`. Returns a new
+NamedTuple of vectors, one entry per column.
+"""
+function _category_saturations(::SharpInterface, S, Smax, h, h_max, zt, dh, rw, rg)
     # the saturation left when the mobile part is gone
     S_immob = Smax .* rg ./ (1 - rw)
     S_mob = S .- S_immob
