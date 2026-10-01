@@ -32,7 +32,7 @@
 
 How the fine-scale profile of a VE column follows from its upscaled state
 (roadmap Stage 6 item 0). A model given to [`co2lab_ve_fluid`](@ref) is a
-grid-independent specification; [`setup_co2lab_model`](@ref) builds the
+grid-independent specification; [[`setup_co2lab_model`](@ref) builds the
 column-specific object from it (`_vertical_model`). A model implements
 `_column_heights`, `_column_relperm`, `_fine_saturations` and
 `_category_saturations`; the capillary pressure is `Δρ g h` for all.
@@ -49,13 +49,14 @@ between `h` and `h_max` and the accretion layer of the caprock rugosity.
 struct SharpInterface <: VerticalModel end
 
 """
-    _vertical_model(spec, domain) -> VerticalModel
+    _vertical_model(spec, domain, fluid) -> VerticalModel
 
 The column-specific vertical model for the reservoir `domain` (a
-`DataDomain` from `ve_domain`), built from the specification `spec`. Models
-without column data return `spec` itself. Arguments are only read.
+`DataDomain` from `ve_domain`) and `fluid`, built from the specification
+`spec`. Models without column data return `spec` itself. Arguments are only
+read.
 """
-_vertical_model(spec::VerticalModel, domain) = spec
+_vertical_model(spec::VerticalModel, domain, fluid) = spec
 
 # ---------------------------------- Settings ----------------------------------
 
@@ -210,14 +211,16 @@ _column_heights(::SharpInterface, i, sG, sGmax, H, drho, rw, rg) =
     _plume_heights(sG, sGmax, H, rw, rg)
 
 """
-    _column_relperm(m, i, h, h_max, H, drho, dh, krw, krg) -> (krW, krG)
+    _column_relperm(m, i, sG, sGmax, h, h_max, H, drho, dh, krw, krg, rw, rg)
+        -> (krW, krG)
 
 Upscaled relative permeabilities (brine, CO2) of column `i` under vertical
-model `m`, from its heights, column height `H`, density difference `drho`,
-rugosity `dh` and endpoints `krw`, `krg`.
+model `m`, from its saturations, heights, column height `H`, density
+difference `drho`, rugosity `dh`, endpoints `krw`, `krg` and residual
+saturations `rw`, `rg`.
 """
-_column_relperm(::SharpInterface, i, h, h_max, H, drho, dh, krw, krg) =
-    _sharp_interface_relperm(h, h_max, H, krw, krg, dh)
+_column_relperm(::SharpInterface, i, sG, sGmax, h, h_max, H, drho, dh, krw, krg, rw,
+                rg) = _sharp_interface_relperm(h, h_max, H, krw, krg, dh)
 
 """
     _fine_saturations(m, i, zb, h, h_max, rw, rg) -> (s, smax)
@@ -345,45 +348,53 @@ vertical model `vertical`. In fine cells (`is_ve`) the 3D relperm `fine` —
 roadmap Stage 12, `nothing` until then.
 """
 struct VERelPerm{M <: VerticalModel, V, F} <: JutulDarcy.AbstractRelativePermeabilities
-    vertical::M   # vertical model (column-specific)
-    krw::Float64  # brine relperm in the residual-CO2 zone
-    krg::Float64  # CO2 relperm in the plume
-    is_ve::V      # true for VE columns, per cell
-    fine::F       # 3D relperm of fine cells
+    vertical::M         # vertical model (column-specific)
+    krw::Float64        # brine relperm in the residual-CO2 zone
+    krg::Float64        # CO2 relperm in the plume
+    res_water::Float64  # residual brine saturation
+    res_gas::Float64    # residual CO2 saturation
+    is_ve::V            # true for VE columns, per cell
+    fine::F             # 3D relperm of fine cells
 end
-VERelPerm(vertical, krw, krg; is_ve = nothing, fine = nothing) =
-    VERelPerm(vertical, Float64(krw), Float64(krg), is_ve, fine)
+VERelPerm(vertical, krw, krg, rw, rg; is_ve = nothing, fine = nothing) =
+    VERelPerm(vertical, Float64.((krw, krg, rw, rg))..., is_ve, fine)
 
-# `drho(i)`: the density difference of cell i, or nothing.
+# `sat(i)`: (sG, sGmax_eff) of cell i, or nothing; `drho(i)`: the density
+# difference of cell i, or nothing.
 # Modifies: `kr` (relative permeabilities).
-function _update_relperm!(kr, v::VERelPerm, hh, H, dh, drho, ix)
+function _update_relperm!(kr, v::VERelPerm, hh, H, dh, sat, drho, ix)
     for i in ix
         if !_is_ve(v.is_ve, i)
             kr[1, i], kr[2, i] = _fine_relperm(v.fine, i)
             continue
         end
 
-        kr[1, i], kr[2, i] = _column_relperm(v.vertical, i, hh[1, i], hh[2, i], H[i],
-                                             drho(i), dh[i], v.krw, v.krg)
+        s, smax = something(sat(i), (nothing, nothing))
+        kr[1, i], kr[2, i] = _column_relperm(v.vertical, i, s, smax, hh[1, i], hh[2, i],
+                                             H[i], drho(i), dh[i], v.krw, v.krg,
+                                             v.res_water, v.res_gas)
     end
     return kr
 end
 
-# Any vertical model: the relperm may depend on the density difference.
+# Any vertical model: the relperm may depend on the saturations and the
+# density difference. sGmax as it stands within the step (as for the heights).
 # Modifies: `kr` (relative permeabilities).
-@jutul_secondary function update_ve_relperm!(kr, v::VERelPerm, model, PlumeHeights,
-                                            ColumnHeight, Rugosity, PhaseMassDensities,
-                                            ix)
-    ρ = PhaseMassDensities
-    _update_relperm!(kr, v, PlumeHeights, ColumnHeight, Rugosity,
+@jutul_secondary function update_ve_relperm!(kr, v::VERelPerm, model, sG, sGmax,
+                                            PlumeHeights, ColumnHeight, Rugosity,
+                                            PhaseMassDensities, ix)
+    ρ, rw = PhaseMassDensities, v.res_water
+    sat(i) = (sG[i], max(min(sGmax[i], 1 - rw), sG[i]))
+    _update_relperm!(kr, v, PlumeHeights, ColumnHeight, Rugosity, sat,
                      i -> ρ[1, i] - ρ[2, i], ix)
 end
 
-# The sharp interface: no densities, as for its heights.
+# The sharp interface: heights only, no saturations or densities.
 # Modifies: `kr` (relative permeabilities).
 @jutul_secondary function update_ve_relperm!(kr, v::VERelPerm{SharpInterface}, model,
                                             PlumeHeights, ColumnHeight, Rugosity, ix)
-    _update_relperm!(kr, v, PlumeHeights, ColumnHeight, Rugosity, i -> nothing, ix)
+    _update_relperm!(kr, v, PlumeHeights, ColumnHeight, Rugosity, i -> nothing,
+                     i -> nothing, ix)
 end
 
 """
@@ -451,9 +462,10 @@ function _set_ve_fluid!(model, fluid::CO2LabVEFluid)
     is_ve = haskey(d, :is_ve) && !all(d[:is_ve]) ? collect(Bool, d[:is_ve]) : nothing
 
     # the column-specific vertical model, shared by heights and relperm
-    m = _vertical_model(fluid.vertical, d)
-    S[:PlumeHeights] = PlumeHeights(m, fluid.res_water, fluid.res_gas; is_ve)
-    S[:RelativePermeabilities] = VERelPerm(m, fluid.krw, fluid.krg; is_ve)
+    m = _vertical_model(fluid.vertical, d, fluid)
+    rw, rg = fluid.res_water, fluid.res_gas
+    S[:PlumeHeights] = PlumeHeights(m, rw, rg; is_ve)
+    S[:RelativePermeabilities] = VERelPerm(m, fluid.krw, fluid.krg, rw, rg; is_ve)
     S[:CapillaryPressure] = VECapillaryPressure(; is_ve)
 
     push!(model.output_variables, :PlumeHeights, :CapillaryPressure)

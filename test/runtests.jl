@@ -31,7 +31,8 @@ end
 struct _StandInSharp <: JutulCO2Lab.VerticalModel end
 JutulCO2Lab._column_heights(::_StandInSharp, i, sG, sGmax, H, drho, rw, rg) =
     JutulCO2Lab._plume_heights(sG, sGmax, H, rw, rg)
-JutulCO2Lab._column_relperm(::_StandInSharp, i, h, h_max, H, drho, dh, krw, krg) =
+JutulCO2Lab._column_relperm(::_StandInSharp, i, sG, sGmax, h, h_max, H, drho, dh, krw,
+                            krg, rw, rg) =
     JutulCO2Lab._sharp_interface_relperm(h, h_max, H, krw, krg, dh)
 
 # --------------- Helpers: comparisons with MRST dumps and runs ----------------
@@ -39,6 +40,7 @@ JutulCO2Lab._column_relperm(::_StandInSharp, i, h, h_max, H, drho, dh, krw, krg)
 include("atlas_checks.jl")
 include("trap_checks.jl")
 include("inventory_checks.jl")
+include("fringe_checks.jl")
 
 # The VE sloping-aquifer domain of an MRST dump (3D grid G3 and rock).
 function _ve_case(d)
@@ -1028,6 +1030,26 @@ end
             end
         end
 
+        @testset "capillary fringe (Stage 6 item 1): runs, conserves CO2" begin
+            ff = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = (0.4, 0.5),
+                                                                   kr3D = 2,
+                                                                   samples = 2000),
+                                 wat_rho_pvt = (4.3e-10, 100e5),
+                                 co2_rho_pvt = (4.3e-9, 100e5))
+            model, st = run(fluid = ff)
+            r = model[:Reservoir]
+            @test r.secondary_variables[:PlumeHeights].vertical isa
+                  JutulCO2Lab.PScaledTable
+            @test abs(co2_mass(st[end]) - injected) / injected < 1e-3
+            # the fringe: capillary heights above the sharp interface's for the
+            # same saturation, and the capillary pressure Δρ g h
+            hh = st[end][:PlumeHeights]
+            sharp = JutulCO2Lab._plume_heights.(st[end][:sG], st[end][:sGmax], 20.0,
+                                                0.0, 0.0)
+            co2 = findall(>(1e-3), st[end][:sG])
+            @test !isempty(co2) && all(hh[1, co2] .> first.(sharp[co2]))
+        end
+
         @testset "sGmax update: running maximum, capped at 1 - res_water" begin
             v = MaxGasSaturation(0.2)
             sGmax = [0.0, 0.5, 0.7]
@@ -1186,6 +1208,41 @@ end
             passed(rep) || display(rep)
             @test passed(rep)
         end
+    end
+
+    @testset "capillary fringe ('P-scaled table') vs co2lab (Stage 6 item 1)" begin
+        f = joinpath(refdir, "fringe_fluid.mat")
+        if !isfile(f)
+            @info "Skipping: $f not generated (scripts/mrst_dump_fringe_fluid.m)"
+        else
+            rep = _fringe_fluid_vs_mrst(matread(f))
+            passed(rep) || display(rep)
+            @test passed(rep)
+        end
+    end
+
+    @testset "inventory split of a fringe column (Stage 6 item 1)" begin
+        J = JutulCO2Lab
+        fl = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = (0.4, 0.5),
+                                                               kr3D = 2, samples = 20_000),
+                             residual = (0.2, 0.2), co2_rho_ref = 700.0,
+                             wat_rho_ref = 1020.0)
+        H, drho = 20.0, 320.0
+        m = J._vertical_model(fl.vertical, Dict(:column_height => [H]), fl)
+        S, Smax = [0.3], [0.45]
+        h, hmax = J._column_heights(m, 1, S[1], Smax[1], H, drho, 0.2, 0.2)
+        col = (H = [H], zt = [5.0], dh = [1.0])
+        split(c) = J._category_saturations(m, S, Smax, [h], [hmax], col, [drho], 0.2,
+                                           0.2; co2lab_compatible = c)
+        p, c = split(false), split(true)
+        # co2lab's switch is the sharp interface's split by height
+        @test c == J._height_split(S, Smax, [h], [hmax], col, 0.2, 0.2)
+        # the parts add up, and the profile puts more CO2 under the caprock
+        @test p.immob_sub .+ p.immob_struct .+ p.immob_free ≈ Smax .* 0.2 ./ 0.8
+        @test p.mobile_sub .+ p.mobile_struct .+ p.mobile_free ≈ S .- Smax .* 0.25
+        @test all(p.mobile_struct .> c.mobile_struct)
+        @test all(p.immob_struct .> c.immob_struct)
+        @test all(0 .<= p.res .<= p.immob_free)
     end
 
     @testset "CO2 Storage Atlas maps vs co2lab (Stage 5 step 1)" begin

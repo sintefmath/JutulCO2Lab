@@ -125,7 +125,7 @@ function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid;
     geo, rw, rg = ve.geometry, fluid.res_water, fluid.res_gas
     p, sG, sGmax = state[:Pressure], state[:sG], state[:sGmax]
     rs_ve = haskey(state, :Rs) ? state[:Rs] : zeros(length(p))
-    m = _vertical_model(fluid.vertical, ve.domain)
+    m = _vertical_model(fluid.vertical, ve.domain, fluid)
     nc = length(columns.cells)
     out = (pressure = zeros(nc), sG = zeros(nc), sGmax = zeros(nc))
 

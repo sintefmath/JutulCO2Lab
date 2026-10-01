@@ -45,8 +45,9 @@ include("ve/rock_compressibility.jl")
 export set_co2lab_rock_compressibility!
 
 include("ve/ve_fluid.jl")
+include("ve/capillary_fringe.jl")
 export co2lab_ve_fluid, CO2LabVEFluid, instantaneous_dissolution
-export VerticalModel, SharpInterface
+export VerticalModel, SharpInterface, CapillaryFringeTable
 
 include("ve/co2lab_fluid.jl")
 export co2lab_system, has_dissolution

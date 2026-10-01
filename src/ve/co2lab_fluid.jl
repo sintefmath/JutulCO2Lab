@@ -408,8 +408,9 @@ function _dissolution_transfer(eq, ρV, state, state0, c, dt, out_dis, in_free, 
     supply = pv0 * state0.sG[c] * bG0 * ρV / dt + in_free + src
     max_transfer = _max_c(_min_v(demand, supply), 0.0) / (bW * ρV)
 
-    # brine touched by the plume (between h and h_max) is kept saturated
-    sW_touched = sW - (H - state.PlumeHeights[2, c]) / H
+    # brine touched by the plume (above h_max) is kept saturated; a fringe's
+    # h_max can exceed the column (plume truncated at the bottom)
+    sW_touched = sW - (H - _min_c(state.PlumeHeights[2, c], H)) / H
     min_dissolved = eq.dis_max * sW_touched * bW * pv
     min_transfer = _max_c(min_dissolved - state0.Rs[c] * sW * bW * pv, 0.0) / dt
 
