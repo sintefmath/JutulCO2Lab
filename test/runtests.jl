@@ -1032,8 +1032,7 @@ end
 
         @testset "capillary fringe (Stage 6 item 1): runs, conserves CO2" begin
             ff = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = (0.4, 0.5),
-                                                                   kr3D = 2,
-                                                                   samples = 2000),
+                                                                   kr3D = 2),
                                  wat_rho_pvt = (4.3e-10, 100e5),
                                  co2_rho_pvt = (4.3e-9, 100e5))
             model, st = run(fluid = ff)
@@ -1210,6 +1209,17 @@ end
         end
     end
 
+    @testset "capfringeFigures.m, capillary fringe, vs MRST (Stage 6 gate)" begin
+        f = joinpath(refdir, "capfringe_cp.mat")
+        if !isfile(f)
+            @info "Skipping: $f not generated (scripts/mrst_dump_capfringe_cp.m)"
+        else
+            rep = _capfringe_cp_vs_mrst(matread(f))
+            passed(rep) || display(rep)
+            @test passed(rep)
+        end
+    end
+
     @testset "capillary fringe ('P-scaled table') vs co2lab (Stage 6 item 1)" begin
         f = joinpath(refdir, "fringe_fluid.mat")
         if !isfile(f)
@@ -1225,7 +1235,7 @@ end
         J = JutulCO2Lab
         invJ = x -> (0.5 / (x + 0.5))^2
         fl = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = invJ,
-                                                               kr3D = 2, samples = 50_000,
+                                                               kr3D = 2,
                                                                leverett = true),
                              co2_rho_ref = 700.0, wat_rho_ref = 1000.0)
         H, drho, g = 20.0, 300.0, Jutul.gravity_constant
@@ -1249,7 +1259,7 @@ end
     @testset "inventory split of a fringe column (Stage 6 item 1)" begin
         J = JutulCO2Lab
         fl = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = (0.4, 0.5),
-                                                               kr3D = 2, samples = 20_000),
+                                                               kr3D = 2),
                              residual = (0.2, 0.2), co2_rho_ref = 700.0,
                              wat_rho_ref = 1020.0)
         H, drho = 20.0, 320.0

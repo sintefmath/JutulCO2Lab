@@ -1,8 +1,11 @@
 # Comparisons of the capillary-fringe vertical model with co2lab's
-# 'P-scaled table' fluid (roadmap Stage 6 item 1 and its pre-gate), used by
-# the package tests (runtests.jl) and the Stage 6 gate. Reference:
-# scripts/mrst_dump_fringe_fluid.m (fringe_fluid.mat): co2lab's sampled table
-# and its krG, krW, pcWG and heights on sampled states, per case.
+# 'P-scaled table' and 'P-K-scaled table' fluids (roadmap Stage 6 item 1 and
+# its pre-gate), with JutulCO2Lab's patch of co2lab's fringe tables
+# (scripts/mrst_fringe_patch: adaptive Hermite tables, plume-tip
+# regularisation, the corrected 'P-K-scaled table'), used by the package tests
+# (runtests.jl) and the Stage 6 gate. Reference: scripts/mrst_dump_fringe_fluid.m
+# (fringe_fluid.mat): co2lab's table and its krG, krW, pcWG and heights on
+# sampled states, per case.
 
 # The fluid of a dumped case: the PVT of the dump script, and the case's
 # fine-scale curves (the slope cases' (C, alpha), Johansen's functions, the
@@ -46,12 +49,9 @@ function _fringe_case_values(c, H)
     return (m = m, values = out)
 end
 
-# Table and values of every case against co2lab's ('P-scaled table') or
-# co2lab's corrected by scripts/mrst_pk_patch ('P-K-scaled table'). Plumes truncated at the
-# column bottom are compared at `tol_trunc`: co2lab stops its Newton solve for
-# them at a residual of 1e-8 times the largest Δρ g H of all columns (about
-# 1e-7 relative in Pc), where ours iterates to round-off.
-function _fringe_fluid_vs_mrst(d; tol = 1e-10, tol_trunc = 1e-6)
+# Table and values of every case against the patched co2lab's. Both sides
+# solve for Pc to round-off, plumes reaching the bottom included.
+function _fringe_fluid_vs_mrst(d; tol = 1e-10, tol_trunc = tol)
     rep = OracleReport("Fringe fluid ('P-scaled table') vs co2lab's makeVEFluid";
                        mrst = d)
     H = vec(d["H"])
@@ -62,7 +62,11 @@ function _fringe_fluid_vs_mrst(d; tol = 1e-10, tol_trunc = 1e-6)
         # Leverett: each column's factor σ√(φ/k)
         haskey(c, "kscale") && check!(rep, "$label: kscale", ours.m.kscale,
                                       vec(c["kscale"]); tol = Tolerance(1e-14, 0.0))
-        for (field, ref) in (("p", "table_p"), ("SP", "table_SP"), ("krP", "table_krP"))
+        check!(rep, "$label: table nodes", length(ours.m.p), length(vec(c["table_p"]));
+               tol = Tolerance(0.0, 0.0))
+        length(ours.m.p) == length(vec(c["table_p"])) || continue
+        for (field, ref) in (("p", "table_p"), ("SP", "table_SP"), ("krP", "table_krP"),
+                             ("s", "table_dSP"), ("kr", "table_dkrP"))
             check!(rep, "$label: table $field", getfield(ours.m, Symbol(field)),
                    vec(c[ref]); tol = Tolerance(1e-12, 1e-12 * maximum(c[ref])))
         end
@@ -78,5 +82,75 @@ function _fringe_fluid_vs_mrst(d; tol = 1e-10, tol_trunc = 1e-6)
             end
         end
     end
+    return rep
+end
+
+# capfringeFigures.m, capillary-fringe half (mrst_dump_capfringe_cp.m,
+# capfringe_cp.mat): the 'P-scaled table' curves over sG with and without
+# hysteresis, the heights and the reconstructed profile for S = 0.2,
+# Smax = 0.3, on the example's 50 m column. co2lab's table uses the reference
+# densities; the curves the densities at the example's pressure, reproduced by
+# linear PVT through them. Plumes reaching the bottom at `tol_trunc`
+# (co2lab's Newton accuracy there). A full column (S = 1 − srw) has no
+# determined Pc — any large enough one fills it — so there the check is that
+# both Pc give back S.
+function _capfringe_cp_vs_mrst(d; tol = 1e-10, tol_trunc = tol)
+    J = JutulCO2Lab
+    mesh = ve_mesh_from_mrst(d["G3"])
+    cols, _ = ve_columns(mesh)
+    n = Int(d["G3"]["cells"]["num"])
+    ve = ve_domain(mesh, cols; perm_x = fill(1e-13, n), poro = fill(0.3, n))
+    H, rw, rg, p = ve.geometry.H[1], d["srw"], d["src"], d["pressure"]
+    # linear PVT through co2lab's densities at the example's pressure
+    lin(rho, ref) = ((rho / ref - 1) / p, 0.0)
+    fringe = CapillaryFringeTable(; invPc3D = (d["C"], d["alpha"]),
+                                  kr3D = s -> max((s - rg) / (1 - rg), 0.0)^2)
+    fl = co2lab_ve_fluid(; vertical = fringe, residual = (rw, rg),
+                         wat_rho_ref = d["rhoWS"], co2_rho_ref = d["rhoGS"],
+                         wat_rho_pvt = lin(d["rhoW"], d["rhoWS"]),
+                         co2_rho_pvt = lin(d["rhoG"], d["rhoGS"]))
+    m = J._vertical_model(fl.vertical, ve.domain, fl)
+    drho = J._density_difference(fl, p, 0.0)
+    g = Jutul.gravity_constant
+
+    function curves(s, smax)
+        hh = J._column_heights.(Ref(m), 1, s, smax, H, drho, rw, rg)
+        kr = [J._column_relperm(m, 1, s[i], smax[i], hh[i]..., H, drho, 0.0, fl.krw,
+                                fl.krg, rw, rg) for i in eachindex(s)]
+        return first.(kr), last.(kr), drho * g .* first.(hh), first.(hh)
+    end
+
+    rep = OracleReport("capfringeFigures.m, capillary fringe, vs MRST"; mrst = d)
+    s = vec(d["s"])
+    full = s .>= 1 - rw - 1e-12
+    hyst = (" with hysteresis", vec(d["smax_hyst"]), "_hyst")
+    for (label, smax, sfx) in (("", s, ""), hyst)
+        krw, krg, pc, h = curves(s, smax)
+        trunc = (h .> H) .& .!full
+        rest = .!(h .> H) .& .!full
+        groups = ((rest, tol, ""), (trunc, tol_trunc, ", plumes reaching the bottom"))
+        for (sel, t, tag) in groups
+            any(sel) || continue
+            for (q, ours) in (("krW", krw), ("krG", krg), ("pcWG", pc))
+                ref = vec(d[q * sfx])[sel]
+                check!(rep, "$q$label$tag", ours[sel], ref;
+                       tol = Tolerance(t, t * maximum(abs, ref; init = 1e-12)))
+            end
+        end
+        # the full column: the saturation each Pc gives back
+        dP = drho * g * H
+        sback(q) = (J._SP(m, q) - J._SP(m, q - dP)) / dP
+        check!(rep, "full column$label: S from Pc, ours and co2lab's",
+               [sback.(pc[full]); sback.(vec(d["pcWG" * sfx])[full])],
+               [s[full]; s[full]]; tol = Tolerance(0.0, 1e-8))
+    end
+
+    h, hmax = J._column_heights(m, 1, d["S"], d["Smax"], H, drho, rw, rg)
+    check!(rep, "profile: heights", [h, hmax], [d["h"], d["h_max"]];
+           tol = Tolerance(tol, 0.0))
+    st = Dict(:Pressure => [p], :sG => [d["S"]], :sGmax => [d["Smax"]])
+    o = ve_reconstruct(st, ve, cols, fl)
+    check!(rep, "profile: sG", o.sG, vec(d["s3D"]); tol = Tolerance(0.0, tol))
+    check!(rep, "profile: sGmax", o.sGmax, vec(d["smax3D"]); tol = Tolerance(0.0, tol))
     return rep
 end
