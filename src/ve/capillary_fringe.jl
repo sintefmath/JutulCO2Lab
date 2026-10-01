@@ -23,8 +23,7 @@
 # ---------------------------------- Settings ----------------------------------
 
 """
-    CapillaryFringeTable(; invPc3D, kr3D = 3, hysteresis = :endpoint_scaling,
-                           samples = 200_000)
+    CapillaryFringeTable(; invPc3D, kr3D = 3, samples = 200_000)
 
 co2lab's `'P-scaled table'` vertical model: a capillary fringe between the
 plume and the brine, with one fine-scale capillary curve for the whole
@@ -36,8 +35,11 @@ formation (makeVEFluid's options of the same names):
   density difference, as co2lab does;
 - `kr3D`: the fine-scale CO2 relperm as a function of CO2 saturation, or an
   exponent `β` for `s^β` (co2lab's default 3);
-- `hysteresis`: `:endpoint_scaling` (co2lab's default) or `:fixed_residual`;
 - `samples`: table samples (makeVEFluid asks for 200 000).
+
+Hysteresis is co2lab's `'endpoint scaling'` (its default): the residual CO2
+at each depth scales with the maximum saturation reached there. co2lab's
+experimental `'fixed residual'` is not offered (researcher, 2026-10-01).
 
 A grid-independent specification; [`setup_co2lab_model`](@ref) builds the
 table for the model's domain.
@@ -45,16 +47,11 @@ table for the model's domain.
 struct CapillaryFringeTable{F, K} <: VerticalModel
     invPc3D::F          # brine saturation of capillary pressure, or (C, alpha)
     kr3D::K             # CO2 relperm of CO2 saturation, or a Corey exponent
-    hysteresis::Symbol  # :endpoint_scaling or :fixed_residual
     samples::Int        # table samples
 end
 
-function CapillaryFringeTable(; invPc3D, kr3D = 3, hysteresis = :endpoint_scaling,
-                              samples = 200_000)
-    hysteresis in (:endpoint_scaling, :fixed_residual) ||
-        throw(ArgumentError("hysteresis must be :endpoint_scaling or :fixed_residual"))
-    return CapillaryFringeTable(invPc3D, kr3D, hysteresis, Int(samples))
-end
+CapillaryFringeTable(; invPc3D, kr3D = 3, samples = 200_000) =
+    CapillaryFringeTable(invPc3D, kr3D, Int(samples))
 
 """
     PScaledTable
@@ -66,7 +63,6 @@ struct PScaledTable <: VerticalModel
     p::Vector{Float64}    # capillary pressure axis (Pa), uniform from 0 to Pmax
     SP::Vector{Float64}   # integral of the fine-scale CO2 saturation over p
     krP::Vector{Float64}  # integral of the fine-scale CO2 relperm over p
-    hysteresis::Symbol    # :endpoint_scaling or :fixed_residual
 end
 
 # ------------------------------- Building tables ------------------------------
@@ -83,7 +79,7 @@ function _vertical_model(spec::CapillaryFringeTable, domain, fluid)
 
     pmax = _upper_capillary_pressure(invpc, fluid.res_water, maximum(H) * drho_ref * g)
     p, SP, krP = _p_based_table(invpc, kr3D, spec.samples, pmax)
-    return PScaledTable(p, SP, krP, spec.hysteresis)
+    return PScaledTable(p, SP, krP)
 end
 
 # A function, or co2lab's (C, alpha), scaled by the pressure drop over the
@@ -206,19 +202,13 @@ function _bottom_capillary_pressure(m, SP_col, dP, pb)
     return pb
 end
 
-# The free saturation the vertical model's hysteresis treatment gives
-function _fringe_free_saturation(m::PScaledTable, sG, sGmax, rw, rg)
-    m.hysteresis == :endpoint_scaling && return _free_saturation(sG, sGmax, rw, rg)
-    error("'fixed residual' hysteresis for fringe fluids is roadmap Stage 6 item 2")
-end
-
 # ------------------------- Vertical-model interface ---------------------------
 
 # Capillary heights Pc/(Δρ g) of the free saturation and of the maximum
 # saturation (co2lab's upscaledSat2height, capillary case)
 function _column_heights(m::PScaledTable, i, sG, sGmax, H, drho, rw, rg)
     drho_g = drho * Jutul.gravity_constant
-    pc, _ = _fringe_capillary_pressure(m, _fringe_free_saturation(m, sG, sGmax, rw, rg),
+    pc, _ = _fringe_capillary_pressure(m, _free_saturation(sG, sGmax, rw, rg),
                                        H, drho)
     pc_max, _ = _fringe_capillary_pressure(m, sGmax, H, drho)
     return (pc / drho_g, pc_max / drho_g)

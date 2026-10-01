@@ -15,9 +15,7 @@ function _fringe_case_fluid(c)
         curves = (invPc3D = pc -> (1 - rw) * (pe / max(pc, pe))^2 + rw,
                   kr3D = s -> max((s - rg) / (1 - rg), 0.0)^2)
     end
-    hyst = occursin("fixed residual", name) ? :fixed_residual : :endpoint_scaling
-    return co2lab_ve_fluid(; vertical = CapillaryFringeTable(; curves...,
-                                                             hysteresis = hyst),
+    return co2lab_ve_fluid(; vertical = CapillaryFringeTable(; curves...),
                            residual = (rw, rg), co2_rho_ref = 760.0,
                            wat_rho_ref = 1100.0, co2_rho_pvt = (4.3e-9, 150e5),
                            wat_rho_pvt = (4.3e-10, 100e5), co2_mu_ref = 6e-5,
@@ -42,8 +40,8 @@ function _fringe_case_values(c, H)
     return (m = m, values = out)
 end
 
-# Table and values of every endpoint-scaling case against co2lab's; the
-# 'fixed residual' cases wait for Stage 6 item 2. Plumes truncated at the
+# Table and values of every endpoint-scaling case against co2lab's (the dump's
+# 'fixed residual' cases are skipped: not offered, researcher 2026-10-01). Plumes truncated at the
 # column bottom are compared at `tol_trunc`: co2lab stops its Newton solve for
 # them at a residual of 1e-8 times the largest Δρ g H of all columns (about
 # 1e-7 relative in Pc), where ours iterates to round-off.
