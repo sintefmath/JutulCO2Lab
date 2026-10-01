@@ -223,13 +223,14 @@ _column_relperm(::SharpInterface, i, sG, sGmax, h, h_max, H, drho, dh, krw, krg,
                 rg) = _sharp_interface_relperm(h, h_max, H, krw, krg, dh)
 
 """
-    _fine_saturations(m, i, zb, h, h_max, rw, rg) -> (s, smax)
+    _fine_saturations(m, i, zb, h, h_max, drho, rw, rg) -> (s, smax)
 
 CO2 saturation and maximum CO2 saturation of each fine cell of column `i`
 (cumulative cell-bottom depths below the caprock `zb`) under vertical model
-`m`. Returns two new vectors, top cell first.
+`m`, with density difference `drho`. Returns two new vectors, top cell
+first.
 """
-_fine_saturations(::SharpInterface, i, zb, h, h_max, rw, rg) =
+_fine_saturations(::SharpInterface, i, zb, h, h_max, drho, rw, rg) =
     _column_saturations(zb, h, h_max, rw, rg)
 
 "Linear property `ref·(1 + c·(p − p_ref))`; constant when `c = 0`."

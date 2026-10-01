@@ -1221,6 +1221,31 @@ end
         end
     end
 
+    @testset "Leverett-scaled fringe ('P-K-scaled table', corrected)" begin
+        J = JutulCO2Lab
+        invJ = x -> (0.5 / (x + 0.5))^2
+        fl = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = invJ,
+                                                               kr3D = 2, samples = 50_000,
+                                                               leverett = true),
+                             co2_rho_ref = 700.0, wat_rho_ref = 1000.0)
+        H, drho, g = 20.0, 300.0, Jutul.gravity_constant
+        dom = Dict(:column_height => [H, H], :porosity => [0.2, 0.2],
+                   :permeability => [1e-13, 4e-13])
+        m = J._vertical_model(fl.vertical, dom, fl)
+        @test m.kscale ≈ sqrt.(0.2 ./ [1e-13, 4e-13]) .* 30e-3
+        # the column's saturation and krG, by direct integration of the fine
+        # profile s(z) = 1 − invJ((Pc − Δρ g z)/kscale), thin to truncated plumes
+        z = range(0, H; length = 20_001)
+        integral(f) = sum(f.(z[1:end-1] .+ step(z) / 2)) * step(z) / H
+        for i in 1:2, S in (0.05, 0.3, 0.9)
+            h, _ = J._column_heights(m, i, S, S, H, drho, 0.0, 0.0)
+            _, krG = J._column_relperm(m, i, S, S, h, h, H, drho, 0.0, 1.0, 1.0, 0.0, 0.0)
+            s(zz) = 1 - invJ(max(h - zz, 0.0) * drho * g / m.kscale[i])
+            @test integral(s) ≈ S rtol = 1e-4
+            @test integral(zz -> s(zz)^2) ≈ krG rtol = 1e-3
+        end
+    end
+
     @testset "inventory split of a fringe column (Stage 6 item 1)" begin
         J = JutulCO2Lab
         fl = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = (0.4, 0.5),

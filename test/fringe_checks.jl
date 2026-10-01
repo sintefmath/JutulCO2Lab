@@ -5,11 +5,15 @@
 # and its krG, krW, pcWG and heights on sampled states, per case.
 
 # The fluid of a dumped case: the PVT of the dump script, and the case's
-# fine-scale curves (the slope cases' (C, alpha), Johansen's functions)
+# fine-scale curves (the slope cases' (C, alpha), Johansen's functions, the
+# Leverett cases' J-curve)
 function _fringe_case_fluid(c)
     name, rw, rg = c["name"], c["res_water"], c["res_gas"]
     if startswith(name, "slope")
         curves = (invPc3D = (0.4, 0.5), kr3D = s -> s^2)
+    elseif startswith(name, "Leverett")
+        curves = (invPc3D = J -> (1 - rw) * (0.5 / (J + 0.5))^2 + rw, kr3D = s -> s^2,
+                  leverett = true)
     else
         pe = 5e3
         curves = (invPc3D = pc -> (1 - rw) * (pe / max(pc, pe))^2 + rw,
@@ -25,7 +29,9 @@ end
 # Our table and our krG, krW, pcWG, heights for every sample of case `c`
 function _fringe_case_values(c, H)
     fluid = _fringe_case_fluid(c)
-    m = JutulCO2Lab._vertical_model(fluid.vertical, Dict(:column_height => H), fluid)
+    domain = Dict(:column_height => H, :porosity => vec(c["poro"]),
+                  :permeability => vec(c["perm"]))
+    m = JutulCO2Lab._vertical_model(fluid.vertical, domain, fluid)
     rw, rg, g = fluid.res_water, fluid.res_gas, Jutul.gravity_constant
     out = Dict(k => zeros(size(c["sg"])) for k in ("krG", "krW", "pcWG", "h", "hmax"))
     for s in axes(c["sg"], 2), i in eachindex(H)
@@ -40,8 +46,8 @@ function _fringe_case_values(c, H)
     return (m = m, values = out)
 end
 
-# Table and values of every endpoint-scaling case against co2lab's (the dump's
-# 'fixed residual' cases are skipped: not offered, researcher 2026-10-01). Plumes truncated at the
+# Table and values of every case against co2lab's ('P-scaled table') or
+# co2lab's corrected by scripts/mrst_pk_patch ('P-K-scaled table'). Plumes truncated at the
 # column bottom are compared at `tol_trunc`: co2lab stops its Newton solve for
 # them at a residual of 1e-8 times the largest Δρ g H of all columns (about
 # 1e-7 relative in Pc), where ours iterates to round-off.
@@ -49,11 +55,13 @@ function _fringe_fluid_vs_mrst(d; tol = 1e-10, tol_trunc = 1e-6)
     rep = OracleReport("Fringe fluid ('P-scaled table') vs co2lab's makeVEFluid";
                        mrst = d)
     H = vec(d["H"])
-    for k in 1:5
+    for k in 1:Int(d["ncases"])
         c = d["case$k"]
-        occursin("fixed residual", c["name"]) && continue
         ours = _fringe_case_values(c, H)
         label = c["name"]
+        # Leverett: each column's factor σ√(φ/k)
+        haskey(c, "kscale") && check!(rep, "$label: kscale", ours.m.kscale,
+                                      vec(c["kscale"]); tol = Tolerance(1e-14, 0.0))
         for (field, ref) in (("p", "table_p"), ("SP", "table_SP"), ("krP", "table_krP"))
             check!(rep, "$label: table $field", getfield(ours.m, Symbol(field)),
                    vec(c[ref]); tol = Tolerance(1e-12, 1e-12 * maximum(c[ref])))

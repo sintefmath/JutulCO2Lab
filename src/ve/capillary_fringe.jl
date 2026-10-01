@@ -1,5 +1,6 @@
-# co2lab's capillary-fringe VE fluid, 'P-scaled table' (roadmap Stage 6 item 1;
-# co2lab: addVERelpermCapillaryFringe.m, makeVEFluid.m).
+# co2lab's capillary-fringe VE fluid, 'P-scaled table' and, corrected,
+# 'P-K-scaled table' (roadmap Stage 6 item 1; co2lab:
+# addVERelpermCapillaryFringe.m, makeVEFluid.m).
 #
 # The fine-scale capillary pressure is linear in depth below the caprock,
 # pc(z) = Pc − Δρ g z, so the column's integrals become integrals over
@@ -19,11 +20,21 @@
 # of an entry pressure, the midpoint cumulative sum and linear interpolation
 # with extrapolation (MRST's interpTable; at a node the slope of the interval
 # to the right).
+#
+# Leverett scaling ('P-K-scaled table'): the fine-scale curve is a J-curve of
+# J = pc/kscale, kscale = σ·√(φ/k) per column. The table is over J; a column
+# works in J throughout with the scaled density difference Δρ/kscale (its
+# integrals over p are kscale times the table's), so the inversion, the
+# truncation and krG stay consistent, and h = Pc/(Δρ g) comes out physical.
+# co2lab's version fails on first use and mixes J with physical pressures
+# (co2lab-issues.org); this is the corrected one, compared with a patched
+# co2lab (scripts/mrst_pk_patch).
 
 # ---------------------------------- Settings ----------------------------------
 
 """
-    CapillaryFringeTable(; invPc3D, kr3D = 3, samples = 200_000)
+    CapillaryFringeTable(; invPc3D, kr3D = 3, samples = 200_000, leverett = false,
+                           surface_tension = 30e-3)
 
 co2lab's `'P-scaled table'` vertical model: a capillary fringe between the
 plume and the brine, with one fine-scale capillary curve for the whole
@@ -35,7 +46,10 @@ formation (makeVEFluid's options of the same names):
   density difference, as co2lab does;
 - `kr3D`: the fine-scale CO2 relperm as a function of CO2 saturation, or an
   exponent `β` for `s^β` (co2lab's default 3);
-- `samples`: table samples (makeVEFluid asks for 200 000).
+- `samples`: table samples (makeVEFluid asks for 200 000);
+- `leverett`: co2lab's `'P-K-scaled table'` (corrected): `invPc3D` is a
+  function of the J-variable `pc/kscale`, `kscale = surface_tension·√(φ/k)`
+  per column from the domain's upscaled porosity and permeability.
 
 Hysteresis is co2lab's `'endpoint scaling'` (its default): the residual CO2
 at each depth scales with the maximum saturation reached there. co2lab's
@@ -47,22 +61,28 @@ table for the model's domain.
 struct CapillaryFringeTable{F, K} <: VerticalModel
     invPc3D::F          # brine saturation of capillary pressure, or (C, alpha)
     kr3D::K             # CO2 relperm of CO2 saturation, or a Corey exponent
-    samples::Int        # table samples
+    samples::Int             # table samples
+    leverett::Bool           # Leverett scaling ('P-K-scaled table')
+    surface_tension::Float64 # σ of the Leverett scaling (N/m)
 end
 
-CapillaryFringeTable(; invPc3D, kr3D = 3, samples = 200_000) =
-    CapillaryFringeTable(invPc3D, kr3D, Int(samples))
+CapillaryFringeTable(; invPc3D, kr3D = 3, samples = 200_000, leverett::Bool = false,
+                     surface_tension = 30e-3) =
+    CapillaryFringeTable(invPc3D, kr3D, Int(samples), leverett, Float64(surface_tension))
 
 """
     PScaledTable
 
 The built form of [`CapillaryFringeTable`](@ref): co2lab's table over
-capillary pressure (`make_CO2_table_p_based`), shared by all columns.
+capillary pressure (`make_CO2_table_p_based`), shared by all columns; with
+Leverett scaling over the J-variable, with each column's `kscale`.
 """
-struct PScaledTable <: VerticalModel
+struct PScaledTable{F} <: VerticalModel
     p::Vector{Float64}    # capillary pressure axis (Pa), uniform from 0 to Pmax
     SP::Vector{Float64}   # integral of the fine-scale CO2 saturation over p
     krP::Vector{Float64}  # integral of the fine-scale CO2 relperm over p
+    invpc::F              # fine-scale brine saturation of capillary pressure (or J)
+    kscale::Vector{Float64}  # Leverett factor σ√(φ/k) per column (Pa); 1 without
 end
 
 # ------------------------------- Building tables ------------------------------
@@ -77,10 +97,20 @@ function _vertical_model(spec::CapillaryFringeTable, domain, fluid)
                                   fluid.res_water)
     kr3D = spec.kr3D isa Number ? (s -> s^spec.kr3D) : spec.kr3D
 
-    pmax = _upper_capillary_pressure(invpc, fluid.res_water, maximum(H) * drho_ref * g)
+    # Leverett: each column's factor from its upscaled rock (co2lab's rock2D)
+    kscale = spec.leverett ?
+             sqrt.(domain[:porosity] ./ domain[:permeability]) .* spec.surface_tension :
+             ones(length(H))
+    # the upper limit in the table's variable (pressure, or J)
+    pmax = _upper_capillary_pressure(invpc, fluid.res_water,
+                                     maximum(H .* drho_ref .* g ./ kscale))
     p, SP, krP = _p_based_table(invpc, kr3D, spec.samples, pmax)
-    return PScaledTable(p, SP, krP)
+    return PScaledTable(p, SP, krP, invpc, kscale)
 end
+
+# The density difference in the table's variable: Δρ/kscale (Δρ without
+# Leverett scaling), so that column integrals over p are those over J
+_table_drho(m::PScaledTable, i, drho) = drho / m.kscale[i]
 
 # A function, or co2lab's (C, alpha), scaled by the pressure drop over the
 # tallest column (`dp_max` = Hmax·Δρ_ref·g)
@@ -207,6 +237,7 @@ end
 # Capillary heights Pc/(Δρ g) of the free saturation and of the maximum
 # saturation (co2lab's upscaledSat2height, capillary case)
 function _column_heights(m::PScaledTable, i, sG, sGmax, H, drho, rw, rg)
+    drho = _table_drho(m, i, drho)
     drho_g = drho * Jutul.gravity_constant
     pc, _ = _fringe_capillary_pressure(m, _free_saturation(sG, sGmax, rw, rg),
                                        H, drho)
@@ -220,7 +251,7 @@ end
 # combine the fringe with rugosity.
 function _column_relperm(m::PScaledTable, i, sG, sGmax, h, h_max, H, drho, dh,
                          krw, krg, rw, rg)
-    drho_g = drho * Jutul.gravity_constant
+    drho_g = _table_drho(m, i, drho) * Jutul.gravity_constant
     pc = h * drho_g
     pb = _max_c(pc - drho_g * H, 0.0)
     kr = _max_c(_interp_table(m.p, m.krP, pc), 0.0)
@@ -233,8 +264,31 @@ function _column_relperm(m::PScaledTable, i, sG, sGmax, h, h_max, H, drho, dh,
     return (_max_c(sw_eff, 0.0), krG)
 end
 
-_fine_saturations(::PScaledTable, i, zb, h, h_max, rw, rg) =
-    error("reconstruction for fringe fluids is roadmap Stage 6 item 1b")
+# co2lab's cap_fringe_h2s (height2finescaleSat.m), endpoint scaling: each fine
+# cell's average of the current (free) and the maximum fringe profile, mixed
+# as s = (1 − C)·s_free + C·s_max with C = rg/(1 − rw)
+function _fine_saturations(m::PScaledTable, i, zb, h, h_max, drho, rw, rg)
+    drho = _table_drho(m, i, drho)
+    tops = [0.0; zb[1:end-1]]
+    s_free = [_cell_fringe_saturation(m, a, b, h, drho) for (a, b) in zip(tops, zb)]
+    s_max = [_cell_fringe_saturation(m, a, b, h_max, drho) for (a, b) in zip(tops, zb)]
+    C = rg / (1 - rw)
+    return ((1 - C) .* s_free .+ C .* s_max, s_max)
+end
+
+# The fringe saturation averaged over a cell from depth a to b below the
+# caprock, for capillary height h: co2lab's trapezoid rule on 10 levels
+function _cell_fringe_saturation(m::PScaledTable, a, b, h, drho)
+    n, g = 10, Jutul.gravity_constant
+    s = 0.0
+    for k in 1:n
+        w = k == 1 || k == n ? 0.5 : 1.0
+        d = h - (a * (n - k) + b * (k - 1)) / (n - 1)
+        # no CO2 below the capillary height
+        d > 0 && (s += w * (1 - m.invpc(d * drho * g)))
+    end
+    return s / (n - 1)
+end
 
 # The inventory's split of a fringe column: the mobile part by the current
 # saturation profile, the immobile part by the maximum one (researcher,
@@ -245,6 +299,8 @@ function _category_saturations(m::PScaledTable, S, Smax, h, h_max, col, drho, rw
     S_immob = Smax .* rg ./ (1 - rw)
     S_mob = S .- S_immob
     g = Jutul.gravity_constant
+    # in the table's variable (J with Leverett scaling)
+    drho = [_table_drho(m, i, drho[i]) for i in eachindex(drho)]
     pc, pc_max = h .* drho .* g, h_max .* drho .* g
 
     # the fraction of each profile between two depths below the caprock

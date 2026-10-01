@@ -1,5 +1,5 @@
 # Reconstruction of fine-scale (3D) states from VE states (roadmap Stage 2
-# item 6), as co2lab's VEstates23D does for its sharp-interface fluid:
+# item 6; capillary fringe: Stage 6 item 1b), as co2lab's VEstates23D:
 #
 # - pressure (pVE_to_p3D.m): the column's caprock brine pressure extended
 #   hydrostatically with the brine density at that pressure,
@@ -13,8 +13,8 @@
 #   the caprock down — saturated (dis_max) down to the depth where the brine
 #   volume above holds the column's fraction rs/dis_max of it, none below.
 #
-# The saturations come from the fluid's vertical model (`_fine_saturations`);
-# capillary-fringe models (cap_fringe_h2s) are Stage 6.
+# The saturations come from the fluid's vertical model (`_fine_saturations`):
+# sharp_interface_h2s, or for a capillary fringe cap_fringe_h2s.
 
 # ------------------------------ Filling a column ------------------------------
 
@@ -105,7 +105,7 @@ end
     ve_reconstruct(state, ve, columns, fluid; poro3D = nothing) -> NamedTuple
 
 Fine-scale state on the 3D grid from a VE reservoir state, as co2lab's
-`VEstates23D` for its sharp-interface fluid. `state` needs `:Pressure`,
+`VEstates23D`, for the fluid's vertical model. `state` needs `:Pressure`,
 `:sG`, `:sGmax` and, with dissolution, `:Rs` (a reservoir output state, or
 the `:Reservoir` entry of a full state); `ve` is [`ve_domain`](@ref)'s
 NamedTuple, `columns` the columns it was built on, `fluid` the
@@ -135,7 +135,7 @@ function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid;
 
         drho = _density_difference(fluid, p[col], rs_ve[col])
         h, h_max = _column_heights(m, col, sG[col], sGmax[col], geo.H[col], drho, rw, rg)
-        s, smax = _fine_saturations(m, col, view(geo.z, r), h, h_max, rw, rg)
+        s, smax = _fine_saturations(m, col, view(geo.z, r), h, h_max, drho, rw, rg)
         out.sG[cells], out.sGmax[cells] = s, smax
 
         # brine density at the caprock pressure, as co2lab's fluid.rhoW(pVE)
