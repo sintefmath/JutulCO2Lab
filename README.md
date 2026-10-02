@@ -22,7 +22,10 @@ vertical-model framework (`VerticalModel`; co2lab's sharp interface is
 `SharpInterface`) and co2lab's capillary fringe (`CapillaryFringeTable`:
 `'P-scaled table'` and a corrected `'P-K-scaled table'`, on adaptive cubic
 Hermite tables), with reconstruction, the inventory split and dissolution,
-gated against a patched co2lab on `exampleVEJohansen.m`.
+gated against a patched co2lab on `exampleVEJohansen.m`; and co2lab's
+`'sharp_interface_integrated'` for rock varying with depth
+(`SharpInterfaceIntegrated`), gated on `sharpInterfaceCrossSectionExample.m`.
+`examples/johansen_ve.jl` runs `exampleVEJohansen.m`.
 Readable walkthroughs: `examples/sloping_aquifer.jl` (Stage 2),
 `examples/residual_trapping.jl` (Stage 3, residual trapping) and
 `examples/dissolution.jl` (Stage 4, rate-driven and instantaneous
@@ -183,6 +186,8 @@ src/ve/              the VE simulator
   capillary_fringe.jl  the capillary-fringe vertical model: adaptive tables,
                      capillary pressure from saturation, relperm, fine-scale
                      profile, touched brine
+  sharp_interface_integrated.jl  the integrated sharp interface: heights by
+                     pore volume, relperm by permeability, over the fine cells
   co2lab_fluid.jl    co2lab's fluid system: black-oil with a :co2lab formulation,
                      unknowns by configuration; dissolution transfer, hysteresis;
                      model, state and simulator setup

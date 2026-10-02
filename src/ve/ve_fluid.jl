@@ -32,8 +32,9 @@
 
 How the fine-scale profile of a VE column follows from its upscaled state
 (roadmap Stage 6 item 0). A model given to [`co2lab_ve_fluid`](@ref) is a
-grid-independent specification; [[`setup_co2lab_model`](@ref) builds the
-column-specific object from it (`_vertical_model`). A model implements
+grid-independent specification, from which [`setup_co2lab_model`](@ref) builds
+the column-specific object (`_vertical_model`), or already built for the grid
+([`SharpInterfaceIntegrated`](@ref)). A model implements
 `_column_heights`, `_column_relperm`, `_fine_saturations` and
 `_category_saturations`; the capillary pressure is `Δρ g h` for all.
 """
@@ -47,6 +48,28 @@ the brine below it, in a vertically homogeneous column, with residual CO2
 between `h` and `h_max` and the accretion layer of the caprock rugosity.
 """
 struct SharpInterface <: VerticalModel end
+
+"""
+    SharpInterfaceIntegrated
+
+co2lab's `'sharp_interface_integrated'`: a sharp interface in a column whose
+rock varies with depth. Heights by pore volume, relperm by permeability, both
+integrated over the column's fine cells; built with
+[`SharpInterfaceIntegrated(mesh, columns; poro, perm_x)`](@ref
+SharpInterfaceIntegrated(::Any, ::VEColumns)). Per column, at the boundaries
+of its fine cells (top first, `pos[c]:pos[c+1]-1`), the depth below the
+caprock and the integrals from the caprock down.
+"""
+struct SharpInterfaceIntegrated <: VerticalModel
+    pos::Vector{Int}    # column c: entries pos[c]:pos[c+1]-1, one per cell boundary
+    z::Vector{Float64}  # depth of the boundary below the caprock (m)
+    V::Vector{Float64}  # pore volume above it, ∫ φ·area dz (m³)
+    K::Vector{Float64}  # x-permeability integrated down to it, ∫ k_x dz (m³)
+end
+
+# Vertical models whose heights and relperm depend on the saturations and the
+# column alone (not on the densities)
+const _DensityFreeModel = Union{SharpInterface, SharpInterfaceIntegrated}
 
 """
     _vertical_model(spec, domain, fluid) -> VerticalModel
@@ -346,10 +369,10 @@ end
     _update_heights!(hh, v, sG, sGmax, ColumnHeight, i -> ρ[1, i] - ρ[2, i], ix)
 end
 
-# The sharp interface does not read the densities, so it does not depend on
+# The sharp interfaces do not read the densities, so they do not depend on
 # them (an unchanged dependency graph and derivatives).
 # Modifies: `hh` (plume heights).
-@jutul_secondary function update_plume_heights!(hh, v::PlumeHeights{SharpInterface},
+@jutul_secondary function update_plume_heights!(hh, v::PlumeHeights{<:_DensityFreeModel},
                                                model, sG, sGmax, ColumnHeight, ix)
     _update_heights!(hh, v, sG, sGmax, ColumnHeight, i -> nothing, ix)
 end
@@ -401,10 +424,11 @@ end
                      i -> ρ[1, i] - ρ[2, i], ix)
 end
 
-# The sharp interface: heights only, no saturations or densities.
+# The sharp interfaces: heights only, no saturations or densities.
 # Modifies: `kr` (relative permeabilities).
-@jutul_secondary function update_ve_relperm!(kr, v::VERelPerm{SharpInterface}, model,
-                                            PlumeHeights, ColumnHeight, Rugosity, ix)
+@jutul_secondary function update_ve_relperm!(kr, v::VERelPerm{<:_DensityFreeModel},
+                                            model, PlumeHeights, ColumnHeight, Rugosity,
+                                            ix)
     _update_relperm!(kr, v, PlumeHeights, ColumnHeight, Rugosity, i -> nothing,
                      i -> nothing, ix)
 end

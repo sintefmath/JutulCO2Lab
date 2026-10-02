@@ -57,16 +57,17 @@ Returns a new vector, one value per column; `geometry` is only read.
 ve_hydrostatic_pressure(geometry; rho_w, g = Jutul.gravity_constant) =
     rho_w * g .* geometry.z_top
 
-# Warn if kx and ky differ; VE permeability then uses kx (see ve_average_rock).
-function _warn_lateral_anisotropy(kx, ky, rtol)
+# Warn if kx and ky differ; `what` (VE permeability, or the integrated relperm)
+# then uses kx (see ve_average_rock).
+function _warn_lateral_anisotropy(kx, ky, rtol; what = "VE permeability")
     rel = abs.(kx .- ky) ./ max.(abs.(kx), abs.(ky), floatmin())
     n = count(>(rtol), rel)
     n == 0 && return nothing
 
     ratio = maximum(max.(kx ./ ky, ky ./ kx))
     @warn "Lateral permeability is anisotropic in $n of $(length(kx)) cells " *
-          "(largest kx/ky or ky/kx: $(round(ratio, sigdigits = 3))); VE " *
-          "permeability uses x-permeability only"
+          "(largest kx/ky or ky/kx: $(round(ratio, sigdigits = 3))); $what " *
+          "uses x-permeability only"
     return nothing
 end
 

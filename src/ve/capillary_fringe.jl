@@ -21,7 +21,7 @@
 # accurate than co2lab's 200 000 uniform samples with linear interpolation,
 # which are poor for thin plumes (co2lab-issues.org). co2lab's range (Pmax)
 # and its scaling of a numeric (C, alpha) curve are kept. Comparisons with
-# co2lab use a patched co2lab with the same table (scripts/mrst_fringe_patch).
+# co2lab use a patched co2lab with the same table (scripts/mrst_patch).
 #
 # The plume tip: with the exact table Pc grows like √S (no entry pressure) or
 # jumps to the entry pressure as S leaves 0, so dPc/dS is unbounded there.

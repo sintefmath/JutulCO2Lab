@@ -1,7 +1,7 @@
 # Comparisons of the capillary-fringe vertical model with co2lab's
 # 'P-scaled table' and 'P-K-scaled table' fluids (roadmap Stage 6 item 1 and
 # its pre-gate), with JutulCO2Lab's patch of co2lab's fringe tables
-# (scripts/mrst_fringe_patch: adaptive Hermite tables, plume-tip
+# (scripts/mrst_patch: adaptive Hermite tables, plume-tip
 # regularisation, the corrected 'P-K-scaled table'), used by the package tests
 # (runtests.jl) and the Stage 6 gate. Reference: scripts/mrst_dump_fringe_fluid.m
 # (fringe_fluid.mat): co2lab's table and its krG, krW, pcWG and heights on

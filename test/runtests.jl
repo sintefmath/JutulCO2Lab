@@ -1279,6 +1279,108 @@ end
         @test J._untouched_brine(SharpInterface(), 1, 0.1, 5.0, 50.0, 300.0) ≈ 0.9
     end
 
+    @testset "integrated sharp interface (Stage 6 item 3)" begin
+        J = JutulCO2Lab
+        # a small sloping aquifer, 4 columns of 10 layers of 2 m
+        mesh = _cp_mesh(4, 10, (i, k) -> 1000.0 + 2.0 * i + 2.0 * (k - 1))
+        cols, _ = ve_columns(mesh)
+        layer = [cell_ijk(mesh, c)[3] for c in 1:number_of_cells(mesh)]
+        rw, rg, krw, krg = 0.2, 0.25, 0.75, 0.8
+
+        # uniform rock: the sharp interface's heights and relperm
+        u = SharpInterfaceIntegrated(mesh, cols; poro = fill(0.2, 40),
+                                     perm_x = fill(1e-13, 40))
+        for (s, smax, dh) in ((0.1, 0.1, 0.0), (0.1, 0.4, 0.0), (0.5, 0.6, 1.5))
+            hu = J._column_heights(u, 2, s, smax, 20.0, 0.0, rw, rg)
+            hs = J._plume_heights(s, smax, 20.0, rw, rg)
+            @test all(hu .≈ hs)
+            @test all(J._column_relperm(u, 2, s, smax, hu..., 20.0, 0.0, dh, krw, krg,
+                                        rw, rg) .≈
+                      J._sharp_interface_relperm(hs..., 20.0, krw, krg, dh))
+        end
+
+        # layered rock (porosity and permeability by layer)
+        poro = [0.1 + 0.02 * l for l in layer]
+        perm = [1e-13 * (1 + 0.5 * sin(l)) for l in layer]
+        m = SharpInterfaceIntegrated(mesh, cols; poro, perm_x = perm,
+                                     perm_y = 2 .* perm)
+        @test_logs (:warn, r"integrated relperm") SharpInterfaceIntegrated(mesh, cols;
+            poro, perm_x = perm, perm_y = 2 .* perm)
+        # the column's fine profile: layer of depth z, and its φ and k
+        lay(zz) = clamp(ceil(Int, zz / 2), 1, 10)
+        ph(zz) = 0.1 + 0.02 * lay(zz)
+        kx(zz) = 1e-13 * (1 + 0.5 * sin(lay(zz)))
+        z = range(0, 20.0; length = 200_001)
+        mid = z[1:end-1] .+ step(z) / 2
+        quad(f, a, b) = sum((f(x) for x in mid if a <= x < b); init = 0.0) * step(z)
+        # states with sG at least the residual left by sGmax, sGmax·rg/(1 − rw)
+        for (s, smax, dh) in ((0.05, 0.05, 0.0), (0.2, 0.4, 0.0), (0.5, 0.6, 1.5))
+            h, hmax = J._column_heights(m, 2, s, smax, 20.0, 0.0, rw, rg)
+            # pore volumes: CO2 at 1 − rw in the plume, rg in the residual zone
+            Vt = quad(ph, 0, 20)
+            @test (1 - rw) * quad(ph, 0, hmax) ≈ smax * Vt rtol = 1e-4
+            @test (1 - rw - rg) * quad(ph, 0, h) + rg * quad(ph, 0, hmax) ≈
+                  s * Vt rtol = 1e-4
+            # relperm by direct integration of the zones
+            krW, krG = J._column_relperm(m, 2, s, smax, h, hmax, 20.0, 0.0, dh, krw,
+                                         krg, rw, rg)
+            KH = quad(kx, 0, 20)
+            @test krG ≈ krg * quad(kx, min(dh, h), h) / KH rtol = 1e-4
+            @test krW ≈ (quad(kx, max(hmax, dh), 20) +
+                         krw * quad(kx, max(h, dh), max(hmax, dh))) / KH rtol = 1e-4
+            # the touched brine: pore volume above h_max
+            @test 1 - J._untouched_brine(m, 2, smax, hmax, 20.0, 0.0) ≈
+                  quad(ph, 0, hmax) / Vt rtol = 1e-4
+        end
+
+        # the inventory split: co2lab's by height; ours by pore volume, whose
+        # parts add up as the height split's do
+        S, Smax = fill(0.3, 4), fill(0.45, 4)
+        hh = [J._column_heights(m, i, 0.3, 0.45, 20.0, 0.0, rw, rg) for i in 1:4]
+        col = (H = fill(20.0, 4), zt = fill(5.0, 4), dh = fill(1.0, 4))
+        split(c) = J._category_saturations(m, S, Smax, first.(hh), last.(hh), col,
+                                           zeros(4), rw, rg; co2lab_compatible = c)
+        p, c = split(false), split(true)
+        @test c == J._height_split(S, Smax, first.(hh), last.(hh), col, rw, rg)
+        S_immob = Smax .* rg ./ (1 - rw)
+        @test p.immob_sub .+ p.immob_struct .+ p.immob_free ≈ S_immob
+        @test p.mobile_sub .+ p.mobile_struct .+ p.mobile_free ≈ S .- S_immob
+        # porosity grows with depth, so the top 5 m hold less than their height share
+        @test all(p.mobile_struct .< c.mobile_struct)
+
+        # a run: CO2 conserved, and no dependency on the densities
+        ve = ve_domain(mesh, cols; perm_x = perm, poro)
+        fl = co2lab_ve_fluid(; vertical = m, residual = (rw, rg),
+                             wat_rho_pvt = (4.3e-10, 100e5),
+                             co2_rho_pvt = (4.3e-9, 100e5))
+        well = setup_ve_well(ve, 4; name = :inj)
+        model = setup_co2lab_model(ve.domain; wells = [well], fluid = fl)
+        q = 2e-3
+        on = setup_reservoir_forces(model;
+                                    control = Dict(:inj => co2_injector_control(
+                                        TotalRateTarget(q), fl)))
+        off = setup_reservoir_forces(model; control = Dict(:inj => DisabledControl()))
+        p0 = ve_hydrostatic_pressure(ve.geometry; rho_w = 1100.0)
+        state0 = setup_co2lab_state(model; pressure = p0, forces = on)
+        dt = fill(30 * 86400.0, 10)
+        case = JutulCase(model, dt, [k <= 5 ? on : off for k in 1:10]; state0,
+                         parameters = setup_parameters(model))
+        sim, cfg = setup_co2lab_simulator(case; info_level = -1)
+        st = simulate_reservoir(case; simulator = sim, config = cfg).states
+        injected = 5 * 30 * 86400.0 * q * fl.rho_ref[2]
+        # (the sharp interface misses by the same 1.8e-5 on this case)
+        @test abs(sum(st[end][:TotalMasses][2, :]) - injected) / injected < 1e-4
+        r = model[:Reservoir]
+        @test !(:PhaseMassDensities in
+                Jutul.get_dependencies(r.secondary_variables[:PlumeHeights], r))
+        # a model built for another grid is refused
+        small = _cp_mesh(2, 10, (i, k) -> 1000.0 + 2.0 * (k - 1))
+        other = SharpInterfaceIntegrated(small, ve_columns(small)[1];
+                                         poro = fill(0.2, 20), perm_x = fill(1e-13, 20))
+        @test_throws ErrorException setup_co2lab_model(ve.domain;
+            fluid = co2lab_ve_fluid(; vertical = other))
+    end
+
     @testset "inventory split of a fringe column (Stage 6 item 1)" begin
         J = JutulCO2Lab
         fl = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = (0.4, 0.5),
