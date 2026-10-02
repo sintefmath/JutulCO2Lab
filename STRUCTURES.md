@@ -49,7 +49,7 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 |---|---|---|---|---|
 | 9 | `ColumnHeight` [ScalarVariable] | `ve_fluid.jl` | parameter `H` | `domain[:column_height]` (4) |
 | 9b | `Rugosity` [ScalarVariable] | `ve_fluid.jl` | parameter `dh`, caprock rugosity per column | `domain[:rugosity]` (4); zero if absent |
-| 10 | **`MaxGasSaturation`** [ScalarVariable] | `co2lab_fluid.jl` | `sGmax` in `[0, 1 − res_water]`: without hysteresis a parameter, the running maximum of converged `sG`; with hysteresis (`res_gas > 0`) an unknown, governed by 22c | `sG`; constant `res_water` from 8 |
+| 10 | **`MaxGasSaturation`** [ScalarVariable] | `co2lab_fluid.jl` | `sGmax` in `[0, 1 − res_water]`: without hysteresis a parameter, the running maximum of converged `sG`; with hysteresis (`res_gas > 0`) an unknown, governed by 22c, and after every Newton update projected with `sG` as co2lab's `updateState` (`sG ≤ 1 − res_water`, `sGmax ∈ [sG, 1 − res_water]`, `sG ≥ sGmax·res_gas`) | `sG`; constants `res_water`, `res_gas` from 8 |
 | 11 | `GasSaturation` [ScalarVariable] | `co2lab_fluid.jl` | unknown `sG` | — |
 | 12 | `DissolvedGasRatio` [ScalarVariable] | `co2lab_fluid.jl` | unknown `rs` (rate-driven dissolution) | — |
 | 12b | **`DissolvedOrFreeCO2`** [ScalarVariable, values JutulDarcy's `BlackOilX`] | `instant_dissolution.jl` | co2lab's switching unknown `:CO2X` for instantaneous dissolution: `rs` where brine is undersaturated, `sG` where saturated; co2lab's update rule | — |
@@ -60,8 +60,8 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 | 15b | `PVTShrinkage{R}` [PhaseVariables] | `pvt_tables.jl` | shrinkage factors `b = ρ(p, T)/ρ_ref` with any tabulated density (7g) | pressure, the `Temperature` parameter (JutulDarcy's; from `domain[:temperature]`, in wells their perforated column's, 30 °C default) |
 | 16 | `BlackOilDensities` [PhaseVariables] | `co2lab_fluid.jl` | phase mass densities | 15 (and 12) |
 | 17 | `VECapillaryPressure` [AbstractCapillaryPressure] | `ve_fluid.jl` | `pcWG = Δρ·g·h`; field `is_ve` (fine cells: Stage 12) | 13, 16 |
-| 18 | `LinearViscosities` [PhaseVariables] | `ve_fluid.jl` | viscosities (used by `setup_co2lab_model`) | pressure |
-| 18b | `PVTViscosities{U}` [PhaseVariables] | `pvt_tables.jl` | viscosities with any tabulated one (7g) | pressure, `Temperature` |
+| 18 | `LinearViscosities{P}` [PhaseVariables] | `ve_fluid.jl` | linear or constant viscosities (used by `setup_co2lab_model`); `P = true` (reservoir): at the phase pressures as co2lab, CO2 at `p + pcWG`; `P = false` (wells): at `p` | pressure; with `P = true` also 17 |
+| 18b | `PVTViscosities{U, P}` [PhaseVariables] | `pvt_tables.jl` | viscosities with any tabulated one (7g); `P` as 18 | pressure, `Temperature`; with `P = true` also 17 |
 | 19 | **`ConstantViscosities`** [PhaseVariables] | `co2lab_fluid.jl` | placeholder default, replaced by 18 in `setup_co2lab_model` | — |
 | 20 | `LinearPoreVolume` [ScalarVariable] | `rock_compressibility.jl` | pore volume `1 + c·(p − p_ref)` times the static pore volume — co2lab's rock compressibility, set on the model by `set_co2lab_rock_compressibility!` (or `setup_co2lab_model`'s `rock_compressibility`); exchangeable for JutulDarcy's `LinearlyCompressiblePoreVolume` | pressure, parameter `StaticFluidVolume` |
 | 21 | `DissolvedCO2Mass` [ScalarVariable] | `co2lab_fluid.jl` | dissolved CO2 mass per cell | 12, 15, saturations, 20 |

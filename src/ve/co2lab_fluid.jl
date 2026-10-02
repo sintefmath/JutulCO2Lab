@@ -120,7 +120,7 @@ end
 # ----------------------------------- sGmax ------------------------------------
 
 """
-    MaxGasSaturation(res_water)
+    MaxGasSaturation(res_water, res_gas = 0.0)
 
 co2lab's `sGmax`, between 0 and `1 - res_water`. Without hysteresis a Jutul
 parameter, updated explicitly before each step and after each converged
@@ -128,15 +128,51 @@ step: `sGmax = min(max(sGmax, sG), 1 - res_water)`. MRST does the same in
 `updateState` (`CO2VEBlackOilTypeModel.m:352-353`), but after every Newton
 update, so an overshooting iterate can raise its `sGmax`; here only converged
 states count. With hysteresis an unknown instead, governed by
-[`HysteresisEquation`](@ref).
+[`HysteresisEquation`](@ref), and after every Newton update projected as
+co2lab's `updateState` (`:349-357`): `sG ≤ 1 − res_water`, `sGmax` into
+`[sG, 1 − res_water]`, then `sG ≥ sGmax·res_gas` (CO2 cannot fall below the
+residual its maximum left).
 """
 struct MaxGasSaturation <: Jutul.ScalarVariable
     res_water::Float64  # residual brine: sGmax ≤ 1 − res_water
+    res_gas::Float64    # residual CO2: sG ≥ sGmax·res_gas (hysteresis)
 end
+MaxGasSaturation(res_water) = MaxGasSaturation(res_water, 0.0)
 Jutul.default_value(model, ::MaxGasSaturation) = 0.0
 Jutul.minimum_value(::MaxGasSaturation) = 0.0
 Jutul.maximum_value(v::MaxGasSaturation) = 1 - v.res_water
 Jutul.absolute_increment_limit(::MaxGasSaturation) = 0.2
+
+"""
+Jutul hook (hysteresis: `sGmax` an unknown): the Newton update of `sGmax`,
+then co2lab's projection of `sG` and `sGmax` (`updateState`,
+`CO2VEBlackOilTypeModel.m:349-357`; see [`MaxGasSaturation`](@ref)). Without
+it Newton cycles where a cell switches between drainage and imbibition and an
+iterate drops below its residual CO2 (`geothermGradientExample`, a 10-year
+step). Where `sG` is not an unknown (instantaneous dissolution) the plain
+update.
+
+Modifies: `state[state_symbol]` (`sGmax`) and `state.sG`.
+"""
+function Jutul.update_primary_variable!(state, v::MaxGasSaturation, state_symbol, model,
+                                        dx, w)
+    invoke(Jutul.update_primary_variable!,
+           Tuple{Any, Jutul.JutulVariables, Any, Any, Any, Any},
+           state, v, state_symbol, model, dx, w)
+    smax = state[state_symbol]
+    haskey(model.primary_variables, :sG) || return smax
+    sG, rw, rg = state.sG, v.res_water, v.res_gas
+    val = Jutul.value
+    for i in eachindex(smax)
+        # in co2lab's order: sG capped, sGmax into [sG, 1 − rw], sG above residual
+        sg = min(val(sG[i]), 1 - rw)
+        m = max(min(val(smax[i]), 1 - rw), sg)
+        smax[i] = replace_value(smax[i], m)
+        sG[i] = replace_value(sG[i], max(sg, m * rg))
+    end
+    return smax
+end
+
 
 """
     _update_max_gas_saturation!(sGmax, v, sG)
@@ -710,15 +746,17 @@ function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve
     isnothing(rock_compressibility) ||
         set_co2lab_rock_compressibility!(rmodel; rock_compressibility...)
 
-    shrinkage, viscosity = _co2lab_pvt(fluid)
+    shrinkage, viscosity, well_viscosity = _co2lab_pvt(fluid)
     for m in values(model.models)
         S = m.secondary_variables
         haskey(S, :ShrinkageFactors) || continue
         # the wellbores' equilibrium formulation starts from JutulDarcy's
-        # three-phase deck tables; give every submodel the same PVT
+        # three-phase deck tables; give every submodel the same PVT (wells'
+        # viscosities at the pressure: they have no capillary pressure)
         S[:ShrinkageFactors] = shrinkage
         S[:PhaseMassDensities] = BlackOilDensities()
-        S[:PhaseViscosities] = viscosity
+        is_well = JutulDarcy.model_or_domain_is_well(m)
+        S[:PhaseViscosities] = is_well ? well_viscosity : viscosity
     end
     needs_temperature(fluid) && _set_temperature!(model, domain)
     return model
@@ -761,7 +799,7 @@ Modifies: `rmodel.parameters` or `rmodel.primary_variables` and
 `rmodel.equations`. `fluid` is only read.
 """
 function _set_max_gas_saturation!(rmodel, fluid::CO2LabVEFluid)
-    v = MaxGasSaturation(fluid.res_water)
+    v = MaxGasSaturation(fluid.res_water, fluid.res_gas)
     if fluid.res_gas > 0
         rmodel.primary_variables[:sGmax] = v
         flow = rmodel.domain.discretizations.mass_flow

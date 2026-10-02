@@ -85,16 +85,26 @@ function co2lab_sampled_table(file)
 end
 
 """
-    co2lab_table_file(dir, property) -> String
+    co2lab_table_file(dir, property; fluid = :co2, p_range = (1e5, 4e8),
+                      T_range = (278, 524), samples = (800, 800)) -> String
 
-The path of co2lab's default CO2 table for `property` (`:density` or
-`:viscosity`; 0.1–400 MPa, 278–524 K, 800 × 800 samples, as makeVEFluid's
-default) in `dir`, e.g. `mrst/core/examples/data/CO2lab_Sampled_Tables` of an
-MRST installation. Returns the path; it is not checked.
+The path of one of co2lab's sampled tables in `dir` (e.g.
+`mrst/core/examples/data/CO2lab_Sampled_Tables` of an MRST installation),
+named as co2lab's `propFilename`: `property` `:density` or `:viscosity`,
+`fluid` `:co2` or `:water`, the pressure range (Pa), temperature range (K)
+and sample counts. The defaults are makeVEFluid's CO2 table. Returns the
+path; it is not checked.
 """
-function co2lab_table_file(dir, property::Symbol)
+function co2lab_table_file(dir, property::Symbol; fluid::Symbol = :co2,
+                           p_range = (1e5, 4e8), T_range = (278, 524),
+                           samples = (800, 800))
     tag = Dict(:density => "D", :viscosity => "V")[property]
-    return joinpath(dir, "CarbonDioxide_100000_400000000_278_524_800_800_$tag.mat")
+    name = Dict(:co2 => "CarbonDioxide", :water => "Water")[fluid]
+    # MATLAB's num2str(x, '%d_'): integers plainly, others in %e form
+    num(x) = isinteger(x) ? string(Int(x)) : @sprintf("%.6e", x)
+    parts = [name; num.(collect(p_range)); num.(collect(T_range));
+             num.(collect(samples))]
+    return joinpath(dir, join(parts, "_") * "_$tag.mat")
 end
 
 # co2lab's SampledProp2D: the cell of the uniform grid (the last one at the
@@ -143,16 +153,31 @@ end
 
 """
 Viscosities per phase (brine, CO2), each tabulated or linear (`pvt`, with
-`mu_ref` for linear ones), at the cell's pressure and temperature.
+`mu_ref` for linear ones), at the cell's temperature and, with `P = true`, at
+the phase pressures as co2lab's (CO2 at `p + pcWG`; wells, `P = false`, at
+`p`).
 """
-struct PVTViscosities{U} <: JutulDarcy.PhaseVariables
+struct PVTViscosities{U, P} <: JutulDarcy.PhaseVariables
     mu_ref::NTuple{2, Float64}  # reference viscosities (linear ones)
     pvt::U                      # per phase: PhaseTable or (c, p_ref)
 end
+PVTViscosities(mu_ref, pvt::U; phase_pressures::Bool = true) where {U} =
+    PVTViscosities{U, phase_pressures}(mu_ref, pvt)
 
 # Modifies: `mu` (phase viscosities).
-@jutul_secondary function update_pvt_viscosities!(mu, v::PVTViscosities, model,
-                                                 Pressure, Temperature, ix)
+@jutul_secondary function update_pvt_viscosities!(mu, v::PVTViscosities{<:Any, true},
+                                                 model, Pressure, CapillaryPressure,
+                                                 Temperature, ix)
+    for i in ix
+        p, T = Pressure[i], Temperature[i]
+        mu[1, i] = _phase_value(v.mu_ref[1], v.pvt[1], p, T)
+        mu[2, i] = _phase_value(v.mu_ref[2], v.pvt[2], p + CapillaryPressure[1, i], T)
+    end
+end
+
+# Modifies: `mu` (phase viscosities).
+@jutul_secondary function update_pvt_viscosities!(mu, v::PVTViscosities{<:Any, false},
+                                                 model, Pressure, Temperature, ix)
     for i in ix, ph in 1:2
         mu[ph, i] = _phase_value(v.mu_ref[ph], v.pvt[ph], Pressure[i], Temperature[i])
     end

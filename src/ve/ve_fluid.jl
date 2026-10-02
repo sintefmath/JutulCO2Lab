@@ -282,6 +282,23 @@ _min_c(x, c) = x > c ? zero(x) + c : x
 _min_v(u, v) = u < v ? u : v
 
 """
+    _effective_max(sGmax, sG, rw, rg) -> Real
+
+`sGmax` as it stands within a step: `max(min(sGmax, 1 − rw), sG)`. With
+hysteresis (`rg > 0`) `sGmax` is an unknown projected to at least `sG` after
+every Newton update (as co2lab's), and a tie keeps `sGmax`: this is `sGmax`
+itself, with co2lab's Jacobian (otherwise Newton can cycle where a cell
+switches between drainage and imbibition). Without, `sGmax` is a parameter
+updated after converged steps, so the current `sG` counts while the plume
+grows, and a tie keeps `sG` and its derivative.
+"""
+function _effective_max(sGmax, sG, rw, rg)
+    m = _min_c(sGmax, 1 - rw)
+    rg > 0 && return m >= sG ? m : sG
+    return max(m, sG)
+end
+
+"""
     _plume_heights(sG, sGmax, H, rw, rg) -> (h, h_max)
 
 co2lab's `upscaledSat2height` for a vertically homogeneous column
@@ -454,7 +471,7 @@ function _update_heights!(hh, v::PlumeHeights, sG, sGmax, H, drho, ix)
         end
 
         # sGmax as it stands within this step (see above)
-        smax = max(min(sGmax[i], 1 - rw), sG[i])
+        smax = _effective_max(sGmax[i], sG[i], rw, rg)
         hh[1, i], hh[2, i] = _column_heights(v.vertical, i, sG[i], smax, H[i], drho(i),
                                              rw, rg)
     end
@@ -519,7 +536,7 @@ end
                                             PlumeHeights, ColumnHeight, Rugosity,
                                             PhaseMassDensities, ix)
     ρ, rw = PhaseMassDensities, v.res_water
-    sat(i) = (sG[i], max(min(sGmax[i], 1 - rw), sG[i]))
+    sat(i) = (sG[i], _effective_max(sGmax[i], sG[i], rw, v.res_gas))
     _update_relperm!(kr, v, PlumeHeights, ColumnHeight, Rugosity, sat,
                      i -> ρ[1, i] - ρ[2, i], ix)
 end
@@ -558,15 +575,31 @@ VECapillaryPressure(; is_ve = nothing) = VECapillaryPressure(is_ve)
     end
 end
 
-"Viscosities `μ_ref·(1 + c·(p − p_ref))` per phase (brine, CO2)."
-struct LinearViscosities <: JutulDarcy.PhaseVariables
+"""
+Viscosities `μ_ref·(1 + c·(p − p_ref))` per phase (brine, CO2). With `P =
+true` at the phase pressures, as co2lab's (MRST's `Viscosity` state function
+reads `PhasePressures`; its densities do not): CO2 at `p + pcWG`; with `P =
+false` (wells, which have no capillary pressure) at `p`.
+"""
+struct LinearViscosities{P} <: JutulDarcy.PhaseVariables
     mu_ref::NTuple{2, Float64}          # reference viscosities
     pvt::NTuple{2, NTuple{2, Float64}}  # (c, p_ref) per phase
 end
+LinearViscosities(mu_ref, pvt; phase_pressures::Bool = true) =
+    LinearViscosities{phase_pressures}(mu_ref, pvt)
 
 # Modifies: `mu` (phase viscosities).
-@jutul_secondary function update_linear_visc!(mu, v::LinearViscosities, model, Pressure,
-                                             ix)
+@jutul_secondary function update_linear_visc!(mu, v::LinearViscosities{true}, model,
+                                             Pressure, CapillaryPressure, ix)
+    for i in ix
+        mu[1, i] = _linear(v.mu_ref[1], v.pvt[1], Pressure[i])
+        mu[2, i] = _linear(v.mu_ref[2], v.pvt[2], Pressure[i] + CapillaryPressure[1, i])
+    end
+end
+
+# Modifies: `mu` (phase viscosities).
+@jutul_secondary function update_linear_visc!(mu, v::LinearViscosities{false}, model,
+                                             Pressure, ix)
     for i in ix, ph in 1:2
         mu[ph, i] = _linear(v.mu_ref[ph], v.pvt[ph], Pressure[i])
     end
@@ -611,12 +644,13 @@ function _set_ve_fluid!(model, fluid::CO2LabVEFluid,
 end
 
 """
-    _co2lab_pvt(fluid) -> (shrinkage, viscosity)
+    _co2lab_pvt(fluid) -> (shrinkage, viscosity, well_viscosity)
 
 The fluid's PVT as Jutul variables: with tabulated properties `PVTShrinkage`
 and `PVTViscosities` (pressure and temperature); otherwise co2lab's linear
 `b = 1 + c·(p − p_ref)` per phase (the reference density is the "surface"
-density) and linear or constant viscosities (pressure only). Returns new
+density) and linear or constant viscosities. The reservoir's viscosities at
+the phase pressures (as co2lab), the wells' at the pressure. Returns new
 variable objects; `fluid` is only read.
 """
 function _co2lab_pvt(fluid::CO2LabVEFluid)
@@ -627,9 +661,11 @@ function _co2lab_pvt(fluid::CO2LabVEFluid)
         (cw, pw), (cg, pg) = rho
         b = LinearShrinkage((1.0, 1.0), (cw, cg), (pw, pg))
     end
-    visc = _tabulated(mu...) ? PVTViscosities(fluid.mu_ref, mu) :
-                               LinearViscosities(fluid.mu_ref, mu)
-    return (b, visc)
+    # the reservoir's at the phase pressures (co2lab's), the wells' at p
+    visc(pp) = _tabulated(mu...) ?
+               PVTViscosities(fluid.mu_ref, mu; phase_pressures = pp) :
+               LinearViscosities(fluid.mu_ref, mu; phase_pressures = pp)
+    return (b, visc(true), visc(false))
 end
 
 """
