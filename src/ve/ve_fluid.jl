@@ -108,7 +108,7 @@ translates one to one:
   temperature (see [`jutuldarcy_property_tables`](@ref), configured by
   `tables`, e.g. `tables = (co2_source = :salo24, salt_names = ["NaCl"],
   salt_mole_fractions = [0.01])`); a [`PhaseTable`](@ref) (e.g. co2lab's,
-  [`co2lab_sampled_table`](@ref)); `(c, p_ref)` for co2lab's linear
+  `scripts/co2lab_tables.jl`); `(c, p_ref)` for co2lab's linear
   `ref·(1 + c·(p − p_ref))`; `nothing` for constant. Tabulated properties
   take the temperature of each column (`ve_domain(...; temperature)`).
   `default_pvt` is what a property not given means: `:table`, or `nothing`
@@ -256,12 +256,12 @@ instantaneous_dissolution(f::CO2LabVEFluid) =
     f.dissolution && (f.dis_rate == 0 || isinf(f.dis_rate))
 
 # `nothing` → constant; (c, p_ref) → linear; makeVEFluid's 4-entry table spec
-# is refused (its tables: co2lab_sampled_table).
+# is refused (its tables: a PhaseTable).
 function _linear_pvt(spec)
     isnothing(spec) && return (0.0, 0.0)
     length(spec) == 2 ||
         error("makeVEFluid's table range ($spec) is not taken; give :table " *
-              "(JutulDarcy's), co2lab_sampled_table(file), nothing (constant) " *
+              "(JutulDarcy's), a PhaseTable, nothing (constant) " *
               "or (c, p_ref) (linear)")
     return (Float64(spec[1]), Float64(spec[2]))
 end

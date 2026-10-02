@@ -1396,26 +1396,18 @@ end
 
     @testset "tabulated PVT (Stage 7)" begin
         J = JutulCO2Lab
-        # co2lab's sampled CO2 tables, interpolated as co2lab does
-        # (mrst_dump_co2_tables.m evaluates them under Octave)
+        # JutulDarcy's CSP11 CO2 viscosity is NIST-consistent, as co2lab's
+        # (co2lab's values evaluated under Octave, mrst_dump_co2_tables.m)
         dump = joinpath(@__DIR__, "..", "..", "analysis", "reference-data",
                         "co2lab_co2_tables.mat")
-        tdir = joinpath(@__DIR__, "..", "..", "..", "mrst", "core", "examples", "data",
-                        "CO2lab_Sampled_Tables")
-        if isfile(dump) && isdir(tdir)
+        if isfile(dump)
             d = matread(dump)
-            rho = co2lab_sampled_table(co2lab_table_file(tdir, :density))
-            mu = co2lab_sampled_table(co2lab_table_file(tdir, :viscosity))
-            p, T = vec(d["p"]), vec(d["T"])
-            @test maximum(abs.([rho(pi, Ti) for pi in p, Ti in T] .- d["rho"]) ./
-                          d["rho"]) < 1e-12
-            @test maximum(abs.([mu(pi, Ti) for pi in p, Ti in T] .- d["mu"]) ./
-                          d["mu"]) < 1e-12
-            # JutulDarcy's CSP11 CO2 viscosity is NIST-consistent, as co2lab's
+            i, j = findfirst(==(20e6), vec(d["p"])), findfirst(==(343.0), vec(d["T"]))
             jd = jutuldarcy_property_tables()
-            @test abs(jd.viscosity[2](20e6, 343.15) / mu(20e6, 343.15) - 1) < 0.02
+            @test abs(jd.viscosity[2](20e6, 343.0) / d["mu"][i, j] - 1) < 0.02
+            @test abs(jd.density[2](20e6, 343.0) / d["rho"][i, j] - 1) < 1e-3
         else
-            @warn "co2lab's tables or their dump not found; table checks skipped"
+            @warn "co2lab's table dump not found (scripts/mrst_dump_co2_tables.m)"
         end
 
         # the fluid's defaults: JutulDarcy's tables, surface densities, and

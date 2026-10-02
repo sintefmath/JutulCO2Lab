@@ -45,7 +45,7 @@ include("ve/rock_compressibility.jl")
 export set_co2lab_rock_compressibility!
 
 include("ve/pvt_tables.jl")
-export PhaseTable, jutuldarcy_property_tables, co2lab_sampled_table, co2lab_table_file
+export PhaseTable, jutuldarcy_property_tables
 
 include("ve/ve_fluid.jl")
 include("ve/capillary_fringe.jl")
