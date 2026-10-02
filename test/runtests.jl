@@ -1256,6 +1256,29 @@ end
         end
     end
 
+    @testset "touched brine of a fringe column (dissolution)" begin
+        J = JutulCO2Lab
+        H, drho, g, pe = 50.0, 300.0, Jutul.gravity_constant, 5e3
+        # with and without entry pressure
+        for invpc in (p -> 0.8 * (pe / max(p, pe))^2 + 0.2,
+                      p -> 0.8 * (pe / (max(p, 0.0) + pe))^2 + 0.2)
+            fl = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = invpc),
+                                 residual = (0.2, 0.0))
+            m = J._vertical_model(fl.vertical, Dict(:column_height => [H]), fl)
+            St = m.touched
+            hmax_of(s) = J._column_heights(m, 1, s, s, H, drho, 0.2, 0.0)[2]
+            touched(s) = 1 - J._untouched_brine(m, 1, s, hmax_of(s), H, drho)
+            # above S_t: down to h_max less the entry height
+            @test touched(0.1) ≈ (hmax_of(0.1) - m.entry / (drho * g)) / H
+            # below S_t: linear in the saturation, continuous at S_t
+            @test touched(St / 4) ≈ touched(St) / 4
+            @test touched(St * (1 - 1e-9)) ≈ touched(St) rtol = 1e-6
+            @test touched(0.0) == 0
+        end
+        # the sharp interface: the column above h_max, as co2lab
+        @test J._untouched_brine(SharpInterface(), 1, 0.1, 5.0, 50.0, 300.0) ≈ 0.9
+    end
+
     @testset "inventory split of a fringe column (Stage 6 item 1)" begin
         J = JutulCO2Lab
         fl = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = (0.4, 0.5),

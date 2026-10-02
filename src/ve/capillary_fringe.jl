@@ -40,7 +40,8 @@
 
 """
     CapillaryFringeTable(; invPc3D, kr3D = 3, tolerance = 1e-6, tip_saturation = 1e-6,
-                           leverett = false, surface_tension = 30e-3)
+                           touched_saturation = 1e-3, leverett = false,
+                           surface_tension = 30e-3)
 
 co2lab's `'P-scaled table'` vertical model: a capillary fringe between the
 plume and the brine, with one fine-scale capillary curve for the whole
@@ -56,6 +57,10 @@ formation (makeVEFluid's options of the same names):
   co2lab's uniform table with 200 000 samples is not offered);
 - `tip_saturation`: below this free CO2 saturation, Pc is linear in the
   saturation (the plume tip, where the exact Pc has an unbounded derivative);
+- `touched_saturation`: below this maximum CO2 saturation, the depth of brine
+  touched by CO2 (dissolution) is linear in the saturation. The exact depth
+  grows like √S at the tip, far faster than the free CO2, and Newton cycles
+  there (researcher, 2026-10-02);
 - `leverett`: co2lab's `'P-K-scaled table'` (corrected): `invPc3D` is a
   function of the J-variable `pc/kscale`, `kscale = surface_tension·√(φ/k)`
   per column from the domain's upscaled porosity and permeability.
@@ -68,18 +73,20 @@ A grid-independent specification; [`setup_co2lab_model`](@ref) builds the
 table for the model's domain.
 """
 struct CapillaryFringeTable{F, K} <: VerticalModel
-    invPc3D::F               # brine saturation of capillary pressure, or (C, alpha)
-    kr3D::K                  # CO2 relperm of CO2 saturation, or a Corey exponent
-    tolerance::Float64       # relative accuracy of the table
-    tip_saturation::Float64  # free saturation below which Pc is linear in it
-    leverett::Bool           # Leverett scaling ('P-K-scaled table')
-    surface_tension::Float64 # σ of the Leverett scaling (N/m)
+    invPc3D::F                   # brine saturation of capillary pressure, or (C, alpha)
+    kr3D::K                      # CO2 relperm of CO2 saturation, or a Corey exponent
+    tolerance::Float64           # relative accuracy of the table
+    tip_saturation::Float64      # free saturation below which Pc is linear in it
+    touched_saturation::Float64  # max. saturation below which touched depth is linear
+    leverett::Bool               # Leverett scaling ('P-K-scaled table')
+    surface_tension::Float64     # σ of the Leverett scaling (N/m)
 end
 
 CapillaryFringeTable(; invPc3D, kr3D = 3, tolerance = 1e-6, tip_saturation = 1e-6,
-                     leverett::Bool = false, surface_tension = 30e-3) =
+                     touched_saturation = 1e-3, leverett::Bool = false,
+                     surface_tension = 30e-3) =
     CapillaryFringeTable(invPc3D, kr3D, Float64(tolerance), Float64(tip_saturation),
-                         leverett, Float64(surface_tension))
+                         Float64(touched_saturation), leverett, Float64(surface_tension))
 
 """
     PScaledTable
@@ -98,6 +105,8 @@ struct PScaledTable{F} <: VerticalModel
     invpc::F                 # fine-scale brine saturation of capillary pressure (or J)
     kscale::Vector{Float64}  # Leverett factor σ√(φ/k) per column (Pa); 1 without
     tip::Float64             # tip saturation S_r
+    entry::Float64           # entry pressure (or J): sg > 0 above it; 0 without
+    touched::Float64         # max. saturation below which the touched depth is linear
 end
 
 # ------------------------------- Building tables ------------------------------
@@ -119,13 +128,32 @@ function _vertical_model(spec::CapillaryFringeTable, domain, fluid)
     # the upper limit in the table's variable (pressure, or J)
     pmax = _upper_capillary_pressure(invpc, fluid.res_water,
                                      maximum(H .* drho_ref .* g ./ kscale))
-    t = _adaptive_table(p -> 1 - invpc(max(p, 0.0)), kr3D, pmax, spec.tolerance)
-    return PScaledTable(t..., invpc, kscale, spec.tip_saturation)
+    sg(p) = 1 - invpc(max(p, 0.0))
+    t = _adaptive_table(sg, kr3D, pmax, spec.tolerance)
+    return PScaledTable(t..., invpc, kscale, spec.tip_saturation,
+                        _entry_pressure(sg, pmax), spec.touched_saturation)
 end
 
 # The density difference in the table's variable: Δρ/kscale (Δρ without
 # Leverett scaling), so that column integrals over p are those over J
 _table_drho(m::PScaledTable, i, drho) = drho / m.kscale[i]
+
+# Brine is touched down to where the maximum profile's CO2 saturation is
+# positive: h_max less the entry height, which tends to 0 with the saturation
+# (h_max itself stays ≥ the entry height for any CO2, so a trace of CO2 would
+# touch metres of brine). Below the touched saturation the depth is linear in
+# smax, matching there: the exact depth grows like √smax at the tip, and the
+# brine it would keep saturated outgrows the free CO2 (Newton cycles).
+function _untouched_brine(m::PScaledTable, i, smax, h_max, H, drho)
+    drho_g = _table_drho(m, i, drho) * Jutul.gravity_constant
+    if Jutul.value(smax) < m.touched
+        pc_t = _pc_newton(m, m.touched, H, _table_drho(m, i, drho))
+        h_t = _max_c(pc_t - m.entry, 0.0) / drho_g * smax / m.touched
+    else
+        h_t = _max_c(h_max - m.entry / drho_g, 0.0)
+    end
+    return (H - _min_c(h_t, H)) / H
+end
 
 # A function, or co2lab's (C, alpha), scaled by the pressure drop over the
 # tallest column (`dp_max` = Hmax·Δρ_ref·g)

@@ -233,6 +233,17 @@ first.
 _fine_saturations(::SharpInterface, i, zb, h, h_max, drho, rw, rg) =
     _column_saturations(zb, h, h_max, rw, rg)
 
+"""
+    _untouched_brine(m, i, smax, h_max, H, drho) -> Real
+
+Fraction of column `i`'s pore volume that CO2 has never reached under vertical
+model `m`, from the maximum CO2 saturation `smax` (as it stands within the
+step), the maximum capillary height `h_max`, the column height `H` and the
+density difference `drho` (co2lab's `sW_untouched`, for the dissolution
+transfer). Default: the column below `h_max`, `(H − min(h_max, H))/H`.
+"""
+_untouched_brine(::VerticalModel, i, smax, h_max, H, drho) = (H - _min_c(h_max, H)) / H
+
 "Linear property `ref·(1 + c·(p − p_ref))`; constant when `c = 0`."
 _linear(ref, (c, p_ref), p) = ref * (1 + c * (p - p_ref))
 
@@ -440,17 +451,19 @@ end
 # --------------------- Installing the VE fluid in a model ---------------------
 
 """
-    _set_ve_fluid!(model, fluid)
+    _set_ve_fluid!(model, fluid, m = _vertical_model(fluid.vertical, ...))
 
 Install co2lab's VE constitutive functions in the reservoir submodel `model`
-(which must be on a domain from `ve_domain`).
+(which must be on a domain from `ve_domain`), with the column-specific vertical
+model `m` (built from `fluid` unless given).
 
 Modifies: `model.parameters` (adds `:ColumnHeight`, `:Rugosity`),
 `model.secondary_variables` (`:PlumeHeights`, `:RelativePermeabilities`,
 `:CapillaryPressure`), `model.output_variables` (adds `:PlumeHeights`,
-`:CapillaryPressure`). `fluid` is only read.
+`:CapillaryPressure`). `fluid` and `m` are only read.
 """
-function _set_ve_fluid!(model, fluid::CO2LabVEFluid)
+function _set_ve_fluid!(model, fluid::CO2LabVEFluid,
+                       m = _vertical_model(fluid.vertical, model.data_domain, fluid))
     haskey(model.data_domain, :column_height) ||
         error("VE fluid needs domain[:column_height]; build the domain with ve_domain")
 
@@ -462,8 +475,7 @@ function _set_ve_fluid!(model, fluid::CO2LabVEFluid)
     d = model.data_domain
     is_ve = haskey(d, :is_ve) && !all(d[:is_ve]) ? collect(Bool, d[:is_ve]) : nothing
 
-    # the column-specific vertical model, shared by heights and relperm
-    m = _vertical_model(fluid.vertical, d, fluid)
+    # the column-specific vertical model is shared by heights and relperm
     rw, rg = fluid.res_water, fluid.res_gas
     S[:PlumeHeights] = PlumeHeights(m, rw, rg; is_ve)
     S[:RelativePermeabilities] = VERelPerm(m, fluid.krw, fluid.krg, rw, rg; is_ve)

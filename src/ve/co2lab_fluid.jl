@@ -310,20 +310,25 @@ end
 # ----------------------------- Dissolved-CO2 law ------------------------------
 
 """
-    DissolvedCO2Equation(flow_discretization, dis_rate, dis_max)
+    DissolvedCO2Equation(flow_discretization, dis_rate, dis_max,
+                         vertical = SharpInterface())
 
 Conservation of dissolved CO2 with co2lab's transfer term (rate-driven mode,
 `CO2VEBlackOilTypeModel.m:84-97`): `d/dt(M_dis) + div(F_dis) − η = 0`.
 Assembled like Jutul's TPFA conservation law, with the same stencil; the flux
 is the dissolved part of black-oil's CO2 flux (`JutulDarcy/src/blackoil/
 flux.jl`): `ρ_VS · rs_up · (bλ)_L,up · ∇ψ_L`. The transfer `η` is co2lab's
-`computeDissolutionTransfer` ([`_dissolution_transfer`](@ref)).
+`computeDissolutionTransfer` ([`_dissolution_transfer`](@ref)), with the
+brine CO2 has touched from the column-specific vertical model `vertical`.
 """
-struct DissolvedCO2Equation{D} <: Jutul.JutulEquation
+struct DissolvedCO2Equation{D, M} <: Jutul.JutulEquation
     flow_discretization::D  # faces and stencil (TPFA)
     dis_rate::Float64       # co2lab dis_rate
     dis_max::Float64        # saturated rs
+    vertical::M             # vertical model (column-specific): the touched brine
 end
+DissolvedCO2Equation(flow, dis_rate, dis_max) =
+    DissolvedCO2Equation(flow, dis_rate, dis_max, SharpInterface())
 Jutul.number_of_equations_per_entity(::Jutul.SimulationModel, ::DissolvedCO2Equation) = 1
 function Jutul.local_discretization(eq::DissolvedCO2Equation, i)
     # the half-faces of cell i
@@ -393,7 +398,8 @@ units (per `ρ_VS · b_W`):
   source `src`), at least zero;
 - `min_transfer`: brine that has been in contact with CO2 (below the plume,
   above `h_max`) is kept saturated — `dis_max · sW_touched · bW · pv` less
-  what was dissolved, at least zero. Vertically homogeneous, as co2lab.
+  what was dissolved, at least zero. The untouched brine from the vertical
+  model (`_untouched_brine`); for the sharp interface co2lab's.
 
 co2lab's `min_transfer` is in surface volume per time, while the rest is
 divided by `bW` once more; kept as co2lab has it.
@@ -408,9 +414,12 @@ function _dissolution_transfer(eq, ρV, state, state0, c, dt, out_dis, in_free, 
     supply = pv0 * state0.sG[c] * bG0 * ρV / dt + in_free + src
     max_transfer = _max_c(_min_v(demand, supply), 0.0) / (bW * ρV)
 
-    # brine touched by the plume (above h_max) is kept saturated; a fringe's
-    # h_max can exceed the column (plume truncated at the bottom)
-    sW_touched = sW - (H - _min_c(state.PlumeHeights[2, c], H)) / H
+    # brine touched by the plume (above h_max) is kept saturated; sGmax as it
+    # stands within the step (as for the heights)
+    ρ, smax = state.PhaseMassDensities, max(state.sGmax[c], state.sG[c])
+    untouched = _untouched_brine(eq.vertical, c, smax, state.PlumeHeights[2, c], H,
+                                 ρ[1, c] - ρ[2, c])
+    sW_touched = sW - untouched
     min_dissolved = eq.dis_max * sW_touched * bW * pv
     min_transfer = _max_c(min_dissolved - state0.Rs[c] * sW * bW * pv, 0.0) / dt
 
@@ -686,7 +695,9 @@ function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve
     haskey(domain, :pillar_columns) && any(>(1), domain[:pillar_columns]) &&
         error("stacked columns connect through partial faces, which need the " *
               "transition flux of roadmap Stage 12; not implemented yet")
-    model = _co2lab_multimodel(domain, wells, fluid)
+    # the column-specific vertical model, built once (fringe tables)
+    m = _vertical_model(fluid.vertical, domain, fluid)
+    model = _co2lab_multimodel(domain, wells, fluid, m)
     rmodel = model[:Reservoir]
     # instantaneous dissolution: co2lab's switching unknown replaces sG and rs
     instantaneous_dissolution(fluid) && _set_instant_dissolution!(rmodel, fluid)
@@ -695,7 +706,7 @@ function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve
     _add_well_supply_terms!(model)
     push!(rmodel.output_variables, :sG, :sGmax)
     # VE relperm, pcWG, plume heights, column height and rugosity
-    _set_ve_fluid!(rmodel, fluid)
+    _set_ve_fluid!(rmodel, fluid, m)
     isnothing(rock_compressibility) ||
         set_co2lab_rock_compressibility!(rmodel; rock_compressibility...)
 
@@ -739,13 +750,14 @@ function _set_max_gas_saturation!(rmodel, fluid::CO2LabVEFluid)
 end
 
 """
-    _co2lab_multimodel(domain, wells, fluid) -> MultiModel
+    _co2lab_multimodel(domain, wells, fluid, vertical) -> MultiModel
 
 The reservoir (co2lab's formulation; with dissolution also the dissolved-CO2
-law) and the wells (with dissolution on JutulDarcy's equilibrium
-formulation). Arguments are only read.
+law, with the column-specific vertical model `vertical`) and the wells (with
+dissolution on JutulDarcy's equilibrium formulation). Arguments are only
+read.
 """
-function _co2lab_multimodel(domain, wells, fluid::CO2LabVEFluid)
+function _co2lab_multimodel(domain, wells, fluid::CO2LabVEFluid, vertical)
     rho_ref = fluid.rho_ref
     # nothing: no dissolved CO2 at all (rs is then not even a variable)
     rs_sat = fluid.dissolution ? fluid.dis_max : nothing
@@ -762,7 +774,7 @@ function _co2lab_multimodel(domain, wells, fluid::CO2LabVEFluid)
     rmodel = setup_reservoir_model(domain, sys)[:Reservoir]
     flow = rmodel.domain.discretizations.mass_flow
     rmodel.equations[:dissolved_co2] = DissolvedCO2Equation(flow, fluid.dis_rate,
-                                                            fluid.dis_max)
+                                                            fluid.dis_max, vertical)
     push!(rmodel.output_variables, :Rs, :DissolvedCO2)
 
     # the wells and facility from `full`, the reservoir with co2lab's formulation

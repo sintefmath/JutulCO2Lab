@@ -17,8 +17,12 @@ and the Sleipner benchmark; Stage 8: co2lab-spillpoint's trapping analysis
 (both methods, the derived quantities, IRAP/IGEMS surfaces), identical to
 co2lab (faults sealing by default); Stage 9 items 1–2: the trapping
 inventory, identical to co2lab on identical input and, end to end, against
-co2lab's own run of a Johansen case; Stage 6 item 0: the vertical-model
-framework (`VerticalModel`; co2lab's sharp interface is `SharpInterface`).
+co2lab's own run of a Johansen case; Stage 6 (in progress): the
+vertical-model framework (`VerticalModel`; co2lab's sharp interface is
+`SharpInterface`) and co2lab's capillary fringe (`CapillaryFringeTable`:
+`'P-scaled table'` and a corrected `'P-K-scaled table'`, on adaptive cubic
+Hermite tables), with reconstruction, the inventory split and dissolution,
+gated against a patched co2lab on `exampleVEJohansen.m`.
 Readable walkthroughs: `examples/sloping_aquifer.jl` (Stage 2),
 `examples/residual_trapping.jl` (Stage 3, residual trapping) and
 `examples/dissolution.jl` (Stage 4, rate-driven and instantaneous
@@ -176,6 +180,9 @@ src/ve/              the VE simulator
   ve_fluid.jl        co2lab's VE fluid: vertical models (sharp interface), plume
                      heights, relperm, pcWG, linear PVT; column height and
                      rugosity parameters
+  capillary_fringe.jl  the capillary-fringe vertical model: adaptive tables,
+                     capillary pressure from saturation, relperm, fine-scale
+                     profile, touched brine
   co2lab_fluid.jl    co2lab's fluid system: black-oil with a :co2lab formulation,
                      unknowns by configuration; dissolution transfer, hysteresis;
                      model, state and simulator setup
