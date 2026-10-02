@@ -25,13 +25,18 @@ end
 
 function plot_ve_surface!(ax, surface; color = (:steelblue, 0.6), offset = 0.0,
                           colormap = :viridis, shading = false, strokecolor = :black,
-                          strokewidth = 1)
-    pts, tris, col = _surface_triangles(surface, offset)
+                          strokewidth = 1, smooth = true)
+    pts, tris, col, node = _surface_triangles(surface, offset)
     # one value or colour per column, or one colour for all
     c = color isa AbstractVector ? color[col] : color
+    # smooth: the light blends across column edges (normals shared at the
+    # nodes); otherwise Makie lights each column as a facet of its own
+    m = smooth ? Makie.GeometryBasics.Mesh(pts, tris;
+                     normal = _node_normals(surface, pts, tris, node)) :
+                 Makie.GeometryBasics.Mesh(pts, tris)
     # translucent colours must be flagged: GLMakie otherwise writes them to its
     # depth buffer, hiding what lies behind them
-    mesh!(ax, pts, tris; color = c, colormap = colormap, shading = shading,
+    mesh!(ax, m; color = c, colormap = colormap, shading = shading,
           transparency = _translucent(color))
 
     if strokewidth > 0
@@ -50,13 +55,14 @@ _translucent(c::AbstractVector{<:Real}) = false
 _translucent(c::AbstractVector) = any(_translucent, c)
 _translucent(c) = Makie.to_color(c).alpha < 1
 
-# Each polygon as a fan of triangles around its node mean: points, triangles
-# and the column of each point. The triangles turn the same way in map view
-# whatever the grid's (so that the lit side is the upper one).
+# Each polygon as a fan of triangles around its node mean: points, triangles,
+# the column of each point and its node (0: the polygon's centre). The
+# triangles turn the same way in map view whatever the grid's (so that the lit
+# side is the upper one).
 function _surface_triangles(surface, offset)
     x, y, z = surface.x, surface.y, surface.z .+ offset
     Face = Makie.GeometryBasics.GLTriangleFace
-    pts, tris, col = Point3f[], Face[], Int[]
+    pts, tris, col, node = Point3f[], Face[], Int[], Int[]
     for (c, p) in enumerate(surface.polygons)
         q = unique(p)
         length(q) < 3 && continue
@@ -65,6 +71,7 @@ function _surface_triangles(surface, offset)
                            sum(z[q]) / length(q)))
         append!(pts, Point3f.(x[q], y[q], z[q]))
         append!(col, fill(c, length(q) + 1))
+        append!(node, [0; q])
         # clockwise in map view: with depth as z, the normal points up
         ccw = _signed_area(x[q], y[q]) > 0
         for k in eachindex(q)
@@ -72,7 +79,29 @@ function _surface_triangles(surface, offset)
             push!(tris, ccw ? Face(k0, b, a) : Face(k0, a, b))
         end
     end
-    return (pts, tris, col)
+    return (pts, tris, col, node)
+end
+
+# Each triangle's (unnormalised) normal, from the surface's Float64 positions
+# (Float32 map coordinates of ~1e6 m lose the small depth differences)
+function _triangle_normals(surface, pts, tris, node)
+    p(k) = node[k] == 0 ? Vec3{Float64}(pts[k]...) :
+           Vec3(surface.x[node[k]], surface.y[node[k]], surface.z[node[k]])
+    normal(a, b, c) = cross(p(b) - p(a), p(c) - p(a))
+    return [normal(convert.(Int, Tuple(f))...) for f in tris]
+end
+
+# Normals per point: at a node the mean over every triangle touching the node,
+# in any column; at a polygon's centre over its own triangles
+function _node_normals(surface, pts, tris, node)
+    tn = _triangle_normals(surface, pts, tris, node)
+    at_node = fill(Vec3(0.0, 0.0, 0.0), length(surface.z))
+    at_point = fill(Vec3(0.0, 0.0, 0.0), length(pts))
+    for (f, n) in zip(tris, tn), k in convert.(Int, Tuple(f))
+        node[k] == 0 ? (at_point[k] += n) : (at_node[node[k]] += n)
+    end
+    nrm(v) = Vec3f(v / max(norm(v), eps()))
+    return [nrm(node[k] == 0 ? at_point[k] : at_node[node[k]]) for k in eachindex(pts)]
 end
 
 # Twice the signed area of a polygon in map view (positive: anticlockwise)

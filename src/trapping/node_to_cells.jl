@@ -87,7 +87,8 @@ function _node_to_cell_traps(s, nt)
     top = sort(findall(tops .& (regions .> 0)), by = c -> regions[c])
 
     adj, rivers = _bypass_lost(s, nt, lost)
-    crivers = [[_truncate_river(_river_columns(s, r), traps) for r in rt]
+    look = _river_lookup(s)
+    crivers = [[_truncate_river(_river_columns(s, look, r), traps) for r in rt]
                for rt in rivers]
     return (traps = traps, trap_z = trap_z, trap_regions = regions, trap_adj = adj,
             rivers = crivers, top = top)
@@ -177,16 +178,23 @@ function _shortest_path(g, start, target)
     return reverse!(path)
 end
 
-# A node river as columns (co2lab's project_rivers_to_cells): along an edge
-# the shallower column beside it (the only one at the boundary), across a
-# quad diagonal the column it crosses
-function _river_columns(s, nodes)
+# The edge of each node pair and the column of each quad diagonal (node pairs
+# as given, diagonals as minmax), for _river_columns: a NamedTuple of two Dicts
+function _river_lookup(s)
     edge = Dict((s.edges[1, k], s.edges[2, k]) => k for k in axes(s.edges, 2))
     diag = Dict{Tuple{Int, Int}, Int}()
     for c in axes(s.corners, 2)
         ws, es, wn, en = s.corners[:, c]
         diag[minmax(ws, en)] = c; diag[minmax(es, wn)] = c
     end
+    return (edge = edge, diag = diag)
+end
+
+# A node river as columns (co2lab's project_rivers_to_cells): along an edge
+# the shallower column beside it (the only one at the boundary), across a
+# quad diagonal the column it crosses; `look` from _river_lookup(s)
+function _river_columns(s, look, nodes)
+    edge, diag = look.edge, look.diag
     # repeated nodes dropped
     nodes = nodes[[true; diff(nodes) .!= 0]]
     cells = Int[]

@@ -195,23 +195,31 @@ function _steepest_ascent(s, nbrs)
     return up
 end
 
-# Columns draining to `top`: those whose steepest-ascent path, moving freely
-# between level neighbours, reaches it (co2lab: bfs on the transposed matrix)
-function _drainage(nbrs, z, up, top)
-    down = [Int[] for _ in eachindex(z)]
+# The columns whose steepest-ascent neighbour is each column (`up` from
+# _steepest_ascent)
+function _downslope(up)
+    down = [Int[] for _ in eachindex(up)]
     for c in eachindex(up)
         up[c] > 0 && push!(down[up[c]], c)
     end
-    reached = fill(false, length(z)); reached[top] = true
+    return down
+end
+
+# Columns draining to `top`, as a vector: those whose steepest-ascent path,
+# moving freely between level neighbours, reaches it (co2lab: bfs on the
+# transposed matrix; `down` from _downslope)
+function _drainage(nbrs, z, down, top)
+    reached = Set([top])
     stack = [top]
     # downwards along the steepest-ascent links, and across level neighbours
     while !isempty(stack)
         c = pop!(stack)
-        for b in [down[c]; filter(b -> z[b] == z[c], nbrs[c])]
-            reached[b] || (reached[b] = true; push!(stack, b))
+        level = Iterators.filter(b -> z[b] == z[c], nbrs[c])
+        for b in Iterators.flatten((down[c], level))
+            b in reached || (push!(reached, b); push!(stack, b))
         end
     end
-    return reached
+    return collect(reached)
 end
 
 # --------------------------------- Analysis -----------------------------------
@@ -243,10 +251,10 @@ function _cell_trap_analysis(s)
     trap_adj = sparse(first.(links), last.(links), true, ntrap, ntrap)
 
     # spill regions: what drains to each trap's top (later tops overwrite)
-    up = _steepest_ascent(s, nbrs)
+    down = _downslope(_steepest_ascent(s, nbrs))
     trap_regions = zeros(Int, length(s.zc))
     for t in st.tops
-        trap_regions[_drainage(nbrs, s.zc, up, t)] .= traps[t]
+        trap_regions[_drainage(nbrs, s.zc, down, t)] .= traps[t]
     end
     return (traps = traps, trap_z = trap_z, trap_regions = trap_regions,
             trap_adj = trap_adj, rivers = rivers, top = st.tops)

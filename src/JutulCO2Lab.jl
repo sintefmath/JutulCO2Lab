@@ -25,6 +25,7 @@ using Printf
 using StaticArrays
 using Graphs
 using MAT
+using PrecompileTools
 
 include("oracle.jl")
 using .Oracle
@@ -111,5 +112,7 @@ export plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!
 export plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure
 export plot_traps, plot_traps!, ve_axis3
 export plot_trapping_history, plot_trapping_history!
+
+include("precompile.jl")
 
 end # module

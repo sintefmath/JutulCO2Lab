@@ -33,7 +33,8 @@ dissolution), and `examples/atlas/` (Stage 5, the CO2 Storage Atlas with
 plots: `show_co2_atlas.jl`, `models_from_atlas.jl`,
 `show_top_surface_grids.jl`, `sleipner_model.jl`) and `examples/trapping/`
 (Stage 8, co2lab-spillpoint's seven static examples) and
-`examples/inventory/` (Stage 9, the trapping inventory of a run). The plan
+`examples/inventory/` (Stage 9, the trapping inventory of a run);
+`examples/demos/` (Stage 11, interactive demos: the trap viewer). The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
@@ -230,15 +231,19 @@ src/trapping/        structural traps (Stage 8, co2lab-spillpoint)
 src/inventory/       where the CO2 is (Stage 9)
   trapping_inventory.jl  co2lab's trapping inventory per state and over a run
 
+src/precompile.jl    precompiled workload: the trap analysis on a small synthetic
+                     caprock (no data files)
+
 examples/            readable walkthroughs, with their own environment
                      (examples/Project.toml: JutulCO2Lab, the Jutul fork,
                      GLMakie, CairoMakie), run from the project root with
                      scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/...
   atlas/             CO2 Storage Atlas scripts; JUTULCO2LAB_BACKEND=CairoMakie
                      writes figures to ./figures instead of opening windows
-  trapping/          co2lab-spillpoint's examples (static figures; the
-                     interactive viewer is roadmap Stage 11)
+  trapping/          co2lab-spillpoint's examples (static figures)
   inventory/         a run's trapping inventory
+  demos/             interactive demos (Stage 11): trap_viewer.jl, in a GLMakie
+                     window or a browser (JUTULCO2LAB_BACKEND=WGLMakie)
 test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, wells,
                      boundary conditions and reconstruction (vs MRST), Atlas, trapping,
                      inventory,

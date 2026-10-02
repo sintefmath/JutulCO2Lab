@@ -91,16 +91,27 @@ end
 
 # ------------------------- Spill point of a region group -----------------------
 
+# The spill edges (rows of `spill`) of each region 1:nreg, in edge order
+function _region_spill_rows(nreg, spill)
+    rows = [Int[] for _ in 1:nreg]
+    for (i, e) in enumerate(spill), r in (e[2], e[3])
+        r > 0 && push!(rows[r], i)
+    end
+    return rows
+end
+
 # co2lab's locate_neighbor_traps: for a group of regions `members`, its spill
 # depth (the shallowest of its rim edges' deeper ends), the spill edges at
 # that depth (one per inner node: the one with the shallowest outer end) and
-# the groups beyond them (`group_of` maps region → group)
-function _group_spill(members, group_of, spill)
+# the groups beyond them (`group_of` maps region → group; `rows` from
+# _region_spill_rows)
+function _group_spill(members, group_of, spill, rows)
     member_set = Set(members)
     inside(r) = r in member_set
-    # the group's rim edges, each at its deeper end's depth
-    rim = [(i, max(e[4], e[5])) for (i, e) in enumerate(spill)
-           if inside(e[2]) != inside(e[3])]
+    # the group's rim edges in edge order, each at its deeper end's depth
+    cand = sort!(unique(i for r in members for i in rows[r]))
+    rim = [(i, max(spill[i][4], spill[i][5])) for i in cand
+           if inside(spill[i][2]) != inside(spill[i][3])]
     # stable sort by depth, as co2lab's sortrows
     sort!(rim, by = last)
     z_spill = rim[1][2]
@@ -129,9 +140,11 @@ _spones(A) = (B = copy(A); nonzeros(B) .= 1.0; dropzeros!(B))
 function _merge_groups(A, cycle)
     n = size(A, 1)
     keep = setdiff(1:n, cycle[2:end])
-    new = [c in cycle ? findfirst(==(cycle[1]), keep) : findfirst(==(c), keep)
-           for c in 1:n]
-    P = sparse(1:n, new, 1.0, n, length(keep))
+    # each group's new position; the cycle's members all go to its first's
+    pos = zeros(Int, n)
+    pos[keep] .= eachindex(keep)
+    pos[cycle] .= pos[cycle[1]]
+    P = sparse(1:n, pos, 1.0, n, length(keep))
     return _spones(P' * A * P)
 end
 
@@ -146,9 +159,10 @@ function _merge_cycles(nreg, spill)
     group_of = collect(1:nreg)
     cmat = spzeros(nreg, nreg)
     z, edges = zeros(nreg), Vector{Vector{Int}}(undef, nreg)
+    rows = _region_spill_rows(nreg, spill)
     # each region spills into the groups beyond its spill point
     for g in 1:nreg
-        r = _group_spill(members[g], group_of, spill)
+        r = _group_spill(members[g], group_of, spill, rows)
         cmat[g, r.groups] .= 1.0
         z[g], edges[g] = r.z, r.edges
     end
@@ -169,7 +183,7 @@ function _merge_cycles(nreg, spill)
                 deleteat!(v, cycle[2:end])
             end
             foreach(((k, m),) -> group_of[m] .= k, enumerate(members))
-            r = _group_spill(members[g], group_of, spill)
+            r = _group_spill(members[g], group_of, spill, rows)
             cmat[g, r.groups] .= 1.0
             z[g], edges[g] = r.z, r.edges
         end

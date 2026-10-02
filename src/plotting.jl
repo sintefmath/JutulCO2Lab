@@ -70,13 +70,15 @@ function plot_ve_outline! end
 """
     plot_ve_surface!(ax, surface; color = (:steelblue, 0.6), offset = 0.0,
                      colormap = :viridis, shading = false, strokecolor = :black,
-                     strokewidth = 1) -> ax
+                     strokewidth = 1, smooth = true) -> ax
 
 The top surface of a VE domain ([`ve_top_surface`](@ref)) in 3D: the
 columns' top faces at their node depths (plus `offset`, e.g. to lift it off
 the 3D grid), with their edges (none for `strokewidth = 0`). `color` is one
 colour, one value per column (drawn in `colormap`) or one colour per
-column; `shading` lights the surface. Modifies: `ax` (an `Axis3`). Returns `ax`.
+column; `shading` lights the surface, `smooth` across column edges (normals
+shared at the nodes; `false`: each column lit as a facet of its own; colours
+stay per column either way). Modifies: `ax` (an `Axis3`). Returns `ax`.
 """
 function plot_ve_surface! end
 

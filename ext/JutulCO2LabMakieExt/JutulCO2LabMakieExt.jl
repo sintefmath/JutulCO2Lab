@@ -7,6 +7,7 @@ where they are declared, in `src/plotting.jl`.
 module JutulCO2LabMakieExt
 
 using JutulCO2Lab, Makie
+using LinearAlgebra: cross, norm
 import JutulCO2Lab: plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!,
     plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure,
     plot_traps, plot_traps!, ve_axis3, plot_trapping_history, plot_trapping_history!
