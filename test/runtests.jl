@@ -61,7 +61,8 @@ function _capfringe_si_vs_mrst(d)
     cols, _ = ve_columns(mesh)
     ve = ve_domain(mesh, cols; perm_x = fill(1e-13, 1000), poro = fill(0.3, 1000))
     H, rw, rg = ve.geometry.H[1], d["srw"], d["src"]
-    fl = co2lab_ve_fluid(residual = (rw, rg), krmax = Tuple(vec(d["krmax"])),
+    fl = co2lab_ve_fluid(default_pvt = nothing,
+                         residual = (rw, rg), krmax = Tuple(vec(d["krmax"])),
                          wat_rho_ref = d["rhoW"], co2_rho_ref = d["rhoG"])
 
     # the model's plume heights, relperm and pcWG for (sG, sGmax)
@@ -99,7 +100,8 @@ end
 function _ve_well_vs_mrst_runs(d, ref_rate, ref_bhp, ref_src)
     ve, cols, sides = _ve_case(d)
     g, rho_w = d["gravity"], d["rhow"]
-    fluid = co2lab_ve_fluid(krmax = (1.0, 1.0), co2_rho_ref = d["rhoc"],
+    fluid = co2lab_ve_fluid(default_pvt = nothing,
+                            krmax = (1.0, 1.0), co2_rho_ref = d["rhoc"],
                             wat_rho_ref = rho_w, co2_mu_ref = d["muco2"],
                             wat_mu_ref = d["muw"])
     rc = (reference_pressure = d["p_ref"], compressibility = d["cf_rock"])
@@ -185,7 +187,8 @@ function _ve_reconstruction_vs_mrst(d)
 
     rep = OracleReport("VE reconstruction vs MRST co2lab")
     for (c, res) in enumerate(((0.0, 0.0), (0.2, 0.0), (0.2, 0.15)))
-        fl = co2lab_ve_fluid(residual = res, co2_rho_ref = 700, wat_rho_ref = 1050,
+        fl = co2lab_ve_fluid(default_pvt = nothing,
+                             residual = res, co2_rho_ref = 700, wat_rho_ref = 1050,
                              wat_rho_pvt = (4.3e-10, 100e5))
         r = d["case$c"]
         for k in axes(r["p"], 2)
@@ -267,7 +270,8 @@ end
 function _ve_bc_runs(d)
     ve, cols, sides = _ve_case(d)
     g, rhow, rhoc = d["gravity"], d["rhow"], d["rhoc"]
-    fluid = co2lab_ve_fluid(krmax = (1.0, 1.0), co2_rho_ref = rhoc, wat_rho_ref = rhow,
+    fluid = co2lab_ve_fluid(default_pvt = nothing,
+                            krmax = (1.0, 1.0), co2_rho_ref = rhoc, wat_rho_ref = rhow,
                             co2_mu_ref = d["muco2"], wat_mu_ref = d["muw"])
     rc = (reference_pressure = d["p_ref"], compressibility = d["cf_rock"])
 
@@ -324,7 +328,8 @@ function _ve_bc_runs(d)
     # with dissolution (Stage 4 item 5): CO2 is conserved when brine carries
     # its dissolved CO2 across (the default); co2lab's booking has no
     # dissolved part in the exiting CO2
-    fl_dis = co2lab_ve_fluid(krmax = (1.0, 1.0), co2_rho_ref = rhoc, wat_rho_ref = rhow,
+    fl_dis = co2lab_ve_fluid(default_pvt = nothing,
+                             krmax = (1.0, 1.0), co2_rho_ref = rhoc, wat_rho_ref = rhow,
                              co2_mu_ref = d["muco2"], wat_mu_ref = d["muw"],
                              dissolution = true, dis_rate = 3e-11, dis_max = 0.05)
     for mode in (:carry, :co2lab)
@@ -380,7 +385,8 @@ end
 # the same flow, BHPs differing by the CO2 column rho_CO2·g·H.
 function _ve_well_datum_runs(d, ve, col, r)
     geo, g, rhoc = ve.geometry, d["gravity"], d["rhoc"]
-    fluid = co2lab_ve_fluid(krmax = (1.0, 1.0), co2_rho_ref = rhoc,
+    fluid = co2lab_ve_fluid(default_pvt = nothing,
+                            krmax = (1.0, 1.0), co2_rho_ref = rhoc,
                             wat_rho_ref = d["rhow"], co2_mu_ref = d["muco2"],
                             wat_mu_ref = d["muw"])
     rc = (reference_pressure = d["p_ref"], compressibility = d["cf_rock"])
@@ -896,7 +902,7 @@ end
         inj = setup_well(domain, [nx - 3]; name = :inj)
         p0 = [1100.0 * 9.80665 * c[3] for c in eachcol(domain[:cell_centroids])]
 
-        fluid = co2lab_ve_fluid(wat_rho_pvt = (4.3e-10, 100e5),
+        fluid = co2lab_ve_fluid(default_pvt = nothing, wat_rho_pvt = (4.3e-10, 100e5),
                                 co2_rho_pvt = (4.3e-9, 100e5))
         rho_co2 = fluid.rho_ref[2]
 
@@ -931,13 +937,15 @@ end
             # unknowns by configuration (Stage 4): hysteresis with rate-driven
             # dissolution couples the two equations; instantaneous dissolution
             # (dis_rate 0 or Inf) has co2lab's switching unknown instead of sG, Rs
-            hd = co2lab_ve_fluid(residual = (0.2, 0.2), dissolution = true,
+            hd = co2lab_ve_fluid(default_pvt = nothing,
+                                 residual = (0.2, 0.2), dissolution = true,
                                  dis_rate = 1e-8)
             r = setup_co2lab_model(domain; fluid = hd)[:Reservoir]
             @test collect(keys(r.primary_variables)) == [:Pressure, :sG, :Rs, :sGmax]
             @test r.equations[:hysteresis].dissolution === r.equations[:dissolved_co2]
             for rate in (0.0, Inf)
-                inst = co2lab_ve_fluid(residual = (0.2, 0.2), dissolution = true,
+                inst = co2lab_ve_fluid(default_pvt = nothing,
+                                       residual = (0.2, 0.2), dissolution = true,
                                        dis_rate = rate)
                 @test instantaneous_dissolution(inst)
                 r = setup_co2lab_model(domain; fluid = inst)[:Reservoir]
@@ -946,7 +954,8 @@ end
                 @test r.equations[:hysteresis].dissolution isa
                       JutulCO2Lab.InstantDissolution
             end
-            @test_throws ErrorException co2lab_ve_fluid(co2_rho_pvt = (1, 2, 3, 4))
+            @test_throws ErrorException co2lab_ve_fluid(default_pvt = nothing,
+                                                        co2_rho_pvt = (1, 2, 3, 4))
 
             # the VE fluid needs column heights
             plain = reservoir_domain(mesh, permeability = 0.5Darcy, porosity = 0.25)
@@ -985,7 +994,7 @@ end
         end
 
         @testset "hysteresis (Stage 3): sGmax an unknown with co2lab's equation" begin
-            hfl = co2lab_ve_fluid(wat_rho_pvt = (4.3e-10, 100e5),
+            hfl = co2lab_ve_fluid(default_pvt = nothing, wat_rho_pvt = (4.3e-10, 100e5),
                                   co2_rho_pvt = (4.3e-9, 100e5), residual = (0.2, 0.2))
             model, states = run(fluid = hfl)
             r = model[:Reservoir]
@@ -1014,8 +1023,9 @@ end
             # path does, and a stand-in with the same formulas gives the same run
             kw = (wat_rho_pvt = (4.3e-10, 100e5), co2_rho_pvt = (4.3e-9, 100e5),
                   residual = (0.2, 0.2))
-            m1, s1 = run(fluid = co2lab_ve_fluid(; kw...))
-            m2, s2 = run(fluid = co2lab_ve_fluid(; vertical = _StandInSharp(), kw...))
+            m1, s1 = run(fluid = co2lab_ve_fluid(; default_pvt = nothing, kw...))
+            m2, s2 = run(fluid = co2lab_ve_fluid(; default_pvt = nothing,
+                                                 vertical = _StandInSharp(), kw...))
             dep(m, k) = Jutul.get_dependencies(m[:Reservoir].secondary_variables[k],
                                                m[:Reservoir])
             for k in (:PlumeHeights, :RelativePermeabilities)
@@ -1031,7 +1041,8 @@ end
         end
 
         @testset "capillary fringe (Stage 6 item 1): runs, conserves CO2" begin
-            ff = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = (0.4, 0.5),
+            ff = co2lab_ve_fluid(; default_pvt = nothing,
+                                 vertical = CapillaryFringeTable(; invPc3D = (0.4, 0.5),
                                                                    kr3D = 2),
                                  wat_rho_pvt = (4.3e-10, 100e5),
                                  co2_rho_pvt = (4.3e-9, 100e5))
@@ -1094,7 +1105,7 @@ end
 
         @testset "dissolution on (rate-driven): unknowns p, sG, rs" begin
             rs_sat = 0.03
-            dfl = co2lab_ve_fluid(wat_rho_pvt = (4.3e-10, 100e5),
+            dfl = co2lab_ve_fluid(default_pvt = nothing, wat_rho_pvt = (4.3e-10, 100e5),
                                   co2_rho_pvt = (4.3e-9, 100e5), dissolution = true,
                                   dis_rate = 2e-8, dis_max = rs_sat)
             model, st = run(fluid = dfl)
@@ -1137,7 +1148,7 @@ end
         @test JutulCO2Lab._well_datum_depth(geo1, 1, :bottom) == 1020.0
         @test_throws ArgumentError JutulCO2Lab._well_datum_depth(geo1, 1, :top)
 
-        fl = co2lab_ve_fluid(co2_rho_ref = 700)
+        fl = co2lab_ve_fluid(default_pvt = nothing, co2_rho_ref = 700)
         c = co2_injector_control(TotalRateTarget(1.0), fl)
         @test c.injection_mixture == [0.0, 1.0]
         @test c.mixture_density == 700.0
@@ -1234,7 +1245,8 @@ end
     @testset "Leverett-scaled fringe ('P-K-scaled table', corrected)" begin
         J = JutulCO2Lab
         invJ = x -> (0.5 / (x + 0.5))^2
-        fl = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = invJ,
+        fl = co2lab_ve_fluid(; default_pvt = nothing,
+                             vertical = CapillaryFringeTable(; invPc3D = invJ,
                                                                kr3D = 2,
                                                                leverett = true),
                              co2_rho_ref = 700.0, wat_rho_ref = 1000.0)
@@ -1262,7 +1274,8 @@ end
         # with and without entry pressure
         for invpc in (p -> 0.8 * (pe / max(p, pe))^2 + 0.2,
                       p -> 0.8 * (pe / (max(p, 0.0) + pe))^2 + 0.2)
-            fl = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = invpc),
+            fl = co2lab_ve_fluid(; default_pvt = nothing,
+                                 vertical = CapillaryFringeTable(; invPc3D = invpc),
                                  residual = (0.2, 0.0))
             m = J._vertical_model(fl.vertical, Dict(:column_height => [H]), fl)
             St = m.touched
@@ -1350,7 +1363,7 @@ end
 
         # a run: CO2 conserved, and no dependency on the densities
         ve = ve_domain(mesh, cols; perm_x = perm, poro)
-        fl = co2lab_ve_fluid(; vertical = m, residual = (rw, rg),
+        fl = co2lab_ve_fluid(; default_pvt = nothing, vertical = m, residual = (rw, rg),
                              wat_rho_pvt = (4.3e-10, 100e5),
                              co2_rho_pvt = (4.3e-9, 100e5))
         well = setup_ve_well(ve, 4; name = :inj)
@@ -1378,12 +1391,90 @@ end
         other = SharpInterfaceIntegrated(small, ve_columns(small)[1];
                                          poro = fill(0.2, 20), perm_x = fill(1e-13, 20))
         @test_throws ErrorException setup_co2lab_model(ve.domain;
-            fluid = co2lab_ve_fluid(; vertical = other))
+            fluid = co2lab_ve_fluid(; default_pvt = nothing, vertical = other))
+    end
+
+    @testset "tabulated PVT (Stage 7)" begin
+        J = JutulCO2Lab
+        # co2lab's sampled CO2 tables, interpolated as co2lab does
+        # (mrst_dump_co2_tables.m evaluates them under Octave)
+        dump = joinpath(@__DIR__, "..", "..", "analysis", "reference-data",
+                        "co2lab_co2_tables.mat")
+        tdir = joinpath(@__DIR__, "..", "..", "..", "mrst", "core", "examples", "data",
+                        "CO2lab_Sampled_Tables")
+        if isfile(dump) && isdir(tdir)
+            d = matread(dump)
+            rho = co2lab_sampled_table(co2lab_table_file(tdir, :density))
+            mu = co2lab_sampled_table(co2lab_table_file(tdir, :viscosity))
+            p, T = vec(d["p"]), vec(d["T"])
+            @test maximum(abs.([rho(pi, Ti) for pi in p, Ti in T] .- d["rho"]) ./
+                          d["rho"]) < 1e-12
+            @test maximum(abs.([mu(pi, Ti) for pi in p, Ti in T] .- d["mu"]) ./
+                          d["mu"]) < 1e-12
+            # JutulDarcy's CSP11 CO2 viscosity is NIST-consistent, as co2lab's
+            jd = jutuldarcy_property_tables()
+            @test abs(jd.viscosity[2](20e6, 343.15) / mu(20e6, 343.15) - 1) < 0.02
+        else
+            @warn "co2lab's tables or their dump not found; table checks skipped"
+        end
+
+        # the fluid's defaults: JutulDarcy's tables, surface densities, and
+        # co2lab's default dissolution capacity as a mass ratio
+        fl = co2lab_ve_fluid()
+        @test needs_temperature(fl) && all(x -> x isa PhaseTable, (fl.rho_pvt...,
+                                                                   fl.mu_pvt...))
+        @test fl.rho_ref == (998.207150, 1.868048)
+        @test fl.dis_max * fl.rho_ref[2] / fl.rho_ref[1] ≈ 0.03 * 760 / 1100
+        @test co2lab_ve_fluid(; default_pvt = nothing).dis_max == 0.03
+        @test co2lab_ve_fluid(; dis_max_mass = 0.05).dis_max ≈
+              0.05 * 998.20715 / 1.868048
+        # reference densities at reservoir conditions, from the tables
+        rc = co2lab_ve_fluid(; reference_conditions = (20e6, 343.15))
+        @test rc.rho_ref[2] ≈ rc.rho_pvt[2](20e6, 343.15)
+        # a reference value without its property model is refused
+        @test_throws ErrorException co2lab_ve_fluid(; co2_rho_ref = 700.0)
+        @test_throws ErrorException co2lab_ve_fluid(; dis_max = 0.03,
+                                                    dis_max_mass = 0.02)
+        # salinity needs the Salo correlations
+        @test_throws ErrorException jutuldarcy_property_tables(;
+            salt_names = ["NaCl"], salt_mole_fractions = [0.01])
+        # mixed: tabulated CO2, co2lab's constant brine
+        mix = co2lab_ve_fluid(; wat_rho_pvt = nothing, wat_mu_pvt = nothing)
+        @test mix.rho_ref[1] == 1100.0 && mix.rho_pvt[1] == (0.0, 0.0)
+
+        # a run with a geothermal gradient: temperatures per column and in the
+        # well, CO2 conserved, and the CO2 density following the temperature
+        mesh = _cp_mesh(4, 3, (i, k) -> 1500.0 + 4.0 * i + 5.0 * (k - 1))
+        cols, _ = ve_columns(mesh)
+        grad = geothermal_gradient(T_ref = 283.15, gradient = 0.03)
+        ve = ve_domain(mesh, cols; perm_x = fill(1e-13, 12), poro = fill(0.2, 12),
+                       temperature = grad)
+        @test ve.domain[:temperature] ≈ grad.(ve.geometry.z_top)
+        well = setup_ve_well(ve, 4; name = :inj)
+        model = setup_co2lab_model(ve.domain; wells = [well], fluid = fl)
+        prm = setup_parameters(model)
+        @test prm[:inj][:Temperature] ≈ fill(ve.domain[:temperature][4], 1)
+        q = 0.5 / fl.rho_ref[2]
+        on = setup_reservoir_forces(model; control = Dict(:inj => co2_injector_control(
+                                        TotalRateTarget(q), fl)))
+        p0 = ve_hydrostatic_pressure(ve.geometry; rho_w = 1000.0)
+        case = JutulCase(model, fill(10 * 86400.0, 3), fill(on, 3); parameters = prm,
+                         state0 = setup_co2lab_state(model; pressure = p0, forces = on))
+        sim, cfg = setup_co2lab_simulator(case; info_level = -1)
+        res = simulate_reservoir(case; simulator = sim, config = cfg)
+        injected = 3 * 10 * 86400.0 * 0.5
+        # the CO2 not in the reservoir is in the wellbore, which fills further
+        # as the pressure rises
+        missing_co2 = injected - sum(res.states[end][:TotalMasses][2, :])
+        @test 0 <= missing_co2 <= sum(res.result.states[end][:inj][:TotalMasses][2, :])
+        b(T) = J._shrinkage(fl, 20e6, T)[2]
+        @test b(320.0) > b(360.0)
     end
 
     @testset "inventory split of a fringe column (Stage 6 item 1)" begin
         J = JutulCO2Lab
-        fl = co2lab_ve_fluid(; vertical = CapillaryFringeTable(; invPc3D = (0.4, 0.5),
+        fl = co2lab_ve_fluid(; default_pvt = nothing,
+                             vertical = CapillaryFringeTable(; invPc3D = (0.4, 0.5),
                                                                kr3D = 2),
                              residual = (0.2, 0.2), co2_rho_ref = 700.0,
                              wat_rho_ref = 1020.0)
@@ -1654,9 +1745,12 @@ end
                    co2_rho_pvt = (4.3e-9, 150e5), wat_rho_pvt = (4.3e-10, 100e5),
                    co2_mu_pvt = (2e-9, 150e5))
             # (fluid, caprock rugosity dh): rugosity is a grid property here
-            cases = [(co2lab_ve_fluid(; residual = (0.0, 0.0), pvt...), 0.0),
-                     (co2lab_ve_fluid(; residual = (0.27, 0.20), pvt...), 0.0),
-                     (co2lab_ve_fluid(; residual = (0.27, 0.20), krmax = (0.9, 0.7),
+            cases = [(co2lab_ve_fluid(; default_pvt = nothing,
+                                      residual = (0.0, 0.0), pvt...), 0.0),
+                     (co2lab_ve_fluid(; default_pvt = nothing,
+                                      residual = (0.27, 0.20), pvt...), 0.0),
+                     (co2lab_ve_fluid(; default_pvt = nothing,
+                                      residual = (0.27, 0.20), krmax = (0.9, 0.7),
                                       pvt...), 2.0)]
             # the dump's pore-volume multiplier: 1e-5 /bar about 100 bar
             pv_rock = JutulCO2Lab.LinearPoreVolume(100e5, 1e-10)

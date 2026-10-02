@@ -85,77 +85,165 @@ _vertical_model(spec::VerticalModel, domain, fluid) = spec
 
 """
     co2lab_ve_fluid(; vertical = SharpInterface(), residual = (0.0, 0.0),
-                      krmax = (-1.0, -1.0), co2_rho_ref = 760.0, wat_rho_ref = 1100.0,
-                      co2_rho_pvt = nothing, wat_rho_pvt = nothing,
-                      co2_mu_ref = 6e-5, wat_mu_ref = 8e-4,
-                      co2_mu_pvt = nothing, wat_mu_pvt = nothing,
-                      dissolution = false, dis_rate = 0.0, dis_max = 0.03)
+                      krmax = (-1.0, -1.0),
+                      co2_rho_pvt = :table, wat_rho_pvt = :table,
+                      co2_mu_pvt = :table, wat_mu_pvt = :table,
+                      co2_rho_ref = nothing, wat_rho_ref = nothing,
+                      co2_mu_ref = nothing, wat_mu_ref = nothing,
+                      default_pvt = :table, tables = (;),
+                      reference_conditions = nothing, dissolution = false,
+                      dis_rate = 0.0, dis_max = nothing, dis_max_mass = nothing)
         -> CO2LabVEFluid
 
-co2lab's VE fluid, with `makeVEFluid`'s option names and defaults, so an MRST
-case translates one to one:
+co2lab's VE fluid, with `makeVEFluid`'s option names, so an MRST case
+translates one to one:
 - `vertical`: the [`VerticalModel`](@ref), makeVEFluid's relperm model —
   [`SharpInterface`](@ref) for `'sharp_interface_simple'`;
 - `residual = (res_water, res_gas)`; `krmax = (krw, krg)`: `krw` the brine
   relperm in the residual-CO2 zone (brine below it has relperm 1), `krg` the
   CO2 relperm in the plume; a negative value means one minus the other
   phase's residual saturation;
-- `*_rho_ref`: reference densities, which are also the black-oil "surface"
-  densities (so `b = ρ(p)/ρ_ref`);
-- `*_rho_pvt`, `*_mu_pvt`: `nothing` (constant) or `(c, p_ref)` for
-  `ref·(1 + c·(p − p_ref))`. co2lab's third option, a sampled EOS table (and
-  its default for CO2 density), is not supported.
+- `*_rho_pvt`, `*_mu_pvt`: each phase's density and viscosity —
+  `:table` (default): JutulDarcy's CO2–brine tables in pressure and
+  temperature (see [`jutuldarcy_property_tables`](@ref), configured by
+  `tables`, e.g. `tables = (co2_source = :salo24, salt_names = ["NaCl"],
+  salt_mole_fractions = [0.01])`); a [`PhaseTable`](@ref) (e.g. co2lab's,
+  [`co2lab_sampled_table`](@ref)); `(c, p_ref)` for co2lab's linear
+  `ref·(1 + c·(p − p_ref))`; `nothing` for constant. Tabulated properties
+  take the temperature of each column (`ve_domain(...; temperature)`).
+  `default_pvt` is what a property not given means: `:table`, or `nothing`
+  (co2lab's constant; as before Stage 7, for ports of co2lab cases).
+- `*_rho_ref`: reference densities, the black-oil "surface" densities
+  (`b = ρ/ρ_ref`). For a linear or constant density the density at `p_ref`
+  (default co2lab's: CO2 760, brine 1100 kg/m³). For a tabulated one only the
+  scale of `b` and of the dissolved-CO2 ratio (below): default JutulDarcy's
+  surface densities (CO2 1.868, brine 998.2 kg/m³), or the table's densities
+  at `reference_conditions = (p, T)`.
+- `*_mu_ref`: constant or linear viscosities only (default co2lab's: CO2
+  6e-5, brine 8e-4 Pa·s).
 - `dissolution`, `dis_rate`, `dis_max`: CO2 dissolution into brine, with
-  `dis_max` the saturated dissolved-CO2 ratio `rs` (surface volume of CO2 per
-  surface volume of brine). `dis_rate = 0` or `Inf`: instantaneous (brine
-  saturated wherever CO2 is present); otherwise rate-driven, with co2lab's
-  transfer rule (`computeDissolutionTransfer`).
+  `dis_max` the saturated dissolved-CO2 ratio `rs`: the volume of the
+  dissolved CO2 at `co2_rho_ref` per volume of brine at `wat_rho_ref`
+  (black-oil "surface" volumes, co2lab's convention), i.e. a mass ratio of
+  `rs · co2_rho_ref / wat_rho_ref` kg CO2 per kg brine. Or give that mass
+  ratio as `dis_max_mass`. Default: co2lab's, `dis_max = 0.03` at its
+  reference densities, ≈ 0.0207 kg/kg (whatever the reference densities).
+  `dis_rate = 0` or `Inf`: instantaneous (brine saturated wherever CO2 is
+  present); otherwise rate-driven, with co2lab's transfer rule
+  (`computeDissolutionTransfer`).
 
-Returns a new `CO2LabVEFluid`, with the endpoints resolved.
+With `default_pvt = :table`, a reference value given without its `*_pvt` is
+refused: state `*_pvt` (`nothing` for co2lab's constant property). Returns a
+new `CO2LabVEFluid`, with the endpoints, properties and reference values
+resolved.
 """
 function co2lab_ve_fluid(; vertical::VerticalModel = SharpInterface(),
                            residual = (0.0, 0.0), krmax = (-1.0, -1.0),
-                           co2_rho_ref = 760.0, wat_rho_ref = 1100.0,
-                           co2_rho_pvt = nothing, wat_rho_pvt = nothing,
-                           co2_mu_ref = 6e-5, wat_mu_ref = 8e-4,
-                           co2_mu_pvt = nothing, wat_mu_pvt = nothing,
-                           dissolution::Bool = false, dis_rate = 0.0, dis_max = 0.03)
+                           co2_rho_pvt = missing, wat_rho_pvt = missing,
+                           co2_mu_pvt = missing, wat_mu_pvt = missing,
+                           co2_rho_ref = nothing, wat_rho_ref = nothing,
+                           co2_mu_ref = nothing, wat_mu_ref = nothing,
+                           default_pvt = :table, tables = (;),
+                           reference_conditions = nothing,
+                           dissolution::Bool = false, dis_rate = 0.0, dis_max = nothing,
+                           dis_max_mass = nothing)
     # makeVEFluid's rugosity goes to ve_domain, pvMult_* to setup_co2lab_model
     rw, rg = Float64.(residual)
     krw = krmax[1] < 0 ? 1 - rg : Float64(krmax[1])
     krg = krmax[2] < 0 ? 1 - rw : Float64(krmax[2])
-    lin = _linear_pvt
 
-    return CO2LabVEFluid(vertical, rw, rg, krw, krg,
-                         (Float64(wat_rho_ref), Float64(co2_rho_ref)),
-                         (lin(wat_rho_pvt), lin(co2_rho_pvt)),
-                         (Float64(wat_mu_ref), Float64(co2_mu_ref)),
-                         (lin(wat_mu_pvt), lin(co2_mu_pvt)),
-                         dissolution, Float64(dis_rate), Float64(dis_max))
+    # each phase property: tabulated (JutulDarcy's by default) or co2lab's
+    jd = Ref{Any}(nothing)
+    jd_tables() = isnothing(jd[]) ? (jd[] = jutuldarcy_property_tables(; tables...)) :
+                  jd[]
+    spec(x, ref, name, jd) = _pvt_spec(x, ref, name, jd, default_pvt)
+    rho = (spec(wat_rho_pvt, wat_rho_ref, "wat_rho", () -> jd_tables().density[1]),
+           spec(co2_rho_pvt, co2_rho_ref, "co2_rho", () -> jd_tables().density[2]))
+    mu = (spec(wat_mu_pvt, wat_mu_ref, "wat_mu", () -> jd_tables().viscosity[1]),
+          spec(co2_mu_pvt, co2_mu_ref, "co2_mu", () -> jd_tables().viscosity[2]))
+
+    rho_ref = _reference_densities(rho, (wat_rho_ref, co2_rho_ref), reference_conditions)
+    mu_ref = _reference_viscosities(mu, (wat_mu_ref, co2_mu_ref))
+    dmax = _dis_max(dis_max, dis_max_mass, rho_ref)
+    return CO2LabVEFluid(vertical, rw, rg, krw, krg, rho_ref, rho, mu_ref, mu,
+                         dissolution, Float64(dis_rate), dmax)
+end
+
+# One phase property: `missing` (not given) is `default`, a table only if its
+# reference value is not given; `:table` JutulDarcy's (`jd()`); `nothing` or
+# `(c, p_ref)` linear
+function _pvt_spec(spec, ref, name, jd, default)
+    if ismissing(spec) && default !== :table
+        spec = default
+    elseif ismissing(spec)
+        isnothing(ref) ||
+            error("$(name)_ref given without $(name)_pvt: state $(name)_pvt " *
+                  "(nothing for constant, (c, p_ref), :table or a PhaseTable)")
+        spec = :table
+    end
+    spec === :table && return jd()
+    spec isa PhaseTable && return spec
+    return _linear_pvt(spec)
+end
+
+# Reference densities: given; for a table its densities at
+# `conditions = (p, T)`, else JutulDarcy's surface densities; for a linear or
+# constant density co2lab's defaults
+function _reference_densities(rho, given, conditions)
+    surface, co2lab = (998.207150, 1.868048), (1100.0, 760.0)
+    return ntuple(2) do ph
+        isnothing(given[ph]) || return Float64(given[ph])
+        rho[ph] isa PhaseTable || return co2lab[ph]
+        isnothing(conditions) ? surface[ph] : Float64(rho[ph](conditions...))
+    end
+end
+
+# Reference viscosities: co2lab's defaults; none (NaN) for a table
+function _reference_viscosities(mu, given)
+    return ntuple(2) do ph
+        if mu[ph] isa PhaseTable
+            isnothing(given[ph]) || error("a reference viscosity is given for a " *
+                                          "tabulated viscosity")
+            return NaN
+        end
+        return isnothing(given[ph]) ? (8e-4, 6e-5)[ph] : Float64(given[ph])
+    end
+end
+
+# The saturated dissolved-CO2 ratio rs: given, from a mass ratio, or co2lab's
+# default capacity (0.03 at its reference densities 760, 1100)
+function _dis_max(dis_max, dis_max_mass, (rhoW, rhoG))
+    isnothing(dis_max) || isnothing(dis_max_mass) ||
+        error("give dis_max or dis_max_mass, not both")
+    isnothing(dis_max) || return Float64(dis_max)
+    mass = something(dis_max_mass, 0.03 * 760.0 / 1100.0)
+    # a mass ratio m_CO2/m_brine is rs·ρ_CO2,ref/ρ_brine,ref
+    (rhoW, rhoG) == (1100.0, 760.0) && isnothing(dis_max_mass) && return 0.03
+    return Float64(mass) * rhoW / rhoG
 end
 
 """
     CO2LabVEFluid
 
 Settings of co2lab's VE fluid; build with [`co2lab_ve_fluid`](@ref). Phase
-order in all tuples: (brine, CO2). The type parameter is that of the
-vertical model. `rho_pvt`/`mu_pvt` hold `(c, p_ref)` per
-phase, `(0.0, 0.0)` for a constant property. `dissolution`, `dis_rate`,
-`dis_max` as makeVEFluid's options.
+order in all tuples: (brine, CO2). Type parameters: the vertical model, and
+the density and viscosity specifications. `rho_pvt`/`mu_pvt` hold per phase
+`(c, p_ref)` (linear; `(0.0, 0.0)` for constant) or a [`PhaseTable`](@ref).
+`dissolution`, `dis_rate`, `dis_max` as makeVEFluid's options.
 """
-struct CO2LabVEFluid{M <: VerticalModel}
-    vertical::M                               # vertical model (specification)
-    res_water::Float64                        # residual brine saturation
-    res_gas::Float64                          # residual CO2 saturation
-    krw::Float64                              # brine relperm in the residual-CO2 zone
-    krg::Float64                              # CO2 relperm in the plume
-    rho_ref::NTuple{2, Float64}               # reference ("surface") densities
-    rho_pvt::NTuple{2, NTuple{2, Float64}}    # (c, p_ref): ρ_ref·(1 + c·(p − p_ref))
-    mu_ref::NTuple{2, Float64}                # reference viscosities
-    mu_pvt::NTuple{2, NTuple{2, Float64}}     # (c, p_ref), as rho_pvt
-    dissolution::Bool                         # CO2 dissolves into brine
-    dis_rate::Float64                         # dissolution rate; 0 or Inf: instantaneous
-    dis_max::Float64                          # saturated dissolved-CO2 ratio rs
+struct CO2LabVEFluid{M <: VerticalModel, R, U}
+    vertical::M                  # vertical model (specification)
+    res_water::Float64           # residual brine saturation
+    res_gas::Float64             # residual CO2 saturation
+    krw::Float64                 # brine relperm in the residual-CO2 zone
+    krg::Float64                 # CO2 relperm in the plume
+    rho_ref::NTuple{2, Float64}  # reference ("surface") densities
+    rho_pvt::R                   # densities: (c, p_ref) or PhaseTable, per phase
+    mu_ref::NTuple{2, Float64}   # reference viscosities (NaN for a table)
+    mu_pvt::U                    # viscosities, as rho_pvt
+    dissolution::Bool            # CO2 dissolves into brine
+    dis_rate::Float64            # dissolution rate; 0 or Inf: instantaneous
+    dis_max::Float64             # saturated rs
 end
 
 """
@@ -167,12 +255,14 @@ Whether `fluid` has dissolution with co2lab's instantaneous mode (`dis_rate`
 instantaneous_dissolution(f::CO2LabVEFluid) =
     f.dissolution && (f.dis_rate == 0 || isinf(f.dis_rate))
 
-# `nothing` → constant; (c, p_ref) → linear; a 4-entry table spec is refused.
+# `nothing` → constant; (c, p_ref) → linear; makeVEFluid's 4-entry table spec
+# is refused (its tables: co2lab_sampled_table).
 function _linear_pvt(spec)
     isnothing(spec) && return (0.0, 0.0)
     length(spec) == 2 ||
-        error("co2lab's sampled PVT tables ($spec) are not supported; " *
-              "give nothing (constant) or (c, p_ref) (linear)")
+        error("makeVEFluid's table range ($spec) is not taken; give :table " *
+              "(JutulDarcy's), co2lab_sampled_table(file), nothing (constant) " *
+              "or (c, p_ref) (linear)")
     return (Float64(spec[1]), Float64(spec[2]))
 end
 
@@ -271,15 +361,25 @@ _untouched_brine(::VerticalModel, i, smax, h_max, H, drho) = (H - _min_c(h_max, 
 _linear(ref, (c, p_ref), p) = ref * (1 + c * (p - p_ref))
 
 """
-    _density_difference(fluid, p, rs) -> Real
+    _shrinkage(fluid, p, T) -> (bW, bG)
 
-Brine minus CO2 density at pressure `p` with dissolved-CO2 ratio `rs`, as
-the model's black-oil densities (`update_bo_densities!`): the brine carries
-its dissolved CO2.
+The fluid's shrinkage factors `b = ρ(p, T)/ρ_ref` (brine, CO2) at pressure `p`
+and temperature `T` (ignored by linear properties).
 """
-function _density_difference(fluid::CO2LabVEFluid, p, rs)
-    (ρW, ρG), (pvt_w, pvt_g) = fluid.rho_ref, fluid.rho_pvt
-    return _linear(1.0, pvt_w, p) * (ρW + rs * ρG) - _linear(1.0, pvt_g, p) * ρG
+_shrinkage(fluid::CO2LabVEFluid, p, T) =
+    ntuple(ph -> _phase_value(fluid.rho_ref[ph], fluid.rho_pvt[ph], p, T) /
+                 fluid.rho_ref[ph], 2)
+
+"""
+    _density_difference(fluid, p, rs, T = nothing) -> Real
+
+Brine minus CO2 density at pressure `p`, dissolved-CO2 ratio `rs` and
+temperature `T`, as the model's black-oil densities (`update_bo_densities!`):
+the brine carries its dissolved CO2.
+"""
+function _density_difference(fluid::CO2LabVEFluid, p, rs, T = nothing)
+    (ρW, ρG), (bW, bG) = fluid.rho_ref, _shrinkage(fluid, p, T)
+    return bW * (ρW + rs * ρG) - bG * ρG
 end
 
 # ------------------------------ Jutul variables -------------------------------
@@ -513,12 +613,29 @@ end
 """
     _co2lab_pvt(fluid) -> (shrinkage, viscosity)
 
-co2lab's PVT as Jutul variables: `b = 1 + c·(p − p_ref)` per phase (the
-reference density is the "surface" density), and linear or constant
-viscosities. Returns new variable objects; `fluid` is only read.
+The fluid's PVT as Jutul variables: with tabulated properties `PVTShrinkage`
+and `PVTViscosities` (pressure and temperature); otherwise co2lab's linear
+`b = 1 + c·(p − p_ref)` per phase (the reference density is the "surface"
+density) and linear or constant viscosities (pressure only). Returns new
+variable objects; `fluid` is only read.
 """
 function _co2lab_pvt(fluid::CO2LabVEFluid)
-    (cw, pw), (cg, pg) = fluid.rho_pvt
-    b = LinearShrinkage((1.0, 1.0), (cw, cg), (pw, pg))
-    return (b, LinearViscosities(fluid.mu_ref, fluid.mu_pvt))
+    rho, mu = fluid.rho_pvt, fluid.mu_pvt
+    if _tabulated(rho...)
+        b = PVTShrinkage(fluid.rho_ref, rho)
+    else
+        (cw, pw), (cg, pg) = rho
+        b = LinearShrinkage((1.0, 1.0), (cw, cg), (pw, pg))
+    end
+    visc = _tabulated(mu...) ? PVTViscosities(fluid.mu_ref, mu) :
+                               LinearViscosities(fluid.mu_ref, mu)
+    return (b, visc)
 end
+
+"""
+    needs_temperature(fluid) -> Bool
+
+Whether `fluid` has a tabulated property, and so needs each column's
+temperature (`ve_domain(...; temperature)`; 30 °C where none is given).
+"""
+needs_temperature(f::CO2LabVEFluid) = _tabulated(f.rho_pvt..., f.mu_pvt...)

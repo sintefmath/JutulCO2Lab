@@ -10,7 +10,7 @@ function _inventory_case_model(c)
     case = atlas_ve_domain(c["name"]; coarsening = Int(c["coarsening"]),
                            co2lab_compatible = true, min_thickness = 0.0,
                            rugosity = c["rugosity"])
-    fluid = co2lab_ve_fluid(residual = (c["srw"], c["srg"]),
+    fluid = co2lab_ve_fluid(default_pvt = nothing, residual = (c["srw"], c["srg"]),
                             co2_rho_ref = c["rho_co2"], wat_rho_ref = c["rho_w"],
                             co2_rho_pvt = Tuple(vec(c["co2_rho_pvt"])),
                             wat_rho_pvt = Tuple(vec(c["wat_rho_pvt"])),

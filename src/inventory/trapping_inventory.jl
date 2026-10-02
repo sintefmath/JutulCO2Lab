@@ -18,7 +18,8 @@ const TRAPPING_CATEGORIES = (:dissolved, :structural_residual, :residual,
 # What the inventory needs per column besides the state: static pore volume,
 # height, rugosity (the grid's, if it has one), trap height (from the trap
 # analysis `res` on the trap surface `s`), the pressure dependence of pore
-# volume, and the column-specific vertical model
+# volume, the temperature (tabulated properties) and the column-specific
+# vertical model
 function _inventory_columns(model, fluid::CO2LabVEFluid, s, res)
     rmodel = JutulDarcy.reservoir_model(model)
     domain = JutulDarcy.reservoir_domain(rmodel)
@@ -31,7 +32,9 @@ function _inventory_columns(model, fluid::CO2LabVEFluid, s, res)
     # the height below the caprock that lies in a trap (co2lab's zt)
     spill(r) = r == 0 ? 0.0 : res.trap_z[r]
     zt = [min(max(spill(r) - z, 0.0), h) for (r, z, h) in zip(res.trap_regions, s.zc, H)]
-    return (pv = JutulDarcy.pore_volume(domain), H = H, dh = dh, zt = zt,
+    T = haskey(domain, :temperature, Cells()) ? domain[:temperature] :
+        fill(Jutul.default_value(nothing, JutulDarcy.Temperature()), length(H))
+    return (pv = JutulDarcy.pore_volume(domain), H = H, dh = dh, zt = zt, T = T,
             pv_mult = _pore_volume_multiplier(rmodel),
             vertical = _vertical_model(fluid.vertical, domain, fluid))
 end
@@ -88,21 +91,21 @@ end
 # The inventory of a state with the column properties `col` already assembled
 function _trapping_inventory(state, fluid, col; co2lab_compatible::Bool = false)
     rw, rg = fluid.res_water, fluid.res_gas
-    (cw, pw), (cg, pg) = fluid.rho_pvt
     p, S, Smax = state[:Pressure], state[:sG], state[:sGmax]
     # no Rs in the state: a model without dissolution
     rs = haskey(state, :Rs) ? state[:Rs] : zeros(length(p))
 
-    # pore volume and CO2 density at the state's pressure
+    # pore volume and CO2 density at the state's pressure (and temperature)
     pv = col.pv .* col.pv_mult.(p)
     rho_ref = fluid.rho_ref[2]
-    mfac = pv .* rho_ref .* (1 .+ cg .* (p .- pg))
+    b = [_shrinkage(fluid, p[i], col.T[i]) for i in eachindex(p)]
+    mfac = pv .* rho_ref .* last.(b)
     # brine expansion factor: rs is surface CO2 per surface brine volume
-    bW = 1 .+ cw .* (p .- pw)
+    bW = first.(b)
 
     # heights from the vertical model, at each column's density difference
     m = col.vertical
-    drho = [_density_difference(fluid, p[i], rs[i]) for i in eachindex(p)]
+    drho = [_density_difference(fluid, p[i], rs[i], col.T[i]) for i in eachindex(p)]
     hh = [_column_heights(m, i, S[i], Smax[i], col.H[i], drho[i], rw, rg)
           for i in eachindex(S)]
     c = _category_saturations(m, S, Smax, first.(hh), last.(hh), col, drho, rw, rg;

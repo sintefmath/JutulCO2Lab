@@ -126,6 +126,10 @@ function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid;
     p, sG, sGmax = state[:Pressure], state[:sG], state[:sGmax]
     rs_ve = haskey(state, :Rs) ? state[:Rs] : zeros(length(p))
     m = _vertical_model(fluid.vertical, ve.domain, fluid)
+    # the columns' temperatures (tabulated properties), 30 °C where none
+    d = ve.domain
+    T = haskey(d, :temperature, Cells()) ? d[:temperature] :
+        fill(Jutul.default_value(nothing, JutulDarcy.Temperature()), length(p))
     nc = length(columns.cells)
     out = (pressure = zeros(nc), sG = zeros(nc), sGmax = zeros(nc))
 
@@ -133,13 +137,13 @@ function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid;
         r = columns.pos[col]:(columns.pos[col+1] - 1)
         cells = columns.cells[r]
 
-        drho = _density_difference(fluid, p[col], rs_ve[col])
+        drho = _density_difference(fluid, p[col], rs_ve[col], T[col])
         h, h_max = _column_heights(m, col, sG[col], sGmax[col], geo.H[col], drho, rw, rg)
         s, smax = _fine_saturations(m, col, view(geo.z, r), h, h_max, drho, rw, rg)
         out.sG[cells], out.sGmax[cells] = s, smax
 
         # brine density at the caprock pressure, as co2lab's fluid.rhoW(pVE)
-        rho_w = fluid.rho_ref[1] * _linear(1.0, fluid.rho_pvt[1], p[col])
+        rho_w = fluid.rho_ref[1] * first(_shrinkage(fluid, p[col], T[col]))
         g = Jutul.gravity_constant
         out.pressure[cells] = p[col] .+ rho_w * g .* (geo.z_cell[r] .- geo.z_top[col])
     end

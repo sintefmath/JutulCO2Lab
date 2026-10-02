@@ -32,7 +32,7 @@ geo = ve.geometry
 
 # ---------- 3. Fluid (sharp interface, constant densities) and rock -----------
 
-fluid = co2lab_ve_fluid(krmax = (1.0, 1.0),
+fluid = co2lab_ve_fluid(default_pvt = nothing, krmax = (1.0, 1.0),
                         co2_rho_ref = rho_co2, wat_rho_ref = rho_w,
                         co2_mu_ref = d["muco2"], wat_mu_ref = d["muw"])
 

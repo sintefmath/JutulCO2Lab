@@ -43,7 +43,8 @@ modes = (without = nothing, rate_driven = 3e-11, instantaneous = 0.0)
 function make_fluid(dis_rate)
     dis = isnothing(dis_rate) ? (;) :
           (dissolution = true, dis_rate = dis_rate, dis_max = dis_max)
-    return co2lab_ve_fluid(; residual = (srw, srg), krmax = (1.0, (1 - srw)^2),
+    return co2lab_ve_fluid(; default_pvt = nothing,
+                           residual = (srw, srg), krmax = (1.0, (1 - srw)^2),
                            co2_rho_ref = rho_co2, wat_rho_ref = rho_w,
                            co2_mu_ref = d["muco2"], wat_mu_ref = d["muw"], dis...)
 end

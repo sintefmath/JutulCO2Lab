@@ -75,13 +75,17 @@ end
 
 """
     ve_domain(mesh, columns; perm_x, perm_y = nothing, poro, ntg = nothing,
-              rugosity = 0.0) -> NamedTuple
+              rugosity = 0.0, temperature = nothing) -> NamedTuple
 
 Build the VE reservoir domain: a `CoarseMesh` over `mesh`, one block per
 column, with thickness-averaged rock and the gravity term taken from the
 caprock. `rugosity` is the caprock rugosity `dh` (m) — co2lab's makeVEFluid
 option, a property of the grid here — as a scalar or one value per column;
 the relperm loses an accretion layer `min(dh, H)` under the caprock.
+`temperature` (K) is the formation's at the caprock, for tabulated fluid
+properties (co2lab's `reservoirT`): a scalar, one value per column, or a
+function of depth evaluated at each column's caprock (e.g.
+[`geothermal_gradient`](@ref)); `nothing` leaves it to the model (30 °C).
 
 Stacked columns (`ve_columns(...; below_holes = :stack)`) are built fully:
 coarse faces between stacked columns of one pillar (sealed by construction)
@@ -93,7 +97,7 @@ rejects it).
 Returns the NamedTuple `(domain, coarse, geometry, rock)`, all new:
 - `domain`: the `DataDomain` on the `CoarseMesh` (from `reservoir_domain`),
   with the averaged `:permeability`, `:porosity` (and `:net_to_gross`),
-  `:column_height` and `:rugosity` per column, `:is_ve` (all true: fine
+  `:column_height`, `:rugosity` (and `:temperature`) per column, `:is_ve` (all true: fine
   cells are Stage 12) and `:pillar_columns` (number of columns in the
   column's pillar; 1 unless stacked), and `:gdz` on `Faces()` from the
   caprock depths; `:transmissibilities` only if stacked columns need sealed
@@ -117,7 +121,7 @@ Deliberately **not** done, and why:
   roadmap Stage 1 item 7.
 """
 function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing, poro,
-                   ntg = nothing, rugosity = 0.0)
+                   ntg = nothing, rugosity = 0.0, temperature = nothing)
     geometry = ve_column_geometry(mesh, columns)
     rock = ve_average_rock(columns, geometry.dz; perm_x, perm_y, poro, ntg)
 
@@ -135,11 +139,30 @@ function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing, poro,
                                  collect(Float64, rugosity)
     domain[:is_ve, Cells()] = fill(true, ncol)
     domain[:pillar_columns, Cells()] = _pillar_columns(columns)
+    isnothing(temperature) ||
+        (domain[:temperature, Cells()] = _column_temperature(temperature, geometry))
 
     # stacked columns of one pillar exchange no flow directly
     any(>(1), domain[:pillar_columns]) && _seal_stacked!(domain, columns)
     return (domain = domain, coarse = coarse, geometry = geometry, rock = rock)
 end
+
+# Temperature per column: a scalar, one value per column, or a function of
+# the caprock depth. Returns a new vector.
+_column_temperature(T::Number, geometry) = fill(Float64(T), length(geometry.H))
+_column_temperature(T::AbstractVector, geometry) = collect(Float64, T)
+_column_temperature(T::Function, geometry) = Float64.(T.(geometry.z_top))
+
+"""
+    geothermal_gradient(; T_ref, z_ref = 0.0, gradient) -> Function
+
+The temperature of a geothermal gradient as a function of depth `z` (m,
+positive down): `T_ref + gradient · (z − z_ref)`, with `T_ref` (K) at depth
+`z_ref` and `gradient` in K/m (e.g. 0.03 for 30 °C/km). For
+[`ve_domain`](@ref)'s `temperature`. Returns a new function.
+"""
+geothermal_gradient(; T_ref, z_ref = 0.0, gradient) =
+    z -> T_ref + gradient * (z - z_ref)
 
 # Number of columns in each column's pillar.
 function _pillar_columns(columns::VEColumns)

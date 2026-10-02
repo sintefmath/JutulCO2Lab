@@ -36,7 +36,8 @@ volumes = trap_volumes(s, traps; poro = ve.domain[:porosity])
 # the retreating plume is trapped), linear densities, and dissolution of CO2
 # into the brine at a finite rate.
 g, rho_w, rho_co2 = 9.80665, 1020.0, 700.0
-fluid = co2lab_ve_fluid(residual = (0.27, 0.20), krmax = (1.0, 1.0),
+fluid = co2lab_ve_fluid(default_pvt = nothing,
+                        residual = (0.27, 0.20), krmax = (1.0, 1.0),
                         co2_rho_ref = rho_co2, wat_rho_ref = rho_w,
                         co2_rho_pvt = (4.5e-9, 100e5), wat_rho_pvt = (4.6e-10, 100e5),
                         co2_mu_ref = 6e-5, wat_mu_ref = 8e-4,

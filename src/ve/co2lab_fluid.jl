@@ -720,6 +720,34 @@ function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve
         S[:PhaseMassDensities] = BlackOilDensities()
         S[:PhaseViscosities] = viscosity
     end
+    needs_temperature(fluid) && _set_temperature!(model, domain)
+    return model
+end
+
+"""
+    _set_temperature!(model, domain)
+
+A `Temperature` parameter for tabulated properties: in the reservoir the
+domain's (`ve_domain(...; temperature)`, JutulDarcy's 30 °C where none is
+given), in each well its perforated column's (JutulDarcy's wells have none).
+
+Modifies: `model`'s submodels' `parameters` (adds `:Temperature`), the wells'
+`data_domain` (sets `:temperature`). `domain` is only read.
+"""
+function _set_temperature!(model, domain)
+    T_res = haskey(domain, :temperature) ? domain[:temperature] :
+            fill(Jutul.default_value(nothing, JutulDarcy.Temperature()),
+                 number_of_cells(physical_representation(domain)))
+    for m in values(model.models)
+        haskey(m.secondary_variables, :ShrinkageFactors) || continue
+        m.parameters[:Temperature] = JutulDarcy.Temperature()
+        d = m.data_domain
+        if JutulDarcy.model_or_domain_is_well(m)
+            # the wellbore at its (first) perforated column's temperature
+            perf = physical_representation(d).perforations.reservoir
+            d[:temperature, Cells()] = fill(T_res[first(perf)], number_of_cells(d))
+        end
+    end
     return model
 end
 

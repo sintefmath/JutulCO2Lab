@@ -33,7 +33,8 @@ geo = ve.geometry
 srw, srg = 0.25, 0.25
 
 # CO2 relperm endpoint: the example's quadratic curve at 1 - srw.
-fluid = co2lab_ve_fluid(residual = (srw, srg), krmax = (1.0, (1 - srw)^2),
+fluid = co2lab_ve_fluid(default_pvt = nothing,
+                        residual = (srw, srg), krmax = (1.0, (1 - srw)^2),
                         co2_rho_ref = rho_co2, wat_rho_ref = rho_w,
                         co2_mu_ref = d["muco2"], wat_mu_ref = d["muw"])
 

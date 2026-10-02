@@ -52,7 +52,8 @@ srw, src, pe = c["srw"], c["src"], c["pe"]
 # its residual 0.27; CO2 relperm zero below the residual CO2 saturation 0.2.
 fringe = CapillaryFringeTable(; invPc3D = p -> (1 - srw) * (pe / max(p, pe))^2 + srw,
                               kr3D = s -> max((s - src) / (1 - src), 0.0)^2)
-fluid = co2lab_ve_fluid(; vertical = fringe, residual = (srw, src),
+fluid = co2lab_ve_fluid(; default_pvt = nothing,
+                        vertical = fringe, residual = (srw, src),
                         co2_rho_ref = c["co2_rho"], wat_rho_ref = c["rhow"],
                         co2_rho_pvt = (c["co2_c"], c["p_ref"]),
                         wat_rho_pvt = (c["wat_c"], c["p_ref"]),

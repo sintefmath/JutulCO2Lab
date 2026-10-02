@@ -22,7 +22,8 @@ function _fringe_case_fluid(c)
         curves = (invPc3D = pc -> (1 - rw) * (pe / max(pc, pe))^2 + rw,
                   kr3D = s -> max((s - rg) / (1 - rg), 0.0)^2)
     end
-    return co2lab_ve_fluid(; vertical = CapillaryFringeTable(; curves...),
+    return co2lab_ve_fluid(; default_pvt = nothing,
+                           vertical = CapillaryFringeTable(; curves...),
                            residual = (rw, rg), co2_rho_ref = 760.0,
                            wat_rho_ref = 1100.0, co2_rho_pvt = (4.3e-9, 150e5),
                            wat_rho_pvt = (4.3e-10, 100e5), co2_mu_ref = 6e-5,
@@ -105,7 +106,7 @@ function _capfringe_cp_vs_mrst(d; tol = 1e-10, tol_trunc = tol)
     lin(rho, ref) = ((rho / ref - 1) / p, 0.0)
     fringe = CapillaryFringeTable(; invPc3D = (d["C"], d["alpha"]),
                                   kr3D = s -> max((s - rg) / (1 - rg), 0.0)^2)
-    fl = co2lab_ve_fluid(; vertical = fringe, residual = (rw, rg),
+    fl = co2lab_ve_fluid(; default_pvt = nothing, vertical = fringe, residual = (rw, rg),
                          wat_rho_ref = d["rhoWS"], co2_rho_ref = d["rhoGS"],
                          wat_rho_pvt = lin(d["rhoW"], d["rhoWS"]),
                          co2_rho_pvt = lin(d["rhoG"], d["rhoGS"]))

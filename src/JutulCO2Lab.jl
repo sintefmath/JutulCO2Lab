@@ -39,15 +39,18 @@ export VEColumnSides, ve_column_sides
 
 include("ve/vedomain.jl")
 export ve_average_rock, ve_domain, VEBoundarySides, ve_boundary_sides
-export ve_hydrostatic_pressure
+export ve_hydrostatic_pressure, geothermal_gradient
 
 include("ve/rock_compressibility.jl")
 export set_co2lab_rock_compressibility!
 
+include("ve/pvt_tables.jl")
+export PhaseTable, jutuldarcy_property_tables, co2lab_sampled_table, co2lab_table_file
+
 include("ve/ve_fluid.jl")
 include("ve/capillary_fringe.jl")
 include("ve/sharp_interface_integrated.jl")
-export co2lab_ve_fluid, CO2LabVEFluid, instantaneous_dissolution
+export co2lab_ve_fluid, CO2LabVEFluid, instantaneous_dissolution, needs_temperature
 export VerticalModel, SharpInterface, SharpInterfaceIntegrated, CapillaryFringeTable
 
 include("ve/co2lab_fluid.jl")
