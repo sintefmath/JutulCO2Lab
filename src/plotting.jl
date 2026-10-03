@@ -131,8 +131,8 @@ function plot_trapping_history! end
                       spill_regions = false, lighting = false, contours = false,
                       path_colours = true, injection_column = 0, exaggeration = 10,
                       view = (-37.5, 30.0), title = "", size = (1700, 1000),
-                      widgets = extra -> nothing, charts = true, selection = true)
-        -> NamedTuple
+                      widgets = extra -> nothing, charts = true, selection = true,
+                      on_click = nothing, on_draw = nothing) -> NamedTuple
     interactive_traps!(viewer, s; res = nothing, title = "", injection_column = 0)
         -> viewer
 
@@ -171,6 +171,12 @@ backends draw the first view only.
   `selection = false`: clicks select nothing, and the "Red path" switch and
   the "Trap detail" button are left out (`toggles` without `red`, `detail`
   `nothing`).
+- `on_click(column, button)`: called for each click on the caprock (the
+  column under the pointer, 0 if none; `Mouse.left`, `Mouse.right`, ...),
+  instead of selecting traps (`selection` off then).
+- `on_draw(viewer)`: called after each drawing of the caprock (a new
+  surface, the lighting switched), which removes all plots of the axis: for
+  a caller's own plots on it.
 - [`show_column_values!`](@ref) colours the caprock by values per column
   instead (e.g. capacities), with a colour bar.
 - Differences from co2lab: the method asked for is used (co2lab's
@@ -185,8 +191,9 @@ with `display` or [`show_figure`](@ref)), `ax` (the `Axis3`), `title`,
 `widgets` (what that function returned), the widgets `method`,
 `exaggeration`, `toggles` (`traps`, `regions`, `light`, `contours`, `red`),
 `top`, `reset`, `detail`, `info`, the charts' areas `pie` and `bars` and
-their plots `charts` (empty without charts), the `colorbar`, and its
-state: `values` (a `Ref` to the values shown, or `nothing`), `selectable`, `view`, `current` (a `Ref`
+their plots `charts` (empty without charts), the `colorbar`, `on_click`,
+`on_draw`, and its state: `values` (a `Ref` to the values shown, or
+`nothing`), `selectable`, `view`, `current` (a `Ref`
 to `(s, res, vol, title)`), `selection` (a `Ref` to `(column, upstream)`),
 `plots`, `in_detail`, `lock`, `pressed_at`. `interactive_traps!` shows the surface
 `s` in an existing viewer (e.g. another formation), with the viewer's

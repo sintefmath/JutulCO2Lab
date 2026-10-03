@@ -36,7 +36,7 @@ plots: `show_co2_atlas.jl`, `models_from_atlas.jl`,
 interactive trap viewer, `showTrapsInteractively`) and
 `examples/inventory/` (Stage 9, the trapping inventory of a run);
 `examples/demos/` (Stage 11, interactive demos: the trap viewer,
-co2lab's `exploreCapacity`). The plan
+co2lab's `exploreCapacity` and `exploreSimulation`). The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
@@ -234,6 +234,10 @@ src/trapping/        structural traps (Stage 8, co2lab-spillpoint)
   capacity.jl        the storage capacity per column (co2lab-demo's exploreCapacity
                      estimate), the reachable structural capacity
 
+src/ve/injection_case.jl  co2lab-demo's exploreSimulation scenario: wells, closed,
+                     semi-open and open boundary stretches, a run handing over
+                     each report step; the boundary in loops (Stage 11)
+
 src/inventory/       where the CO2 is (Stage 9)
   trapping_inventory.jl  co2lab's trapping inventory per state and over a run
 
@@ -252,7 +256,8 @@ examples/            readable walkthroughs, with their own environment
   demos/             interactive demos (Stage 11), in a GLMakie window or a
                      browser (JUTULCO2LAB_BACKEND=WGLMakie): trap_viewer.jl (the
                      Atlas formations in the trap viewer), explore_capacity.jl
-                     (co2lab's exploreCapacity)
+                     (co2lab's exploreCapacity), explore_simulation.jl
+                     (co2lab's exploreSimulation)
 test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, wells,
                      boundary conditions and reconstruction (vs MRST), Atlas, trapping,
                      inventory,

@@ -73,6 +73,9 @@ export ve_boundary_mass_fluxes
 include("ve/vereconstruct.jl")
 export ve_reconstruct
 
+include("ve/injection_case.jl")
+export setup_injection_case, simulate_injection_case, ve_boundary_loops
+
 include("ve/ve_top_surface.jl")
 export ve_top_surface, ve_contour_lines
 

@@ -1748,6 +1748,49 @@ end
         @test all(x -> 100 < x < 1000, c.density)
     end
 
+    @testset "injection case (Stage 11 item 4)" begin
+        mesh, cols = _sine_mesh()
+        n = number_of_columns(cols)
+        ve = ve_domain(mesh, cols; perm_x = fill(1e-13, n), poro = fill(0.25, n))
+        a = (mesh = mesh, columns = cols, ve = ve)
+        s = trap_surface(mesh, cols)
+        sides, _ = ve_boundary_sides(mesh, cols, ve.domain)
+        ns = length(sides)
+
+        # the boundary in order: one loop, consecutive sides a column apart
+        loops = ve_boundary_loops(s, sides)
+        @test length(loops) == 1 && sort(only(loops)) == 1:ns
+        l = only(loops)
+        step(i, j) = hypot((sides.edge_midpoint[i] .- sides.edge_midpoint[j])...)
+        @test all(step(l[k], l[mod1(k + 1, ns)]) <= 150.0 for k in 1:ns)
+
+        # side types: open and semi-open get conditions, semi-open scaled
+        types = [(:closed, :semi_open, :open)[mod1(k, 3)] for k in 1:ns]
+        fluid = co2lab_ve_fluid(default_pvt = nothing, residual = (0.1, 0.2))
+        yr = 365.2425 * 86400
+        c = setup_injection_case(a, [(n ÷ 2, 1e8 / yr)]; fluid, boundary = types,
+                                 inj_time = 2yr, inj_steps = 2, mig_time = 10yr,
+                                 mig_steps = 1, outside_distance = 1e3)
+        @test c.side_types == types && length(c.bc) == count(!=(:closed), types)
+        k = findfirst(==(:semi_open), types)
+        col = sides.column[k]
+        d = hypot(s.cx[col] - sides.edge_midpoint[k][1],
+                  s.cy[col] - sides.edge_midpoint[k][2])
+        bck = c.bc[findfirst(==(k), findall(!=(:closed), types))]
+        @test bck.trans ≈ sides.half_trans[k] * d / (d + 1e3)
+        @test c.dt ≈ [yr, yr, 10yr] && c.wells == [n ÷ 2]
+        @test_throws ArgumentError setup_injection_case(a, []; fluid, boundary = :leaky)
+
+        # a run handing over each report step; one stopped after the first
+        seen = Int[]
+        r = simulate_injection_case(c; info_level = -1,
+                                    on_report = (k, st) -> (push!(seen, k); true))
+        @test seen == [1, 2, 3] && length(r.states) == 3
+        @test maximum(r.states[2][:sG]) > 0
+        @test isnothing(simulate_injection_case(c; info_level = -1,
+                                                on_report = (k, st) -> k < 1))
+    end
+
     @testset "trapping inventory vs co2lab (Stage 9 item 2)" begin
         c, d = (joinpath(refdir, f) for f in ("inventory_case.mat", "inventory_mrst.mat"))
         if !isfile(c) || !isfile(d) || !isdir(atlas_data_directory())

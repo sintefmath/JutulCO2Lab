@@ -109,16 +109,18 @@ function interactive_traps(s; res = nothing, method::Symbol = :node, traps = tru
                            path_colours = true, injection_column = 0,
                            exaggeration = 10, view = (-37.5, 30.0), title = "",
                            size = (1700, 1000), widgets = extra -> nothing,
-                           charts::Bool = true, selection::Bool = true)
+                           charts::Bool = true, selection::Bool = true,
+                           on_click = nothing, on_draw = nothing)
     fig, ax, tlabel, panel = _viewer_layout(size, view)
     w = _panel_widgets!(panel, method, exaggeration,
                         (traps, spill_regions, lighting, contours, path_colours),
-                        widgets, charts, selection)
+                        widgets, charts, selection && isnothing(on_click))
     colorbar = _value_colorbar(fig)
     _bring_forward!([tlabel; colorbar; _blocks(panel)], w.backdrop)
     plots = charts ? _chart_plots!(w.pie, w.bars) : (;)
     v = (; fig, ax, title = tlabel, panel, w..., charts = plots, colorbar,
-         values = Ref{Any}(nothing), view = view, selectable = selection,
+         values = Ref{Any}(nothing), view = view,
+         selectable = selection && isnothing(on_click), on_click, on_draw,
          current = Ref{Any}(nothing), selection = Ref((column = 0, upstream = false)),
          plots = Dict{Symbol, Any}(), in_detail = Ref(false), lock = ReentrantLock(),
          pressed_at = Dict{Mouse.Button, Point2f}())
@@ -285,6 +287,8 @@ function _draw!(v)
     _set_aspect!(v)
     v.title.text[] = c.title
     _update!(v)
+    # the caller's own plots, made anew with the caprock's
+    isnothing(v.on_draw) || v.on_draw(v)
 end
 
 # Ten depth contours on the caprock (co2lab: contourAtlas(data, 10))
@@ -557,7 +561,7 @@ end
 # view): left picks a column (shift-left or middle: upstream, as co2lab),
 # right clears the selection; clicks on the panel are the widgets'
 function _mouse!(v, ev)
-    v.selectable || return
+    (v.selectable || !isnothing(v.on_click)) || return
     ev.button in (Mouse.left, Mouse.middle, Mouse.right) || return
     scene = v.ax.scene
     pos = Point2f(events(scene).mouseposition[])
@@ -568,6 +572,13 @@ function _mouse!(v, ev)
     sum(abs2, pos .- get(v.pressed_at, ev.button, Point2f(Inf))) < 9 || return
     (isnothing(v.current[]) || v.in_detail[]) && return
     _over_widgets(v, pos) && return
+    # a caller's clicks: the column (0: none) and the button, to on_click
+    if !isnothing(v.on_click)
+        origin = minimum(v.ax.scene.viewport[])
+        _background(() -> _locked(() -> v.on_click(_pick_column(v, pos .- origin),
+                                                     ev.button), v))
+        return
+    end
     if ev.button == Mouse.right
         _locked(v) do
             v.selection[] = (column = 0, upstream = false)
