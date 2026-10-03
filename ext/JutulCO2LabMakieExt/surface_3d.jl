@@ -26,6 +26,20 @@ end
 function plot_ve_surface!(ax, surface; color = (:steelblue, 0.6), offset = 0.0,
                           colormap = :viridis, shading = false, strokecolor = :black,
                           strokewidth = 1, smooth = true)
+    _surface_mesh!(ax, surface; color, offset, colormap, shading, smooth)
+    if strokewidth > 0
+        x, y, z = surface.x, surface.y, surface.z .+ offset
+        edges = [Point3f(x[n], y[n], z[n]) for p in surface.polygons
+                 for (k, a) in enumerate(p) for n in (a, p[mod1(k + 1, length(p))])]
+        linesegments!(ax, edges; color = strokecolor, linewidth = strokewidth,
+                      transparency = _translucent(strokecolor))
+    end
+    return ax
+end
+
+# The surface's columns as one mesh (plot_ve_surface! without the edges).
+# Returns the mesh plot. Modifies: `ax`.
+function _surface_mesh!(ax, surface; color, offset, colormap, shading, smooth)
     pts, tris, col, node = _surface_triangles(surface, offset)
     # one value or colour per column, or one colour for all
     c = color isa AbstractVector ? color[col] : color
@@ -36,17 +50,8 @@ function plot_ve_surface!(ax, surface; color = (:steelblue, 0.6), offset = 0.0,
                  Makie.GeometryBasics.Mesh(pts, tris)
     # translucent colours must be flagged: GLMakie otherwise writes them to its
     # depth buffer, hiding what lies behind them
-    mesh!(ax, m; color = c, colormap = colormap, shading = shading,
-          transparency = _translucent(color))
-
-    if strokewidth > 0
-        x, y, z = surface.x, surface.y, surface.z .+ offset
-        edges = [Point3f(x[n], y[n], z[n]) for p in surface.polygons
-                 for (k, a) in enumerate(p) for n in (a, p[mod1(k + 1, length(p))])]
-        linesegments!(ax, edges; color = strokecolor, linewidth = strokewidth,
-                      transparency = _translucent(strokecolor))
-    end
-    return ax
+    return mesh!(ax, m; color = c, colormap = colormap, shading = shading,
+                 transparency = _translucent(color))
 end
 
 # Whether a colour (or any colour of a vector of colours) is translucent;
@@ -191,12 +196,15 @@ function plot_traps!(ax::Axis3, s, res; regions = true, trap_values = nothing,
     return ax
 end
 
+# Trap k's colour (tab20, repeating), and a light version for its spill region
+const _TAB20 = Makie.to_colormap(:tab20)
+_palette_colour(k) = RGBAf(_TAB20[mod1(k, length(_TAB20))])
+_light(c) = RGBAf(0.45c.r + 0.55, 0.45c.g + 0.55, 0.45c.b + 0.55, 1)
+
 # A colour per column: spill regions light (grey where draining out; neutral
 # without `regions`), traps in their region's full colour or by `trap_values`
 function _trap_colours(res; regions, trap_values, colormap)
-    palette = Makie.to_colormap(:tab20)
-    colour(k) = RGBAf(palette[mod1(k, length(palette))])
-    light(c) = RGBAf(0.45c.r + 0.55, 0.45c.g + 0.55, 0.45c.b + 0.55, 1)
+    colour, light = _palette_colour, _light
     grey = RGBAf(0.9, 0.9, 0.9, 1)
     out = [regions && k > 0 ? light(colour(k)) : grey for k in res.trap_regions]
 

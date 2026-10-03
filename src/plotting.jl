@@ -127,6 +127,68 @@ function plot_trapping_history end
 function plot_trapping_history! end
 
 """
+    interactive_traps(s; res = nothing, method = :node, traps = true,
+                      spill_regions = false, lighting = false, contours = false,
+                      path_colours = true, injection_column = 0, exaggeration = 10,
+                      view = (-37.5, 30.0), title = "", size = (1700, 1000),
+                      widgets = extra -> nothing) -> NamedTuple
+    interactive_traps!(viewer, s; res = nothing, title = "", injection_column = 0)
+        -> viewer
+
+The interactive trap viewer, co2lab's `interactiveTrapping`: the trap
+surface `s` ([`trap_surface`](@ref)) in 3D with its traps, rivers, outline
+and sealing faults, and a panel of widgets over the window's right side.
+Interactive with GLMakie (a window) or WGLMakie (a browser page); other
+backends draw the first view only.
+
+- A left click on the caprock selects a column (co2lab: the injection
+  point; marked yellow, with a red vertical line): the trap it drains into
+  and every trap that trap spills into are coloured in spill order, bright
+  red to nearly black (grey with the "Red path" switch off), their outline
+  blue and their rivers thick; with shift (or the middle button) the traps
+  spilling into it instead (outline green). A right click clears the
+  selection.
+- The panel: the trap analysis's method (recomputed when changed), the
+  vertical exaggeration; switches for the traps, the spill regions (off: the
+  caprock coloured by depth), lighting, ten depth contours and the red path;
+  buttons for a view from above, the starting view and the selected trap
+  alone (its floor, filled to the spill depth, red; its ceiling blue; the
+  caprock around faint; again to return); the selection's numbers; co2lab's
+  pie (the trap's volume, the volume further along the path, the other
+  traps' volume) and its bars (each path trap's volume, log scale).
+- `res`: a [`trap_analysis`](@ref) result of `s` to show (default: computed
+  with `method`). The keywords set the widgets' starting state as co2lab's
+  options do (`path_colours` is its `colorpath`, `injection_column` its
+  `injpt`); `view` is the starting (azimuth, elevation) in MATLAB's degrees,
+  as [`ve_axis3`](@ref).
+- `widgets`: a function given an empty `GridLayout` at the panel's top, to
+  make a caller's own widgets in (e.g. a formation menu); called before the
+  viewer makes its own, so that a caller's dropdown list takes the clicks
+  over the widgets below it (Makie gives a click to the first-made of
+  overlapping widgets). Its return value is the viewer's `widgets`.
+- Differences from co2lab: the method asked for is used (co2lab's
+  `interactiveTrapping` always uses the node-based one; `co2lab-issues.org`);
+  the default method is `:node`, what co2lab shows; the trap figure is shown
+  in the same axis; the bars are in spill order and coloured as the map; no
+  "Setup VE simulation" button yet (roadmap Stage 11 item 3).
+
+`interactive_traps` returns a new NamedTuple, the viewer: `fig` (show it
+with `display` or [`show_figure`](@ref)), `ax` (the `Axis3`), `title`,
+`panel`, `backdrop`, `extra` (the `GridLayout` given to `widgets`),
+`widgets` (what that function returned), the widgets `method`,
+`exaggeration`, `toggles` (`traps`, `regions`, `light`, `contours`, `red`),
+`top`, `reset`, `detail`, `info`, the charts' areas `pie` and `bars` and
+their plots `charts`, and its state: `view`, `current` (a `Ref`
+to `(s, res, vol, title)`), `selection` (a `Ref` to `(column, upstream)`),
+`plots`, `in_detail`, `lock`, `pressed_at`. `interactive_traps!` shows the surface
+`s` in an existing viewer (e.g. another formation), with the viewer's
+method; it returns `viewer`. Modifies (`!` version): `viewer` (its figure's
+plots and its state). `s` and `res` are only read.
+"""
+function interactive_traps end
+function interactive_traps! end
+
+"""
     ve_axis3(pos, surface; exaggeration = 10.0, view = (-37.5, 30.0), title = "")
         -> Axis3
 

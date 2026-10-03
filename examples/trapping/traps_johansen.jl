@@ -9,9 +9,9 @@
 # Needs the NPD decks in johansen_data_directory() (downloadable from SINTEF:
 # the error message names the files). Plotting backend: GLMakie (a window per
 # figure, 3D views rotatable with the mouse; close it to continue) by default;
-# JUTULCO2LAB_BACKEND=CairoMakie writes the figures to files instead. co2lab
-# shows each model in its interactive trap viewer (roadmap Stage 11); here
-# the traps reached from the injection point are drawn on the caprock.
+# JUTULCO2LAB_BACKEND=CairoMakie writes the figures to files instead. The
+# traps reached from the injection point are drawn on the caprock, then each
+# model is shown in the interactive trap viewer, as in co2lab.
 
 using JutulCO2Lab
 backend = Symbol(get(ENV, "JUTULCO2LAB_BACKEND", "GLMakie"))
@@ -82,3 +82,16 @@ for (k, (name, s)) in enumerate(surfaces)
                  wells = [col], outline = false)
 end
 show_figure(fig, "johansen_traps_from_well")
+
+# ----------------------- 3. The interactive trap viewer -----------------------
+
+# Each model in the interactive viewer (interactive_traps, co2lab's
+# interactiveTrapping), as co2lab opens them: cell-based traps, lit, spill
+# regions shown, the path traps in grey, the well's column selected. Close a
+# window to go on to the next model.
+for (name, s) in surfaces
+    v = interactive_traps(s; method = :cell, lighting = true, spill_regions = true,
+                          path_colours = false, injection_column = nearest(s),
+                          view = (-80, 64), title = "Johansen, $name")
+    show_figure(v.fig, "johansen_interactive_$(replace(name, ' ' => '_'))")
+end

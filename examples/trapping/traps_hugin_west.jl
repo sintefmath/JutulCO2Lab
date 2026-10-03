@@ -1,7 +1,8 @@
 # co2lab-spillpoint's trapsHuginWest: the Hugin West formation of the CO2
 # Storage Atlas, where the node-based and the cell-based methods differ most
 # in trap volume. The whole formation with the node-based method, then its
-# southern part with both methods side by side.
+# southern part with both methods side by side; at the end the whole
+# formation in the interactive trap viewer, as co2lab shows it.
 #
 #   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/traps_hugin_west.jl
 #
@@ -60,3 +61,13 @@ for (k, (name, r)) in enumerate(("node-based" => node, "cell-based" => cell))
     plot_traps!(a, s, r; labels = true)
 end
 show_figure(fig, "hugin_west_south")
+
+# ----------------------- 3. The interactive trap viewer -----------------------
+
+# The whole formation in the interactive viewer (interactive_traps, co2lab's
+# interactiveTrapping), as co2lab opens it: node-based traps, lit, spill
+# regions shown. Click a column to see where CO2 injected there goes.
+s = trap_surface(hugin.mesh, hugin.columns)
+v = interactive_traps(s; method = :node, lighting = true, spill_regions = true,
+                      view = (-70, 55), title = "Hugin West: interactive trap viewer")
+show_figure(v.fig, "hugin_west_interactive")

@@ -8,15 +8,18 @@ module JutulCO2LabMakieExt
 
 using JutulCO2Lab, Makie
 using LinearAlgebra: cross, norm
+using Printf: @sprintf
 import JutulCO2Lab: plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!,
     plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure,
-    plot_traps, plot_traps!, ve_axis3, plot_trapping_history, plot_trapping_history!
+    plot_traps, plot_traps!, ve_axis3, plot_trapping_history, plot_trapping_history!,
+    interactive_traps, interactive_traps!
 
 include("map_plots.jl")
 include("atlas_plots.jl")
 include("trap_plots.jl")
 include("surface_3d.jl")
 include("inventory_plots.jl")
+include("interactive_traps.jl")
 
 # ------------------------------ Figures, backends -----------------------------
 

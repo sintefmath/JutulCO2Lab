@@ -137,6 +137,15 @@ layers and download address of the two NPD models, `johansen.jl`).
 
 Constants: **`TRAPPING_CATEGORIES`** (the names of 55, in order; exported).
 
+## J. Interactive demos (roadmap Stage 11), on H; Makie extension
+
+| # | Name | File | What it is | Built from / depends on |
+|---|---|---|---|---|
+| 57 | *Trap viewer* (NamedTuple) | `ext/JutulCO2LabMakieExt/interactive_traps.jl` | `(fig, ax, title, panel, backdrop, extra, widgets, method, exaggeration, toggles, top, reset, detail, info, pie, bars, charts, view, current, selection, plots, in_detail, lock, pressed_at)`: the figure, its `Axis3`, the title label, the panel layout and its backdrop `Box`, the caller's layout and widgets, the panel's menus, switches (`toggles`: `traps, regions, light, contours, red`), buttons and text, the charts' areas (`Box`es; the charts are drawn in pixels, as an `Axis`'s own scene does not stay in front of the 3D scene) and their plots (`charts`: `wedges, title, names, rects, frame, ticks, labels`), the starting view, and the state: `current` a `Ref` to `(s, res, vol, title)` (47, 48, trap volumes), `selection` a `Ref` to `(column, upstream)`, `plots` the 3D plots by name (`:surface, :vcols, :contours, :outline, :rivers, :marker`), `in_detail` a `Ref{Bool}`, `lock` (a `ReentrantLock`: drawing, recolouring, picking and the trap detail take turns), `pressed_at` where each mouse button went down | 47, 48 (`interactive_traps`; `interactive_traps!` shows another surface in it) |
+
+Constants (extension, internal): `_TAB20` (Makie's `tab20` palette, the
+traps' colours), `_PIE_COLOURS` (the pie's three colours, co2lab's).
+
 ## F. MRST comparison harness (`JutulCO2Lab.Oracle`), independent of A–E
 
 | # | Name | File | What it is | Depends on |

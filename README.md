@@ -32,7 +32,8 @@ Readable walkthroughs: `examples/sloping_aquifer.jl` (Stage 2),
 dissolution), and `examples/atlas/` (Stage 5, the CO2 Storage Atlas with
 plots: `show_co2_atlas.jl`, `models_from_atlas.jl`,
 `show_top_surface_grids.jl`, `sleipner_model.jl`) and `examples/trapping/`
-(Stage 8, co2lab-spillpoint's seven static examples) and
+(Stage 8, co2lab-spillpoint's seven static examples and, with Stage 11's
+interactive trap viewer, `showTrapsInteractively`) and
 `examples/inventory/` (Stage 9, the trapping inventory of a run);
 `examples/demos/` (Stage 11, interactive demos: the trap viewer). The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
@@ -214,8 +215,10 @@ src/atlas/           the CO2 Storage Atlas (Stage 5)
 src/plotting.jl      plotting functions (declared and documented; implemented in
                      the Makie extension)
 ext/JutulCO2LabMakieExt/  Makie extension: VE map views, Atlas maps, coastline,
-                     trap maps, in 2D or on the caprock in 3D (ve_axis3);
-                     loaded with GLMakie or CairoMakie
+                     trap maps, in 2D or on the caprock in 3D (ve_axis3), and
+                     the interactive trap viewer (interactive_traps, Stage 11:
+                     GLMakie window or WGLMakie browser page); loaded with any
+                     Makie backend
 
 src/trapping/        structural traps (Stage 8, co2lab-spillpoint)
   trap_surface.jl    the caprock as trap analysis sees it (co2lab's Gt quantities),
@@ -240,10 +243,12 @@ examples/            readable walkthroughs, with their own environment
                      scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/...
   atlas/             CO2 Storage Atlas scripts; JUTULCO2LAB_BACKEND=CairoMakie
                      writes figures to ./figures instead of opening windows
-  trapping/          co2lab-spillpoint's examples (static figures)
+  trapping/          co2lab-spillpoint's examples (and showTrapsInteractively,
+                     the interactive trap viewer)
   inventory/         a run's trapping inventory
-  demos/             interactive demos (Stage 11): trap_viewer.jl, in a GLMakie
-                     window or a browser (JUTULCO2LAB_BACKEND=WGLMakie)
+  demos/             interactive demos (Stage 11): trap_viewer.jl, the Atlas
+                     formations in the trap viewer, in a GLMakie window or a
+                     browser (JUTULCO2LAB_BACKEND=WGLMakie)
 test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, wells,
                      boundary conditions and reconstruction (vs MRST), Atlas, trapping,
                      inventory,

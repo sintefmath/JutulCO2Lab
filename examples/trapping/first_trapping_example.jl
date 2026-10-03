@@ -7,8 +7,8 @@
 #
 # Plotting backend: GLMakie (a window per figure, 3D views rotatable with the
 # mouse; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie
-# writes the figures to files instead. co2lab ends with its interactive trap
-# viewer; that is roadmap Stage 11.
+# writes the figures to files instead. It ends, as co2lab's, with the
+# interactive trap viewer.
 
 using JutulCO2Lab
 backend = Symbol(get(ENV, "JUTULCO2LAB_BACKEND", "GLMakie"))
@@ -113,3 +113,14 @@ plot_ve_map!(ax, s; regions = (res.traps .> 0) .& .!is_leaf,
 plot_ve_map!(ax, s; regions = is_leaf, region_color = :white,
              depth_contours = 0, outline = false)
 show_figure(fig, "shoebox_leaves")
+
+# ----------------------- 5. The interactive trap viewer -----------------------
+
+# The shoe-box in the interactive viewer (interactive_traps, co2lab's
+# interactiveTrapping), as co2lab opens it: cell-based traps, lit, spill
+# regions shown, the path traps in grey, column 1898 selected. Click a column
+# to see where CO2 injected there goes; see show_traps_interactively.jl.
+v = interactive_traps(s; method = :cell, lighting = true, spill_regions = true,
+                      path_colours = false, injection_column = 1898, view = (80, 20),
+                      title = "Shoe-box: interactive trap viewer")
+show_figure(v.fig, "shoebox_interactive")
