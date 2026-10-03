@@ -35,7 +35,8 @@ plots: `show_co2_atlas.jl`, `models_from_atlas.jl`,
 (Stage 8, co2lab-spillpoint's seven static examples and, with Stage 11's
 interactive trap viewer, `showTrapsInteractively`) and
 `examples/inventory/` (Stage 9, the trapping inventory of a run);
-`examples/demos/` (Stage 11, interactive demos: the trap viewer). The plan
+`examples/demos/` (Stage 11, interactive demos: the trap viewer,
+co2lab's `exploreCapacity`). The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
@@ -230,6 +231,8 @@ src/trapping/        structural traps (Stage 8, co2lab-spillpoint)
   trap_quantities.jl trap volumes, downstream traps, capacity trees, injection
                      point, flattened caprock
   surfaces.jl        IRAP surfaces, IGEMS grids, grids under lattice surfaces
+  capacity.jl        the storage capacity per column (co2lab-demo's exploreCapacity
+                     estimate), the reachable structural capacity
 
 src/inventory/       where the CO2 is (Stage 9)
   trapping_inventory.jl  co2lab's trapping inventory per state and over a run
@@ -246,9 +249,10 @@ examples/            readable walkthroughs, with their own environment
   trapping/          co2lab-spillpoint's examples (and showTrapsInteractively,
                      the interactive trap viewer)
   inventory/         a run's trapping inventory
-  demos/             interactive demos (Stage 11): trap_viewer.jl, the Atlas
-                     formations in the trap viewer, in a GLMakie window or a
-                     browser (JUTULCO2LAB_BACKEND=WGLMakie)
+  demos/             interactive demos (Stage 11), in a GLMakie window or a
+                     browser (JUTULCO2LAB_BACKEND=WGLMakie): trap_viewer.jl (the
+                     Atlas formations in the trap viewer), explore_capacity.jl
+                     (co2lab's exploreCapacity)
 test/runtests.jl     Oracle, Stage 1 (vs MRST dumps), fluid system, VE fluid, wells,
                      boundary conditions and reconstruction (vs MRST), Atlas, trapping,
                      inventory,

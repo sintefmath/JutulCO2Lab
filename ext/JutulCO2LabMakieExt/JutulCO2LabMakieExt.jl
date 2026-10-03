@@ -12,7 +12,7 @@ using Printf: @sprintf
 import JutulCO2Lab: plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!,
     plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure,
     plot_traps, plot_traps!, ve_axis3, plot_trapping_history, plot_trapping_history!,
-    interactive_traps, interactive_traps!
+    interactive_traps, interactive_traps!, show_column_values!
 
 include("map_plots.jl")
 include("atlas_plots.jl")

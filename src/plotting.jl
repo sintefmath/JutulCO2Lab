@@ -131,7 +131,8 @@ function plot_trapping_history! end
                       spill_regions = false, lighting = false, contours = false,
                       path_colours = true, injection_column = 0, exaggeration = 10,
                       view = (-37.5, 30.0), title = "", size = (1700, 1000),
-                      widgets = extra -> nothing) -> NamedTuple
+                      widgets = extra -> nothing, charts = true, selection = true)
+        -> NamedTuple
     interactive_traps!(viewer, s; res = nothing, title = "", injection_column = 0)
         -> viewer
 
@@ -166,6 +167,12 @@ backends draw the first view only.
   viewer makes its own, so that a caller's dropdown list takes the clicks
   over the widgets below it (Makie gives a click to the first-made of
   overlapping widgets). Its return value is the viewer's `widgets`.
+- `charts = false`: no pie and bars (room for a caller's widgets);
+  `selection = false`: clicks select nothing, and the "Red path" switch and
+  the "Trap detail" button are left out (`toggles` without `red`, `detail`
+  `nothing`).
+- [`show_column_values!`](@ref) colours the caprock by values per column
+  instead (e.g. capacities), with a colour bar.
 - Differences from co2lab: the method asked for is used (co2lab's
   `interactiveTrapping` always uses the node-based one; `co2lab-issues.org`);
   the default method is `:node`, what co2lab shows; the trap figure is shown
@@ -178,7 +185,8 @@ with `display` or [`show_figure`](@ref)), `ax` (the `Axis3`), `title`,
 `widgets` (what that function returned), the widgets `method`,
 `exaggeration`, `toggles` (`traps`, `regions`, `light`, `contours`, `red`),
 `top`, `reset`, `detail`, `info`, the charts' areas `pie` and `bars` and
-their plots `charts`, and its state: `view`, `current` (a `Ref`
+their plots `charts` (empty without charts), the `colorbar`, and its
+state: `values` (a `Ref` to the values shown, or `nothing`), `selectable`, `view`, `current` (a `Ref`
 to `(s, res, vol, title)`), `selection` (a `Ref` to `(column, upstream)`),
 `plots`, `in_detail`, `lock`, `pressed_at`. `interactive_traps!` shows the surface
 `s` in an existing viewer (e.g. another formation), with the viewer's
@@ -187,6 +195,20 @@ plots and its state). `s` and `res` are only read.
 """
 function interactive_traps end
 function interactive_traps! end
+
+"""
+    show_column_values!(viewer, values; label = "", colormap = :viridis) -> viewer
+
+Colours the caprock of an [`interactive_traps`](@ref) viewer by `values`,
+one per column (e.g. capacities, depths), in `colormap` over their finite
+range (`NaN`: light grey), with a colour bar labelled `label` at the bottom
+left; the traps' and spill regions' colours give way to them, a selection
+keeps its outline, rivers and marker. `values = nothing` returns to the
+viewer's own colours; a new surface (`interactive_traps!`) does too.
+Modifies: `viewer` (its colours, colour bar and `values`). Returns `viewer`.
+`values` is only read (copied).
+"""
+function show_column_values! end
 
 """
     ve_axis3(pos, surface; exaggeration = 10.0, view = (-37.5, 30.0), title = "")

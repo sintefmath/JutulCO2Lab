@@ -48,10 +48,10 @@ end
 # The panel's widgets below the caller's (`widgets(extra)`, made first: of
 # overlapping widgets the first made gets the click, so a caller's dropdown
 # list works over ours). Returns a NamedTuple.
-function _panel_widgets!(panel, method, exaggeration, toggles, widgets)
+function _panel_widgets!(panel, method, exaggeration, toggles, widgets, charts, select)
     # a backdrop under the widgets (made first, so drawn below them)
-    backdrop = Box(panel[1:7, 1]; color = (:white, 0.85), strokevisible = false,
-                   alignmode = Outside(-10))
+    backdrop = Box(panel[1:(charts ? 7 : 5), 1]; color = (:white, 0.85),
+                   strokevisible = false, alignmode = Outside(-10))
     extra = GridLayout(panel[1, 1])
     # an empty layout has no height, which leaves the panel's undetermined
     Box(extra[1, 1]; height = 0, visible = false)
@@ -64,27 +64,29 @@ function _panel_widgets!(panel, method, exaggeration, toggles, widgets)
     e = _menu(menus[1, 2], "Vertical exaggeration"; options = factors,
               default = something(findfirst(==(exaggeration), factors), 4))
 
-    # on/off switches, two columns of label and toggle
+    # on/off switches, two columns of label and toggle (the path's colours only
+    # with selection)
+    keys = (:traps, :regions, :light, :contours, :red)[1:(select ? 5 : 4)]
     names = ("Traps", "Spill regions", "Lighting", "Contours", "Red path")
     sw = GridLayout(panel[3, 1])
-    t = map(enumerate(names)) do (k, name)
+    t = map(enumerate(names[1:length(keys)])) do (k, name)
         r, c = fldmod1(k, 2)
         Label(sw[r, 2c - 1], name; halign = :left)
         Toggle(sw[r, 2c]; active = toggles[k], halign = :left)
     end
     bt = GridLayout(panel[4, 1])
-    buttons = [Button(bt[1, k]; label = l) for (k, l) in
-               enumerate(("Top view", "Reset view", "Trap detail"))]
-    info = Label(panel[5, 1], "Click a column."; halign = :left, justification = :left,
+    labels = ("Top view", "Reset view", "Trap detail")[1:(select ? 3 : 2)]
+    buttons = [Button(bt[1, k]; label = l) for (k, l) in enumerate(labels)]
+    info = Label(panel[5, 1], ""; halign = :left, justification = :left,
                  tellwidth = false)
     # the charts' areas: drawn in pixels (_chart_plots!), as an Axis's own
     # scene does not stay in front of the 3D scene
     area(pos) = Box(pos; height = 140, color = :transparent, strokevisible = false)
-    pie, bars = area(panel[6, 1]), area(panel[7, 1])
+    pie, bars = charts ? (area(panel[6, 1]), area(panel[7, 1])) : (nothing, nothing)
     return (backdrop = backdrop, extra = extra, widgets = own, method = m,
             exaggeration = e,
-            toggles = NamedTuple{(:traps, :regions, :light, :contours, :red)}(Tuple(t)),
-            top = buttons[1], reset = buttons[2], detail = buttons[3], info = info,
+            toggles = NamedTuple{keys}(Tuple(t)), top = buttons[1], reset = buttons[2],
+            detail = select ? buttons[3] : nothing, info = info,
             pie = pie, bars = bars)
 end
 
@@ -95,7 +97,8 @@ function _bring_forward!(blocks, backdrop)
     foreach(b -> translate!(b.blockscene, 0, 0, b === backdrop ? 8500 : 9000), blocks)
 end
 
-# Every block in a layout, nested layouts included
+# Every block in a layout, nested layouts included (not the blocks inside a
+# block, e.g. a SliderGrid's: their scenes follow their block's)
 _blocks(g::GridLayout) = vcat([_blocks(x) for x in contents(g)]...)
 _blocks(b) = [b]
 
@@ -105,14 +108,17 @@ function interactive_traps(s; res = nothing, method::Symbol = :node, traps = tru
                            spill_regions = false, lighting = false, contours = false,
                            path_colours = true, injection_column = 0,
                            exaggeration = 10, view = (-37.5, 30.0), title = "",
-                           size = (1700, 1000), widgets = extra -> nothing)
+                           size = (1700, 1000), widgets = extra -> nothing,
+                           charts::Bool = true, selection::Bool = true)
     fig, ax, tlabel, panel = _viewer_layout(size, view)
     w = _panel_widgets!(panel, method, exaggeration,
                         (traps, spill_regions, lighting, contours, path_colours),
-                        widgets)
-    _bring_forward!([tlabel; _blocks(panel)], w.backdrop)
-    charts = _chart_plots!(w.pie, w.bars)
-    v = (; fig, ax, title = tlabel, panel, w..., charts, view = view,
+                        widgets, charts, selection)
+    colorbar = _value_colorbar(fig)
+    _bring_forward!([tlabel; colorbar; _blocks(panel)], w.backdrop)
+    plots = charts ? _chart_plots!(w.pie, w.bars) : (;)
+    v = (; fig, ax, title = tlabel, panel, w..., charts = plots, colorbar,
+         values = Ref{Any}(nothing), view = view, selectable = selection,
          current = Ref{Any}(nothing), selection = Ref((column = 0, upstream = false)),
          plots = Dict{Symbol, Any}(), in_detail = Ref(false), lock = ReentrantLock(),
          pressed_at = Dict{Mouse.Button, Point2f}())
@@ -127,6 +133,9 @@ function interactive_traps!(v, s; res = nothing, title = "", injection_column = 
     res = something(res, trap_analysis(s; method = m))
     _locked(v) do
         v.current[] = (s = s, res = res, vol = trap_volumes(s, res), title = title)
+        # values per column belong to the previous surface
+        v.values[] = nothing
+        v.colorbar.blockscene.visible[] = false
         v.selection[] = (column = injection_column, upstream = false)
         _draw!(v)
         v.ax.limits[] = (nothing, nothing, nothing)
@@ -145,6 +154,7 @@ function _connect!(v)
     on(_ -> _background(() -> _reanalyse!(v)), v.method.selection)
     on(_ -> _set_aspect!(v), v.exaggeration.selection)
     for k in (:traps, :regions, :red)
+        haskey(v.toggles, k) || continue
         on(_ -> _locked(() -> _update!(v), v), getfield(v.toggles, k).active)
     end
     # lighting is set when a mesh is made: draw anew
@@ -153,12 +163,52 @@ function _connect!(v)
        v.toggles.contours.active)
     on(_ -> _reset_view!(v, (0.0, 90.0)), v.top.clicks)
     on(_ -> _reset_view!(v, v.view), v.reset.clicks)
-    on(_ -> _locked(() -> _toggle_detail!(v), v), v.detail.clicks)
+    isnothing(v.detail) || on(_ -> _locked(() -> _toggle_detail!(v), v), v.detail.clicks)
     # the charts follow their areas (moved by a resized window or the text)
     for area in (v.pie, v.bars)
+        isnothing(area) && continue
         on(_ -> _locked(() -> _redraw_charts!(v), v), area.layoutobservables.computedbbox)
     end
     on(ev -> _mouse!(v, ev), events(v.ax.scene).mousebutton)
+    # over the widgets the axis takes no mouse input (it lies under them all):
+    # its turning, panning and zooming switched off there, not during a drag
+    e = events(v.fig.scene)
+    # a press on the widgets reaches the axis's mouse tracking too, but a menu
+    # takes the release: a release sent at the next move ends that "drag"
+    pressed_on_widgets = Ref(false)
+    on(e.mousebutton; priority = 100) do ev
+        ev.action == Mouse.press &&
+            (pressed_on_widgets[] = _over_widgets(v, Point2f(e.mouseposition[])))
+        return Consume(false)
+    end
+    on(e.mouseposition; priority = 100) do pos
+        isempty(e.mousebuttonstate) || return Consume(false)
+        if pressed_on_widgets[]
+            pressed_on_widgets[] = false
+            empty!(v.pressed_at)
+            e.mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.release)
+        end
+        _axis_interactions!(v.ax, !_over_widgets(v, Point2f(pos)))
+        return Consume(false)
+    end
+end
+
+# Whether screen position `pos` is on the panel, the colour bar or an open
+# dropdown list (which may reach beyond the panel)
+function _over_widgets(v, pos)
+    pos in v.panel.layoutobservables.computedbbox[] && return true
+    v.colorbar.blockscene.visible[] &&
+        pos in v.colorbar.layoutobservables.computedbbox[] && return true
+    return any(b -> b isa Menu && b.is_open[], _blocks(v.panel))
+end
+
+# The axis's mouse interactions (turning, panning, zooming, resets) on or off
+function _axis_interactions!(ax, active)
+    for (name, (now, _)) in Makie.interactions(ax)
+        now == active && continue
+        active ? Makie.activate_interaction!(ax, name) :
+                 Makie.deactivate_interaction!(ax, name)
+    end
 end
 
 # The current surface's traps by the method now chosen
@@ -209,7 +259,7 @@ function _draw!(v)
     empty!(v.ax)
     empty!(v.plots)
     v.in_detail[] = false
-    v.detail.label[] = "Trap detail"
+    isnothing(v.detail) || (v.detail.label[] = "Trap detail")
     # one colour per column from the start (a plot of one colour keeps one)
     colours = _column_colours(v, last(_path(res, v.selection[])))
     v.plots[:surface] = _surface_mesh!(v.ax, s; color = colours, offset = 0.0,
@@ -269,6 +319,7 @@ end
 # own colour, the selected path's traps by _path_colour, the selected column
 # yellow
 function _column_colours(v, path)
+    isnothing(v.values[]) || return _value_colours(v)
     c = v.current[]
     s, res = c.s, c.res
     show_traps = v.toggles.traps.active[]
@@ -292,6 +343,58 @@ function _column_colours(v, path)
     sel = v.selection[].column
     sel > 0 && (out[sel] = RGBAf(1, 1, 0, 1))
     return out
+end
+
+# A colour per column from the values shown (show_column_values!): the
+# colormap over their finite range, light grey where NaN, the selected column
+# yellow
+function _value_colours(v)
+    val = v.values[]
+    cmap = Makie.to_colormap(val.colormap)
+    lims = _value_limits(val.values)
+    out = [isfinite(x) ? RGBAf(Makie.interpolated_getindex(cmap, x, lims)) :
+           RGBAf(0.85, 0.85, 0.85, 1) for x in val.values]
+    sel = v.selection[].column
+    sel > 0 && (out[sel] = RGBAf(1, 1, 0, 1))
+    return out
+end
+
+# The finite range of values (widened if a single value; (0, 1) if none)
+function _value_limits(values)
+    finite = filter(isfinite, values)
+    isempty(finite) && return (0.0, 1.0)
+    lo, hi = extrema(finite)
+    return hi > lo ? (lo, hi) : (lo - 0.5, hi + 0.5)
+end
+
+# The colour bar of values shown, at the bottom left, hidden until used
+function _value_colorbar(fig)
+    cb = Colorbar(fig[1, 1]; limits = (0.0, 1.0), height = 300, width = 15,
+                  halign = :left, valign = :bottom, tellwidth = false,
+                  tellheight = false)
+    cb.blockscene.visible[] = false
+    return cb
+end
+
+function show_column_values!(v, values; label = "", colormap = :viridis)
+    _locked(v) do
+        c = v.current[]
+        if isnothing(values)
+            v.values[] = nothing
+            v.colorbar.blockscene.visible[] = false
+        else
+            length(values) == length(c.s.zc) ||
+                throw(ArgumentError("one value per column needed"))
+            v.values[] = (values = collect(Float64, values), label = label,
+                          colormap = colormap)
+            v.colorbar.limits[] = _value_limits(v.values[].values)
+            v.colorbar.colormap[] = colormap
+            v.colorbar.label[] = label
+            v.colorbar.blockscene.visible[] = true
+        end
+        _update!(v)
+    end
+    return v
 end
 
 # The colours, the selection's overlays (its traps' outline, rivers, a
@@ -372,6 +475,7 @@ const _PIE_COLOURS = [RGBf(0, 0, 0.7), RGBf(0.1, 0.8, 0.1), RGBf(0.6, 0, 0)]
 
 # The charts for trap t and its path (hidden for none)
 function _charts!(v, t, path)
+    isempty(v.charts) && return
     foreach(p -> p.visible[] = t > 0, values(v.charts))
     t == 0 && return
     vol = v.current[].vol
@@ -434,6 +538,7 @@ function _report(v, t, path)
     head = @sprintf("%d columns, %d traps, %.3g Mm³ in all", length(s.zc), length(vol),
                     sum(vol; init = 0.0) / 1e6)
     col = v.selection[].column
+    v.selectable || return head
     col == 0 && return head * "\n\nClick a column (shift: upstream)."
     at = @sprintf("\n\nColumn %d at (%.0f, %.0f), %.0f m", col, s.cx[col], s.cy[col],
                      s.zc[col])
@@ -452,6 +557,7 @@ end
 # view): left picks a column (shift-left or middle: upstream, as co2lab),
 # right clears the selection; clicks on the panel are the widgets'
 function _mouse!(v, ev)
+    v.selectable || return
     ev.button in (Mouse.left, Mouse.middle, Mouse.right) || return
     scene = v.ax.scene
     pos = Point2f(events(scene).mouseposition[])
@@ -461,7 +567,7 @@ function _mouse!(v, ev)
     end
     sum(abs2, pos .- get(v.pressed_at, ev.button, Point2f(Inf))) < 9 || return
     (isnothing(v.current[]) || v.in_detail[]) && return
-    pos in v.panel.layoutobservables.computedbbox[] && return
+    _over_widgets(v, pos) && return
     if ev.button == Mouse.right
         _locked(v) do
             v.selection[] = (column = 0, upstream = false)

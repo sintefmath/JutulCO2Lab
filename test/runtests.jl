@@ -40,6 +40,7 @@ JutulCO2Lab._column_relperm(::_StandInSharp, i, sG, sGmax, h, h_max, H, drho, dh
 include("atlas_checks.jl")
 include("trap_checks.jl")
 include("inventory_checks.jl")
+include("capacity_checks.jl")
 include("fringe_checks.jl")
 
 # The VE sloping-aquifer domain of an MRST dump (3D grid G3 and rock).
@@ -1706,6 +1707,45 @@ end
             @test Set(zip(a.x, a.y, a.z)) == Set(zip(b.y, b.x, b.z))
             @test_throws ArgumentError igems_surface_path("OSS", 1000)
         end
+    end
+
+    @testset "capacity estimate (Stage 11 item 2)" begin
+        f = joinpath(refdir, "capacity.mat")
+        if isfile(f)
+            rep = _capacity_vs_mrst(matread(f))
+            passed(rep) || display(rep)
+            @test passed(rep)
+        else
+            @info "Skipping: $f (scripts/mrst_capacity.m) missing"
+        end
+
+        # the synthetic caprock, a constant CO2 density: the parts add up to the
+        # pore volume, the trap parts to the trap volumes
+        s = trap_surface(_sine_mesh()...)
+        res = trap_analysis(s; method = :node)
+        n, poro, rho = length(s.zc), 0.25, 700.0
+        p, T = fill(10e6, n), fill(320.0, n)
+        dense(p, T) = rho
+        a = trapping_capacity(s, res; p, T, res_gas = 1.0, res_water = 0.0,
+                              dis_max = 0.0, poro, co2_density = dense)
+        @test sum(a.structural) ≈ rho * sum(trap_volumes(s, res; poro = fill(poro, n)))
+        @test sum(a.structural) + sum(a.residual) ≈ rho * poro * sum(s.area .* s.H)
+        @test all(iszero, a.dissolved)
+        b = trapping_capacity(s, res; p, T, res_gas = 0.2, res_water = 0.1,
+                              dis_max = 50.0, poro, co2_density = dense)
+        pv_trap = s.area .* b.trap_height .* poro
+        @test b.structural ≈ pv_trap .* (0.9rho + 0.1 * 50)
+        @test b.dissolved ≈ (s.area .* s.H .* poro .- pv_trap) .* 0.8 * 50
+        # reachable: the trap a column drains into and those downstream
+        r = reachable_capacity(res, b.structural)
+        k = findfirst(>(0), res.trap_regions)
+        down = downstream_traps(res, res.trap_regions[k])
+        @test r[k] ≈ sum(b.structural[findall(in(down), res.traps)])
+        @test all(iszero, r[res.trap_regions .== 0])
+        # JutulDarcy's CO2 density by default
+        c = trapping_capacity(s, res; p, T, res_gas = 0.2, res_water = 0.1,
+                              dis_max = 50.0, poro)
+        @test all(x -> 100 < x < 1000, c.density)
     end
 
     @testset "trapping inventory vs co2lab (Stage 9 item 2)" begin
