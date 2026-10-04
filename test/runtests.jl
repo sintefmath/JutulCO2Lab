@@ -1395,6 +1395,225 @@ end
             fluid = co2lab_ve_fluid(; default_pvt = nothing, vertical = other))
     end
 
+    @testset "layered fringe (Stage 6, combined model)" begin
+        J = JutulCO2Lab
+        # 4 columns of 10 layers of 2 m; Δρ, residuals; fringes with and
+        # without entry pressure
+        mesh = _cp_mesh(4, 10, (i, k) -> 1000.0 + 2.0 * i + 2.0 * (k - 1))
+        cols, _ = ve_columns(mesh)
+        layer = [cell_ijk(mesh, c)[3] for c in 1:number_of_cells(mesh)]
+        H, drho, g, rw, rg, pe = 20.0, 300.0, Jutul.gravity_constant, 0.2, 0.25, 3e3
+        curves = (p -> 0.8 * (pe / (max(p, 0.0) + pe))^2 + 0.2,
+                  p -> 0.8 * (pe / max(p, pe))^2 + 0.2)
+        dom = Dict(:column_height => fill(H, 4))
+        fl(v) = co2lab_ve_fluid(; default_pvt = nothing, vertical = v, residual = (rw, rg))
+        build(v) = J._vertical_model(v, dom, fl(v))
+        uniform = (poro = fill(0.2, 40), perm_x = fill(1e-13, 40))
+
+        # uniform rock: CapillaryFringeTable's heights and krG; krW co2lab's
+        # krW_simple less r_w/(1 − r_w)·(S − S_free) (the integrated brine)
+        for invpc in curves
+            mu = build(LayeredFringe(mesh, cols; uniform..., invPc3D = invpc, kr3D = 2))
+            mc = build(CapillaryFringeTable(; invPc3D = invpc, kr3D = 2))
+            for (s, smax) in ((1e-7, 1e-7), (0.05, 0.05), (0.2, 0.4), (0.79, 0.79))
+                hu = J._column_heights(mu, 2, s, smax, H, drho, rw, rg)
+                hc = J._column_heights(mc, 2, s, smax, H, drho, rw, rg)
+                @test all(isapprox.(hu, hc; rtol = 1e-12))
+                ku = J._column_relperm(mu, 2, s, smax, hu..., H, drho, 0.0, 1.0, 1.0,
+                                       rw, rg)
+                kc = J._column_relperm(mc, 2, s, smax, hc..., H, drho, 0.0, 1.0, 1.0,
+                                       rw, rg)
+                sf = J._free_saturation(s, smax, rw, rg)
+                @test ku[2] ≈ kc[2] rtol = 1e-12
+                @test ku[1] ≈ kc[1] - rw / (1 - rw) * (s - sf) atol = 1e-12
+            end
+        end
+
+        # layered rock: saturations by pore volume, relperms by permeability,
+        # against quadrature of the fine profile; an interval inside the column
+        poro = [0.1 + 0.02 * l for l in layer]
+        perm = [1e-13 * (1 + 0.5 * sin(l)) for l in layer]
+        lay(zz) = clamp(ceil(Int, zz / 2), 1, 10)
+        ph(zz) = 0.1 + 0.02 * lay(zz)
+        kx(zz) = 1e-13 * (1 + 0.5 * sin(lay(zz)))
+        z = range(0, H; length = 200_001)
+        mid = z[1:end-1] .+ step(z) / 2
+        quad(f, a, b) = sum((f(x) for x in mid if a <= x < b); init = 0.0) * step(z)
+        C = rg / (1 - rw)
+        quadratic = sw -> ((sw - rw) / (1 - rw))^2
+        for invpc in curves, krw3D in (:linear, quadratic)
+            m = build(LayeredFringe(mesh, cols; poro, perm_x = perm, invPc3D = invpc,
+                                    kr3D = 2, krw3D))
+            kw = krw3D isa Symbol ? (sw -> (sw - rw) / (1 - rw)) : krw3D
+            for (s, smax) in ((0.05, 0.05), (0.2, 0.4), (0.5, 0.6))
+                h, hmax = J._column_heights(m, 2, s, smax, H, drho, rw, rg)
+                krW, krG = J._column_relperm(m, 2, s, smax, h, hmax, H, drho, 0.0, 1.0,
+                                             1.0, rw, rg)
+                sg(p) = 1 - invpc(max(p, 0.0))
+                sf(zz) = sg(drho * g * (h - zz))
+                sa(zz) = (1 - C) * sf(zz) + C * sg(drho * g * (hmax - zz))
+                Vt, KH = quad(ph, 0, H), quad(kx, 0, H)
+                @test quad(zz -> ph(zz) * sg(drho * g * (hmax - zz)), 0, H) / Vt ≈
+                      smax rtol = 1e-6
+                @test quad(zz -> ph(zz) * sa(zz), 0, H) / Vt ≈ s rtol = 1e-6
+                @test quad(zz -> kx(zz) * sf(zz)^2, 0, H) / KH ≈ krG rtol = 1e-5
+                @test quad(zz -> kx(zz) * kw(1 - sa(zz)), 0, H) / KH ≈ krW rtol = 1e-6
+                # the cells are 100 m × 100 m in plan (relative to the column's)
+                I = J._interval_integrals(m, 2, 3.3, 11.7, h, hmax, drho)
+                @test I.co2 ≈ 1e4 * quad(zz -> ph(zz) * sa(zz), 3.3, 11.7) atol =
+                      1e-6 * s * 1e4 * Vt
+            end
+        end
+
+        # zero capillarity: the integrated sharp interface (its brine endpoint
+        # in the residual zone that of the linear krw3D, 1 − r_g/(1 − r_w))
+        sharp = build(LayeredFringe(mesh, cols; poro, perm_x = perm,
+                                    invPc3D = p -> p > 0 ? rw : 1.0, kr3D = 2))
+        si = SharpInterfaceIntegrated(mesh, cols; poro, perm_x = perm)
+        for (s, smax) in ((0.05, 0.05), (0.2, 0.4))
+            hl = J._column_heights(sharp, 2, s, smax, H, drho, rw, rg)
+            hs = J._column_heights(si, 2, s, smax, H, drho, rw, rg)
+            @test all(isapprox.(hl, hs; rtol = 1e-9))
+            kl = J._column_relperm(sharp, 2, s, smax, hl..., H, drho, 0.0, 1.0, 1.0,
+                                   rw, rg)
+            ks = J._column_relperm(si, 2, s, smax, hs..., H, drho, 0.0,
+                                   1 - rg / (1 - rw), (1 - rw)^2, rw, rg)
+            @test all(isapprox.(kl, ks; rtol = 1e-9))
+        end
+        # ... with its derivatives, also at an empty column's S = 0 (the
+        # profile steps up at p = 0; a quadratic brine curve integrated by
+        # quadrature across the moving step)
+        sq = build(LayeredFringe(mesh, cols; poro, perm_x = perm,
+                                 invPc3D = p -> p > 0 ? rw : 1.0, kr3D = 2,
+                                 krw3D = sw -> ((sw - rw) / (1 - rw))^2))
+        # no residual CO2 (rg = 0): the brine endpoints of both are 1
+        kr(m, x, kw) = (sm = J._effective_max(x[2], x[1], rw, 0.0);
+                        hh = J._column_heights(m, 2, x[1], sm, H, drho, rw, 0.0);
+                        collect(J._column_relperm(m, 2, x[1], sm, hh..., H, drho, 0.0,
+                                                  kw, (1 - rw)^2, rw, 0.0)))
+        for x0 in ([0.0, 0.0], [0.1, 0.0])
+            jl = Jutul.ForwardDiff.jacobian(x -> kr(sq, x, 1.0), x0)
+            js = Jutul.ForwardDiff.jacobian(x -> kr(si, x, 1.0), x0)
+            @test jl ≈ js rtol = 1e-8
+        end
+
+        # derivatives (one Newton step with AD) against central differences,
+        # away from the drainage–imbibition switch
+        m = build(LayeredFringe(mesh, cols; poro, perm_x = perm, invPc3D = curves[2],
+                                kr3D = 2))
+        f(x) = (hh = J._column_heights(m, 3, x[1], x[2], H, x[3], rw, rg);
+                [hh..., J._column_relperm(m, 3, x[1], x[2], hh..., H, x[3], 0.0, 1.0,
+                                          1.0, rw, rg)...])
+        for x0 in ([0.2, 0.4, 300.0], [0.04, 0.05, 280.0])
+            jac = Jutul.ForwardDiff.jacobian(f, x0)
+            e = [1e-7, 1e-7, 1e-4] .* x0
+            fd = reduce(hcat, [(f(x0 .+ e[j] .* (1:3 .== j)) .-
+                                f(x0 .- e[j] .* (1:3 .== j))) ./ (2e[j]) for j in 1:3])
+            @test jac ≈ fd rtol = 1e-5
+        end
+        # an empty column of uniform rock keeps co2lab's brine slope,
+        # −1/(1 − r_w), at S = 0 (layers weight it by the top's k/φ)
+        mu = build(LayeredFringe(mesh, cols; uniform..., invPc3D = curves[2], kr3D = 2))
+        @test Jutul.ForwardDiff.derivative(
+            s -> J._column_relperm(mu, 3, s, s, J._column_heights(mu, 3, s, s, H, drho,
+                                   rw, rg)..., H, drho, 0.0, 1.0, 1.0, rw, rg)[1],
+            0.0) ≈ -1 / (1 - rw) rtol = 1e-6
+
+        # co2lab's dimensionless curve, physical: CapillaryFringeTable's scaling
+        cc = co2lab_capillary_curve(0.4, 0.5; height = H, drho = 300.0, res_water = rw)
+        scaled = J._fine_capillary_curve((0.4, 0.5), H * 300.0 * g, rw)
+        @test all(cc(p) ≈ scaled(p) for p in (0.0, 1e3, 1e5))
+        @test_throws ArgumentError LayeredFringe(mesh, cols; poro, perm_x = perm,
+                                                 invPc3D = (0.4, 0.5))
+        # the fringe models refuse the caprock's rugosity
+        rough = Dict(:column_height => fill(H, 4), :rugosity => fill(0.5, 4))
+        for v in (CapillaryFringeTable(; invPc3D = curves[1]),
+                  LayeredFringe(mesh, cols; poro, perm_x = perm, invPc3D = curves[1]))
+            @test_throws ArgumentError J._vertical_model(v, rough, fl(v))
+        end
+
+        # a run: CO2 conserved
+        ve = ve_domain(mesh, cols; perm_x = perm, poro)
+        v = LayeredFringe(mesh, cols; poro, perm_x = perm, invPc3D = curves[1], kr3D = 2,
+                          krw3D = quadratic)
+        flr = co2lab_ve_fluid(; default_pvt = nothing, vertical = v, residual = (rw, rg),
+                              wat_rho_pvt = (4.3e-10, 100e5),
+                              co2_rho_pvt = (4.3e-9, 100e5))
+        well = setup_ve_well(ve, 4; name = :inj)
+        model = setup_co2lab_model(ve.domain; wells = [well], fluid = flr)
+        q = 2e-4
+        on = setup_reservoir_forces(model;
+                                    control = Dict(:inj => co2_injector_control(
+                                        TotalRateTarget(q), flr)))
+        off = setup_reservoir_forces(model; control = Dict(:inj => DisabledControl()))
+        p0 = ve_hydrostatic_pressure(ve.geometry; rho_w = 1100.0)
+        state0 = setup_co2lab_state(model; pressure = p0, forces = on)
+        dt = fill(30 * 86400.0, 10)
+        case = JutulCase(model, dt, [k <= 5 ? on : off for k in 1:10]; state0,
+                         parameters = setup_parameters(model))
+        sim, cfg = setup_co2lab_simulator(case; info_level = -1)
+        st = simulate_reservoir(case; simulator = sim, config = cfg).states
+        injected = 5 * 30 * 86400.0 * q * flr.rho_ref[2]
+        @test abs(sum(st[end][:TotalMasses][2, :]) - injected) / injected < 1e-4
+        @test model[:Reservoir].secondary_variables[:PlumeHeights].vertical isa
+              J.LayeredFringeModel
+    end
+
+    @testset "endpoint-scaling hysteresis in fine 3D cells (Stage 6)" begin
+        J = JutulCO2Lab
+        rw, rg = 0.2, 0.25
+        krg(s) = min(s, 1 - rw)^2
+        imb(s) = krg((1 - rw) * max(s - rg, 0.0) / (1 - rw - rg))
+        s = collect(range(0.0, 1.0; length = 4001))
+        tab(f) = JutulDarcy.PhaseRelativePermeability(s, f.(s); label = :g)
+        H = EndpointScalingHysteresis(rw, rg)
+        # the relperm at co2lab's free saturation, below and at the largest
+        # maximum (JutulDarcy takes the imbibition curve there)
+        for (sg, smax) in ((0.3, 0.5), (0.1, 0.4), (0.5, 0.8), (0.3, 0.3))
+            kr = JutulDarcy.kr_hysteresis(H, tab(krg), tab(imb), sg, smax)
+            @test kr ≈ krg(J._free_saturation(sg, smax, rw, rg)) atol = 1e-6
+        end
+
+        # a column of 10 cells: CO2 injected at the bottom, then brine; cells
+        # with only residual CO2 have the capillary pressure of zero free CO2
+        mesh = reservoir_mesh((1, 1, 10), (10.0, 10.0, 10.0))
+        domain = reservoir_domain(mesh; permeability = 1e-13, porosity = 0.2)
+        sys = ImmiscibleSystem((AqueousPhase(), VaporPhase());
+                               reference_densities = (1000.0, 700.0))
+        well = setup_well(domain, [10]; name = :inj)
+        model = setup_reservoir_model(domain, sys; wells = [well])
+        pc(sg) = 2e3 * sg
+        kr = JutulDarcy.ReservoirRelativePermeabilities(
+            w = JutulDarcy.PhaseRelativePermeability(s, (x -> max(x - rw, 0.0) /
+                                                     (1 - rw)).(s); label = :w),
+            g = (tab(krg), tab(imb)), hysteresis_g = H)
+        replace_variables!(model; RelativePermeabilities = kr)
+        JutulDarcy.add_relperm_parameters!(model)
+        set_secondary_variables!(model[:Reservoir];
+                                 CapillaryPressure = FreeSaturationCapillaryPressure(pc,
+                                                                                    rw, rg))
+        push!(model[:Reservoir].output_variables, :MaxSaturations, :CapillaryPressure)
+        z = domain[:cell_centroids][3, :]
+        state0 = setup_reservoir_state(model; Pressure = 1e7 .+ 1e4 .* z,
+                                       Saturations = [1.0, 0.0])
+        ctrl(f) = Dict(:inj => InjectorControl(TotalRateTarget(2e-5), f;
+                                               density = f[1] > 0 ? 1000.0 : 700.0))
+        forces = [setup_reservoir_forces(model; control = ctrl(f))
+                  for f in ([0.0, 1.0], [1.0, 0.0])]
+        dt = fill(10 * 86400.0, 20)
+        res = simulate_reservoir(state0, model, dt; forces = [k <= 10 ? forces[1] :
+                                                             forces[2] for k in 1:20],
+                                 info_level = -1)
+        st = res.states[end]
+        sg, smax = st[:Saturations][2, :], st[:MaxSaturations][2, :]
+        free = J._free_saturation.(sg, smax, rw, rg)
+        @test st[:CapillaryPressure][1, :] ≈ pc.(free)
+        # residual CO2 left behind by the brine, holding no capillary pressure
+        trapped = findall(i -> sg[i] > 1e-3 && free[i] < 1e-8, eachindex(sg))
+        @test !isempty(trapped)
+        @test all(abs.(st[:CapillaryPressure][1, trapped]) .< 1e-3)
+    end
+
     @testset "tabulated PVT (Stage 7)" begin
         J = JutulCO2Lab
         # JutulDarcy's CSP11 CO2 viscosity is NIST-consistent, as co2lab's

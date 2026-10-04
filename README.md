@@ -24,8 +24,11 @@ vertical-model framework (`VerticalModel`; co2lab's sharp interface is
 Hermite tables), with reconstruction, the inventory split and dissolution,
 gated against a patched co2lab on `exampleVEJohansen.m`; and co2lab's
 `'sharp_interface_integrated'` for rock varying with depth
-(`SharpInterfaceIntegrated`), gated on `sharpInterfaceCrossSectionExample.m`.
-`examples/johansen_ve.jl` runs `exampleVEJohansen.m`.
+(`SharpInterfaceIntegrated`), gated on `sharpInterfaceCrossSectionExample.m`;
+and, not in co2lab, the fringe and the layers together (`LayeredFringe`: a
+per-cell sum over each column's fine cells, built on integrals over any depth
+interval for Stage 12), checked against both in their limits and against
+quadrature. `examples/johansen_ve.jl` runs `exampleVEJohansen.m`.
 Readable walkthroughs: `examples/sloping_aquifer.jl` (Stage 2),
 `examples/residual_trapping.jl` (Stage 3, residual trapping) and
 `examples/dissolution.jl` (Stage 4, rate-driven and instantaneous
@@ -191,6 +194,10 @@ src/ve/              the VE simulator
                      profile, touched brine
   sharp_interface_integrated.jl  the integrated sharp interface: heights by
                      pore volume, relperm by permeability, over the fine cells
+  layered_fringe.jl  the fringe in layered columns: per-cell sums over each
+                     column's fine cells, integrals over any depth interval
+  fine_hysteresis.jl  co2lab's endpoint-scaling hysteresis for fine 3D cells
+                     (JutulDarcy relperm hysteresis and capillary pressure)
   co2lab_fluid.jl    co2lab's fluid system: black-oil with a :co2lab formulation,
                      unknowns by configuration; dissolution transfer, hysteresis;
                      model, state and simulator setup

@@ -23,7 +23,8 @@
 # temperature from 7 °C at the sea floor, 100 m, and 35.6 °C/km); residual
 # saturations 0.11 and 0.21; dissolution at co2lab's rate, at most 53 kg CO2
 # per m³ brine; the capillary fringe co2lab's 'P-scaled table'; subscale
-# trapping a rugosity of the caprock (m). A well in a shallow, cold column
+# trapping a rugosity of the caprock (m), not with the fringe (either toggle
+# switches the other off). A well in a shallow, cold column
 # (where the injected CO2 crosses its boiling curve) makes the run slow.
 
 using JutulCO2Lab
@@ -492,6 +493,13 @@ function connect_app!(v, st, r)
     on(_ -> update_overlays!(v, st), w.btype.selection)
     on(_ -> background(() -> launch!(v, st, r)), w.run.launch.clicks)
     on(_ -> r.running[] && (r.run[].stop[] = true), w.run.stop.clicks)
+    # the fringe does not combine with rugosity: one toggle switches the other off
+    on(w.run.fringe.active) do on
+        on && w.run.subscale.active[] && (w.run.subscale.active[] = false)
+    end
+    on(w.run.subscale.active) do on
+        on && w.run.fringe.active[] && (w.run.fringe.active[] = false)
+    end
     on(_ -> show_state!(r), r.var.selection)
     on(_ -> show_state!(r), r.time.value)
 end

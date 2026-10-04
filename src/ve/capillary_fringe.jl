@@ -65,6 +65,9 @@ formation (makeVEFluid's options of the same names):
   function of the J-variable `pc/kscale`, `kscale = surface_tension·√(φ/k)`
   per column from the domain's upscaled porosity and permeability.
 
+Does not combine with the caprock's rugosity (co2lab's neither):
+[`setup_co2lab_model`](@ref) refuses a domain with a non-zero `:rugosity`.
+
 Hysteresis is co2lab's `'endpoint scaling'` (its default): the residual CO2
 at each depth scales with the maximum saturation reached there. co2lab's
 experimental `'fixed residual'` is not offered (researcher, 2026-10-01).
@@ -114,6 +117,7 @@ end
 # The table for `domain` and `fluid`: co2lab's fine-scale functions
 # (setup_fine_scale_functions) and upper limit, the adaptive Hermite table
 function _vertical_model(spec::CapillaryFringeTable, domain, fluid)
+    _refuse_rugosity(domain, "CapillaryFringeTable")
     H = domain[:column_height]
     g = Jutul.gravity_constant
     drho_ref = fluid.rho_ref[1] - fluid.rho_ref[2]
@@ -132,6 +136,16 @@ function _vertical_model(spec::CapillaryFringeTable, domain, fluid)
     t = _adaptive_table(sg, kr3D, pmax, spec.tolerance)
     return PScaledTable(t..., invpc, kscale, spec.tip_saturation,
                         _entry_pressure(sg, pmax), spec.touched_saturation)
+end
+
+# The fringe models do not combine with the caprock's rugosity (co2lab's
+# neither): its flow would ignore it while the trapping inventory split off
+# subscale-trapped CO2 (researcher, 2026-10-04). Throws if the domain has any.
+function _refuse_rugosity(domain, model)
+    haskey(domain, :rugosity) && any(>(0), domain[:rugosity]) &&
+        throw(ArgumentError("$model does not combine with caprock rugosity; " *
+                            "set the domain's rugosity to zero"))
+    return nothing
 end
 
 # The density difference in the table's variable: Δρ/kscale (Δρ without
@@ -216,8 +230,13 @@ function _adaptive_table(sg, kr3D, pmax, rtol)
     p = [first.(done); last(done[end])]
     SP = cumsum([0.0; [_gl_integral(sg, a, b) for (a, b) in done]])
     krP = cumsum([0.0; [_gl_integral(krs, a, b) for (a, b) in done]])
-    return (p, SP, sg.(p), krP, krs.(p))
+    return (p, SP, _right_values(sg, p), krP, _right_values(krs, p))
 end
+
+# f at the nodes p, at 0 from the right: a curve without capillarity steps up
+# at p = 0, and the integrals' slope there is the plume's (continuous curves:
+# the same value)
+_right_values(f, p) = [x == 0 ? f(nextfloat(0.0)) : f(x) for x in p]
 
 # Where sg turns positive (0 without an entry pressure), by bisection
 function _entry_pressure(sg, pmax)
@@ -236,7 +255,9 @@ function _hermite_fine(sg, krs, a, b, rtol)
     m = (a + b) / 2
     for f in (sg, krs)
         I_ab, I_am = _gl_integral(f, a, b), _gl_integral(f, a, m)
-        pred = _hermite(a, b, 0.0, I_ab, f(a), f(b), m)
+        # the node values as the table has them (from the right at 0)
+        fa = a == 0 ? f(nextfloat(0.0)) : f(a)
+        pred = _hermite(a, b, 0.0, I_ab, fa, f(b), m)
         abs(pred - I_am) <= rtol * abs(I_am) + 1e-14 * (b - a) || return false
     end
     return true
@@ -263,13 +284,13 @@ end
 """
     _table_value(m, Y, dY, x) -> Real
 
-The table `Y` (`m.SP` or `m.krP`, derivatives `dY`) at `x`: 0 for `x ≤ 0`,
-cubic Hermite on the nodes, linear beyond the last node. `x` may carry AD
-derivatives.
+The table `Y` (`m.SP` or `m.krP`, derivatives `dY`) at `x`: 0 for `x < 0`,
+cubic Hermite on the nodes (at `x = 0` with the slope from the right, the
+plume's), linear beyond the last node. `x` may carry AD derivatives.
 """
 function _table_value(m::PScaledTable, Y, dY, x)
     xv = Jutul.value(x)
-    xv <= 0 && return zero(x)
+    xv < 0 && return zero(x)
     n = length(m.p)
     xv >= m.p[n] && return Y[n] + dY[n] * (x - m.p[n])
     k = searchsortedlast(m.p, xv)
@@ -278,7 +299,7 @@ end
 
 "The derivative of `_table_value` at the plain value `x`."
 function _table_slope(m::PScaledTable, Y, dY, x)
-    x <= 0 && return 0.0
+    x < 0 && return 0.0
     n = length(m.p)
     x >= m.p[n] && return dY[n]
     k = searchsortedlast(m.p, x)
