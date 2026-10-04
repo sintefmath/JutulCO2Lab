@@ -114,10 +114,17 @@ end
 
 # ------------------------------- Building tables ------------------------------
 
-# The table for `domain` and `fluid`: co2lab's fine-scale functions
-# (setup_fine_scale_functions) and upper limit, the adaptive Hermite table
+# co2lab's fringe for `domain` and `fluid`: its table (below), without
+# caprock rugosity
 function _vertical_model(spec::CapillaryFringeTable, domain, fluid)
     _refuse_rugosity(domain, "CapillaryFringeTable")
+    return _fringe_table(spec, domain, fluid)
+end
+
+# The table for `domain` and `fluid`: co2lab's fine-scale functions
+# (setup_fine_scale_functions) and upper limit, the adaptive Hermite table.
+# Returns a new PScaledTable; the arguments are only read.
+function _fringe_table(spec::CapillaryFringeTable, domain, fluid)
     H = domain[:column_height]
     g = Jutul.gravity_constant
     drho_ref = fluid.rho_ref[1] - fluid.rho_ref[2]

@@ -1525,15 +1525,44 @@ end
         @test all(cc(p) ≈ scaled(p) for p in (0.0, 1e3, 1e5))
         @test_throws ArgumentError LayeredFringe(mesh, cols; poro, perm_x = perm,
                                                  invPc3D = (0.4, 0.5))
-        # the fringe models refuse the caprock's rugosity
+        # co2lab's fringe refuses the caprock's rugosity; LayeredFringe takes it
         rough = Dict(:column_height => fill(H, 4), :rugosity => fill(0.5, 4))
-        for v in (CapillaryFringeTable(; invPc3D = curves[1]),
-                  LayeredFringe(mesh, cols; poro, perm_x = perm, invPc3D = curves[1]))
-            @test_throws ArgumentError J._vertical_model(v, rough, fl(v))
+        v = CapillaryFringeTable(; invPc3D = curves[1])
+        @test_throws ArgumentError J._vertical_model(v, rough, fl(v))
+        v = LayeredFringe(mesh, cols; poro, perm_x = perm, invPc3D = curves[1])
+        @test J._vertical_model(v, rough, fl(v)) isa J.LayeredFringeModel
+
+        # rugosity: the relief's CO2 immobile, both relperms integrated from dh
+        # (quadrature), at zero capillarity the integrated sharp interface's
+        # accretion layer, with its derivatives
+        for invpc in curves, (s, smax, dh) in ((0.2, 0.4, 1.5), (0.5, 0.6, 3.0))
+            m = build(LayeredFringe(mesh, cols; poro, perm_x = perm, invPc3D = invpc,
+                                    kr3D = 2))
+            h, hmax = J._column_heights(m, 2, s, smax, H, drho, rw, rg)
+            krW, krG = J._column_relperm(m, 2, s, smax, h, hmax, H, drho, dh, 1.0, 1.0,
+                                         rw, rg)
+            sg(p) = 1 - invpc(max(p, 0.0))
+            sf(zz) = sg(drho * g * (h - zz))
+            sa(zz) = (1 - C) * sf(zz) + C * sg(drho * g * (hmax - zz))
+            KH = quad(kx, 0, H)
+            @test quad(zz -> kx(zz) * sf(zz)^2, dh, H) / KH ≈ krG rtol = 1e-5
+            @test quad(zz -> kx(zz) * (1 - sa(zz) / (1 - rw)), dh, H) / KH ≈ krW rtol = 1e-6
+        end
+        rel(m, kw, d) = x -> (sm = J._effective_max(x[2], x[1], rw, rg);
+                              hh = J._column_heights(m, 2, x[1], sm, H, drho, rw, rg);
+                              collect(J._column_relperm(m, 2, x[1], sm, hh..., H, drho,
+                                                        d, kw, (1 - rw)^2, rw, rg)))
+        # (off the drainage–imbibition switch, where the two models take
+        # different one-sided derivatives)
+        for (s, smax, d) in ((0.04, 0.05, 1.5), (0.2, 0.4, 3.0), (0.5, 0.6, 0.5))
+            x0, kwi = [s, smax], 1 - rg / (1 - rw)
+            @test rel(sharp, 1.0, d)(x0) ≈ rel(si, kwi, d)(x0) rtol = 1e-9
+            @test Jutul.ForwardDiff.jacobian(rel(sharp, 1.0, d), x0) ≈
+                  Jutul.ForwardDiff.jacobian(rel(si, kwi, d), x0) rtol = 1e-8
         end
 
-        # a run: CO2 conserved
-        ve = ve_domain(mesh, cols; perm_x = perm, poro)
+        # a run, with rugosity: CO2 conserved
+        ve = ve_domain(mesh, cols; perm_x = perm, poro, rugosity = 0.5)
         v = LayeredFringe(mesh, cols; poro, perm_x = perm, invPc3D = curves[1], kr3D = 2,
                           krw3D = quadratic)
         flr = co2lab_ve_fluid(; default_pvt = nothing, vertical = v, residual = (rw, rg),

@@ -23,7 +23,11 @@
 #   krW_simple in drainage, less by r_w/(1 − r_w)·(S − S_free) with residual CO2;
 # - physical capillary curves only (`co2lab_capillary_curve` converts
 #   co2lab's dimensionless (C, alpha));
-# - no caprock rugosity (a second pass);
+# - the caprock's rugosity dh: the CO2 filling the subscale relief (the top dh
+#   of the column, at the fringe's saturation there) is immobile, and the
+#   relief takes no part in lateral flow, brine included — both relperms are
+#   integrated from dh (co2lab's accretion layer of the sharp interface;
+#   researcher, 2026-10-04: the second pass);
 # - built on integrals over any depth interval, which roadmap Stage 12's
 #   transition flux needs.
 #
@@ -55,8 +59,10 @@ cells:
 
 Saturations are integrated by pore volume, relperms by permeability, over
 the fringe's profile cell by cell; hysteresis is co2lab's endpoint scaling.
-Does not combine with the caprock's rugosity: [`setup_co2lab_model`](@ref)
-refuses a domain with a non-zero `:rugosity`.
+The caprock's rugosity (the domain's `:rugosity`, `dh` per column) is the
+height of its subscale relief: the CO2 there, at the fringe's saturation, is
+immobile, and both relperms are integrated from `dh` down (at zero
+capillarity co2lab's accretion layer, as [`SharpInterfaceIntegrated`](@ref)).
 
 Returns a new `LayeredFringe` to give to [`co2lab_ve_fluid`](@ref) as
 `vertical`; it belongs to this grid. The arguments are only read.
@@ -114,9 +120,8 @@ end
 
 # The model belongs to its grid; the table as CapillaryFringeTable's
 function _vertical_model(spec::LayeredFringe, domain, fluid)
-    _refuse_rugosity(domain, "LayeredFringe")
     _vertical_model(spec.cells, domain, fluid)
-    table = _vertical_model(spec.fringe, domain, fluid)
+    table = _fringe_table(spec.fringe, domain, fluid)
     return LayeredFringeModel(spec.cells, table, spec.krw3D, fluid.res_water,
                               fluid.res_gas)
 end
@@ -305,15 +310,19 @@ function _column_heights(m::LayeredFringeModel, i, sG, sGmax, H, drho, rw, rg)
     return (h, _layered_height(m, i, sGmax, drho))
 end
 
-# Both relperms integrated over the column, weighted by permeability; the
-# endpoints krw, krg are the fine-scale curves' (unused)
+# Both relperms integrated over the column below the subscale relief (the
+# top dh, which takes no part in lateral flow), weighted by permeability and
+# scaled by the whole column's ∫ k dz; the endpoints krw, krg are the
+# fine-scale curves' (unused)
 function _column_relperm(m::LayeredFringeModel, i, sG, sGmax, h, h_max, H, drho, dh,
                          krw, krg, rw, rg)
     Hc, _ = _column_extent(m.cells, i)
-    I = _interval_integrals(m, i, 0.0, Hc, h, h_max, drho)
+    lost = min(dh, Hc)
+    I = _interval_integrals(m, i, lost, Hc, h, h_max, drho)
+    kz = lost > 0 ? _interval_integrals(m, i, 0.0, Hc, h, h_max, drho).kz : I.kz
     Sf = _free_saturation(sG, sGmax, rw, rg)
-    krW = _tip_brine_relperm(m, i, Sf, sGmax, h_max, drho, Hc, I)
-    return (krW / I.kz, I.krG / I.kz)
+    krW = _tip_brine_relperm(m, i, Sf, sGmax, h_max, drho, lost, Hc, I)
+    return (krW / kz, I.krG / kz)
 end
 
 # The brine relperm (times ∫ k dz) below the tip saturation. There h is linear
@@ -322,13 +331,15 @@ end
 # linear in each profile's saturation instead, exact at the tip: for the
 # linear krw3D the deficit is linear in the profiles' CO2, so this is exact
 # (co2lab's krW_simple in a homogeneous column); for another krw3D to first
-# order.
-function _tip_brine_relperm(m::LayeredFringeModel, i, Sf, Sm, h_max, drho, Hc, I)
+# order. `I` holds the integrals over the depths [top, Hc] (below the
+# subscale relief), and so does the result.
+function _tip_brine_relperm(m::LayeredFringeModel, i, Sf, Sm, h_max, drho, top, Hc,
+                            I)
     tip = m.table.tip
     sf, sm = Jutul.value(Sf), Jutul.value(Sm)
     (sf >= tip && sm >= tip) && return I.krW
     ht = _layered_newton(m, i, tip, drho)
-    at(hf, hm) = _interval_integrals(m, i, 0.0, Hc, hf, hm, drho)
+    at(hf, hm) = _interval_integrals(m, i, top, Hc, hf, hm, drho)
     if m.krw3D isa Symbol
         # linear krw3D: the deficit is ((1 − C)·kfree + C·kmax)/(1 − r_w)
         C = m.res_gas / (1 - m.res_water)
