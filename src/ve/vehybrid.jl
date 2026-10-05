@@ -18,11 +18,10 @@
 # transmissibility summed from the fine grid's. Category 2 keeps the coarse
 # mesh's transmissibility (as the pure VE gates), 1 takes the fine grid's.
 #
-# `fault_flux = :co2lab` makes lateral VE–VE faces between pillars with one VE
+# `fault_flux = :virtual` (default; researcher, 2026-10-05) follows the
+# topology; `:co2lab` makes lateral VE–VE faces between pillars with one VE
 # block each continuous (co2lab's smooth flux across faults, for the gates
-# against MRST; stacked blocks follow the topology in any case); `:virtual` is the
-# researcher's choice (2026-10-05), the default once the transition flux
-# exists (roadmap Stage 12 item 3).
+# against MRST; stacked blocks follow the topology in any case).
 
 const _FACE_SEALED = 0
 const _FACE_FINE = 1

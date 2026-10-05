@@ -28,7 +28,10 @@ year = 365.25 * 86400
 
 # co2lab's Johansen VE grid: the sector model's cells with permeability above
 # 0.11 mD, columns down to the first hole (topSurfaceGrid's
-# discard_below_holes), the rock averaged over each column.
+# discard_below_holes), the rock averaged over each column. Across the faults
+# where the caprock breaks off (146 faces) the flux compares the two sides'
+# pressures at a common depth (a virtual cell); co2lab joins the caprocks
+# smoothly instead (`fault_flux = :co2lab`).
 d = matread(joinpath(refdir, "johansen_grids.mat"))
 mesh = ve_mesh_from_mrst(d["G3"])
 columns, _ = ve_columns(mesh)

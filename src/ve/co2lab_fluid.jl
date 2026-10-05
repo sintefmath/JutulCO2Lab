@@ -360,15 +360,23 @@ Fine 3D cells of a hybrid grid (`is_ve` false; `nothing` = all VE) dissolve
 instantaneously: co2lab's rate law is an upscaled phenomenon, the convective
 mixing below a segregated plume (researcher, 2026-10-05).
 """
-struct DissolvedCO2Equation{D, M, V} <: Jutul.JutulEquation
+struct DissolvedCO2Equation{D, M, V, F} <: Jutul.JutulEquation
     flow_discretization::D  # faces and stencil (TPFA)
     dis_rate::Float64       # co2lab dis_rate
     dis_max::Float64        # saturated rs
     vertical::M             # vertical model (column-specific): the touched brine
     is_ve::V                # true for VE columns, per cell (nothing: all)
+    faces::F                # the faces as VEFaces (transitions), or nothing
 end
-DissolvedCO2Equation(flow, dis_rate, dis_max, vertical = SharpInterface()) =
-    DissolvedCO2Equation(flow, dis_rate, dis_max, vertical, nothing)
+DissolvedCO2Equation(flow, dis_rate, dis_max, vertical = SharpInterface(),
+                     is_ve = nothing) =
+    DissolvedCO2Equation(flow, dis_rate, dis_max, vertical, is_ve, nothing)
+
+# The two-point connectivity of a reservoir model's domain, for the
+# equations assembled here (whatever flux discretization the model uses)
+_tpfa_connectivity(rmodel) =
+    Jutul.TwoPointPotentialFlowHardCoded(rmodel.data_domain[:neighbors],
+                                         Jutul.number_of_cells(rmodel.domain))
 Jutul.number_of_equations_per_entity(::Jutul.SimulationModel, ::DissolvedCO2Equation) = 1
 function Jutul.local_discretization(eq::DissolvedCO2Equation, i)
     # the half-faces of cell i
@@ -400,11 +408,21 @@ Over the faces of one cell: the net outflow of dissolved CO2 (kg/s, the
 brine phase's `ρ_VS · rs · bλ_L · ψ_L`) and the net inflow of free CO2 (the
 CO2 phase's `ρ_VS · bλ_V · ψ_V`), both upwinded as black-oil's fluxes.
 """
-function _co2_face_fluxes(state, model, ldisc)
+function _co2_face_fluxes(state, model, ldisc, faces = nothing)
     ρV = reference_densities(model.system)[2]
     out_dis = zero(eltype(state.Rs))
     in_free = zero(out_dis)
     for ld in ldisc
+        # a transition face: its potentials and mobilities, out of this cell
+        if !isnothing(faces) && _is_transition(faces[ld.face])
+            f = faces[ld.face]
+            ψ, λb = _transition_terms(ld.face, state, model, f)
+            sgn = ld.self == f.left ? 1 : -1
+            rs = Jutul.upwind(Jutul.SPU(f.left, f.right), state.Rs, ψ[1])
+            out_dis += ρV * rs * λb[1] * sgn * ψ[1]
+            in_free -= ρV * λb[2] * sgn * ψ[2]
+            continue
+        end
         # ψ: phase potential differences over the face, positive out of the cell
         kgrad = Jutul.TPFA(ld.self, ld.other, ld.face_sign)
         upw = Jutul.SPU(ld.self, ld.other)
@@ -481,7 +499,7 @@ function Jutul.update_equation_in_entity!(v, c, state, state0, eq::DissolvedCO2E
                                           ldisc = Jutul.local_discretization(eq, c))
     ρV = reference_densities(model.system)[2]
     acc = (state.DissolvedCO2[c] - state0.DissolvedCO2[c]) / dt
-    out_dis, in_free = _co2_face_fluxes(state, model, ldisc)
+    out_dis, in_free = _co2_face_fluxes(state, model, ldisc, eq.faces)
     # no well source here: DissolutionWellSupplyCT adds its effect
     η = _dissolution_transfer(eq, ρV, state, state0, c, dt, out_dis, in_free, 0.0)
     v[1] = acc + out_dis - η
@@ -547,7 +565,7 @@ end
 function _well_supply_change(eq::DissolvedCO2Equation, state, state0, model, c, dt, src)
     ρV = reference_densities(model.system)[2]
     ld = Jutul.local_discretization(eq, c)
-    out_dis, in_free = _co2_face_fluxes(state, model, ld)
+    out_dis, in_free = _co2_face_fluxes(state, model, ld, eq.faces)
     η(q) = _dissolution_transfer(eq, ρV, state, state0, c, dt, out_dis, in_free, q)
     return η(0.0) - η(src)
 end
@@ -580,13 +598,15 @@ dissolution (`dissolution = nothing`), otherwise from the dissolved-CO2 law
 matrix pattern (see `declare_pattern` below) and, with dissolution, the faces
 the transfer needs.
 """
-struct HysteresisEquation{D, E} <: Jutul.JutulEquation
+struct HysteresisEquation{D, E, F} <: Jutul.JutulEquation
     flow_discretization::D  # faces and matrix pattern
     res_water::Float64      # residual brine saturation
     res_gas::Float64        # residual CO2 saturation
     dissolution::E          # dissolved-CO2 law, or nothing
+    faces::F                # the faces as VEFaces (transitions), or nothing
 end
-HysteresisEquation(flow, rw, rg) = HysteresisEquation(flow, rw, rg, nothing)
+HysteresisEquation(flow, rw, rg, dis = nothing) =
+    HysteresisEquation(flow, rw, rg, dis, nothing)
 Jutul.number_of_equations_per_entity(::Jutul.SimulationModel, ::HysteresisEquation) = 1
 Jutul.local_discretization(::HysteresisEquation{<:Any, Nothing}, i) = nothing
 Jutul.local_discretization(eq::HysteresisEquation, i) =
@@ -616,7 +636,7 @@ _residual_depletion(eq::HysteresisEquation{<:Any, Nothing}, state, state0, model
 function _residual_depletion(eq::HysteresisEquation, state, state0, model, c, dt,
                              ldisc, src)
     ρV = reference_densities(model.system)[2]
-    out_dis, in_free = _co2_face_fluxes(state, model, ldisc)
+    out_dis, in_free = _co2_face_fluxes(state, model, ldisc, eq.faces)
     η = _dissolution_transfer(eq.dissolution, ρV, state, state0, c, dt, out_dis,
                               in_free, src)
     pv, bG = state.FluidVolume[c], state.ShrinkageFactors[2, c]
@@ -714,10 +734,12 @@ configuration decides the unknowns (see the top of `co2lab_fluid.jl`):
 - each well's CO2 counts as supply for dissolution in its cells
   ([`DissolutionWellSupplyCT`](@ref)).
 - transition faces (`ve_domain`'s `:face_category` 3–5: VE–fine faces,
-  discontinuous VE–VE faces such as faults with `fault_flux = :virtual` or
-  stacked blocks, vertical VE–VE faces through leaky layers) need the
-  transition flux of Stage 12: throws. Fine 3D cells without them (an
-  all-fine grid) run, with the fluid's fine-scale part.
+  discontinuous VE–VE faces such as faults (`ve_domain`'s default
+  `fault_flux = :virtual`) or stacked blocks, vertical VE–VE faces through
+  leaky layers) take the transition flux (`transition_flux.jl`, roadmap
+  Stage 12): the mass conservation law's flux type `VEFlux`, within
+  JutulDarcy's fused two-point assembly. Fine 3D cells take the fluid's
+  fine-scale part.
 
 With dissolution on, the wellbores use JutulDarcy's equilibrium formulation
 of the same fluid, while the reservoir uses co2lab's (the dissolved-CO2 law
@@ -737,10 +759,6 @@ dissolution) besides JutulDarcy's defaults. The wells get the same PVT.
 function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve_fluid(),
                             rock_compressibility = (reference_pressure = 100e5,
                                                     compressibility = 1e-10))
-    haskey(domain, :face_category) &&
-        any(c -> c in _TRANSITIONS, domain[:face_category]) &&
-        error("transition faces (VE–fine, discontinuous or vertical VE–VE) need " *
-              "the transition flux of roadmap Stage 12; not implemented yet")
     # the column-specific vertical model, built once (fringe tables)
     m = _vertical_model(fluid.vertical, domain, fluid)
     model = _co2lab_multimodel(domain, wells, fluid, m)
@@ -812,13 +830,14 @@ function _set_max_gas_saturation!(rmodel, fluid::CO2LabVEFluid)
     v = MaxGasSaturation(fluid.res_water, fluid.res_gas)
     if fluid.res_gas > 0
         rmodel.primary_variables[:sGmax] = v
-        flow = rmodel.domain.discretizations.mass_flow
+        flow = _tpfa_connectivity(rmodel)
         # residual CO2 consumed by dissolution: the transfer of the dissolved-CO2
         # law, or with instantaneous dissolution the dissolved-CO2 balance
         dis = instantaneous_dissolution(fluid) ? InstantDissolution() :
               get(rmodel.equations, :dissolved_co2, nothing)
         rmodel.equations[:hysteresis] = HysteresisEquation(flow, fluid.res_water,
-                                                           fluid.res_gas, dis)
+                                                           fluid.res_gas, dis,
+                                                           _ve_faces(rmodel.data_domain))
     else
         rmodel.parameters[:sGmax] = v
     end
@@ -838,8 +857,14 @@ function _co2lab_multimodel(domain, wells, fluid::CO2LabVEFluid, vertical)
     # nothing: no dissolved CO2 at all (rs is then not even a variable)
     rs_sat = fluid.dissolution ? fluid.dis_max : nothing
     sys = co2lab_system(reference_densities = rho_ref, rs_sat = rs_sat)
+    # transition faces: every face a VEFace, given to the flux (VEFlux)
+    faces = _ve_faces(domain)
     # without dissolution one system serves reservoir and wells alike
-    isnothing(rs_sat) && return setup_reservoir_model(domain, sys; wells = wells)
+    if isnothing(rs_sat)
+        model = setup_reservoir_model(domain, sys; wells = wells)
+        isnothing(faces) || _set_transition_flux!(model[:Reservoir], faces)
+        return model
+    end
 
     # with it, the wellbores need JutulDarcy's own (variable-switching) formulation
     sys_well = co2lab_system(reference_densities = rho_ref, rs_sat = rs_sat,
@@ -848,12 +873,13 @@ function _co2lab_multimodel(domain, wells, fluid::CO2LabVEFluid, vertical)
 
     # the reservoir alone, in co2lab's formulation, plus the dissolved-CO2 law
     rmodel = setup_reservoir_model(domain, sys)[:Reservoir]
-    flow = rmodel.domain.discretizations.mass_flow
+    isnothing(faces) || _set_transition_flux!(rmodel, faces)
+    flow = _tpfa_connectivity(rmodel)
     d = rmodel.data_domain
     is_ve = haskey(d, :is_ve) && !all(d[:is_ve]) ? collect(Bool, d[:is_ve]) : nothing
     rmodel.equations[:dissolved_co2] = DissolvedCO2Equation(flow, fluid.dis_rate,
                                                             fluid.dis_max, vertical,
-                                                            is_ve)
+                                                            is_ve, faces)
     push!(rmodel.output_variables, :Rs, :DissolvedCO2)
 
     # the wells and facility from `full`, the reservoir with co2lab's formulation

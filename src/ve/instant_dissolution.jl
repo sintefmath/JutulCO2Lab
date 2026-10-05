@@ -209,7 +209,7 @@ struct InstantDissolution end
 function _residual_depletion(eq::HysteresisEquation{<:Any, InstantDissolution}, state,
                              state0, model, c, dt, ldisc, src)
     ρV = reference_densities(model.system)[2]
-    out_dis, _ = _co2_face_fluxes(state, model, ldisc)
+    out_dis, _ = _co2_face_fluxes(state, model, ldisc, eq.faces)
     eq_dis = (state.DissolvedCO2[c] - state0.DissolvedCO2[c]) / dt + out_dis
     pv, bG = state.FluidVolume[c], state.ShrinkageFactors[2, c]
     fac = (1 - eq.res_water) / eq.res_gas / (pv * ρV * bG)

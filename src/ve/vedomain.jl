@@ -76,7 +76,7 @@ end
 """
     ve_domain(mesh, columns; perm_x, perm_y = nothing, perm_z = nothing, poro,
               ntg = nothing, rugosity = 0.0, temperature = nothing,
-              fault_flux = :co2lab) -> NamedTuple
+              fault_flux = :virtual) -> NamedTuple
 
 Build the VE reservoir domain: a `CoarseMesh` over `mesh`, one block per
 column, with thickness-averaged rock and the gravity term taken from the
@@ -97,19 +97,19 @@ transmissibility by category (sealed faces 0, continuous VE–VE faces the
 coarse mesh's, the others summed from the fine grid's with `perm_z` for
 vertical faces, default `perm_x`); a warning is given if the blocks fall
 apart into unconnected pieces. Fine cells take their own centroid as gravity
-datum, VE blocks their caprock. `fault_flux`: `:co2lab` (default until the
-transition flux exists) treats every lateral VE–VE face as continuous,
-co2lab's smooth flux across faults; `:virtual` makes faces whose blocks'
-top cells do not connect discontinuous (the virtual cell; researcher,
-2026-10-05). Such domains cannot be simulated before roadmap Stage 12 item 3
-([`setup_co2lab_model`](@ref) rejects them).
+datum, VE blocks their caprock. `fault_flux`: `:virtual` (default) makes
+faces whose blocks' top cells do not connect discontinuous, with the
+virtual-cell flux (`transition_flux.jl`; researcher, 2026-10-05); `:co2lab`
+treats every lateral VE–VE face between pillars with one VE block each as
+continuous, co2lab's smooth flux across faults (for comparisons with co2lab).
 
 Returns the NamedTuple `(domain, coarse, geometry, rock)`, all new:
 - `domain`: the `DataDomain` on the `CoarseMesh` (from `reservoir_domain`),
   with the averaged `:permeability`, `:porosity` (and `:net_to_gross`),
   `:column_height`, `:rugosity` (and `:temperature`) per column, `:is_ve`
-  (`columns.is_ve`) and `:pillar_columns` (number of columns in the column's
-  pillar; 1 unless stacked), and on `Faces()` `:gdz` from the reference
+  (`columns.is_ve`), `:reference_depth` (the gravity datum: a VE block's
+  caprock, a fine cell's centroid) and `:pillar_columns` (number of columns
+  in the column's pillar; 1 unless stacked), and on `Faces()` `:gdz` from the reference
   depths, `:face_category` (0–5), `:face_intervals` (4 × faces, `NaN` but
   for transitions) and `:face_depth`; `:transmissibilities` only if some face
   is not continuous VE–VE;
@@ -133,7 +133,7 @@ Deliberately **not** done, and why:
 """
 function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing,
                    perm_z = nothing, poro, ntg = nothing, rugosity = 0.0,
-                   temperature = nothing, fault_flux::Symbol = :co2lab)
+                   temperature = nothing, fault_flux::Symbol = :virtual)
     geometry = ve_column_geometry(mesh, columns)
     rock = ve_average_rock(columns, geometry.dz; perm_x, perm_y, poro, ntg)
 
@@ -148,6 +148,7 @@ function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing,
     zref = [columns.is_ve[c] ? geometry.z_top[c] : geometry.z_cell[columns.pos[c]]
             for c in 1:number_of_columns(columns)]
     domain[:gdz, Faces()] = Jutul.compute_face_gdz(domain[:neighbors], zref)
+    domain[:reference_depth, Cells()] = zref
     domain[:column_height, Cells()] = geometry.H
     ncol = number_of_columns(columns)
     domain[:rugosity, Cells()] = rugosity isa Number ? fill(Float64(rugosity), ncol) :
@@ -231,8 +232,10 @@ edges of MRST's top-surface grid. One entry per (column, side):
   `:lower`, `:upper` (Jutul's direction tags: i−, i+, j−, j+)
 - `edge_depth`: caprock depth along the side — mean depth of the two top-face
   nodes bounding it (MRST's `Gt.faces.z`, but without MRST's averaging of
-  nodes across pillar offsets)
-- `edge_midpoint`: (x, y) midpoint of that top edge
+  nodes across pillar offsets); for a fine cell of a hybrid grid, the depth
+  of the side's centroid
+- `edge_midpoint`: (x, y) midpoint of that top edge (a fine cell: of the
+  side's centroid)
 - `area`, `centroid`, `normal`: aggregate of the column's lateral boundary
   fine faces on this side (outward unit normal)
 - `half_trans`: two-point half transmissibility from the column's centroid to
@@ -250,7 +253,7 @@ edges of MRST's top-surface grid. One entry per (column, side):
 struct VEBoundarySides
     column::Vector{Int}                        # VE column
     direction::Vector{Int}                     # 1..4: left, right, lower, upper
-    edge_depth::Vector{Float64}                # caprock depth along the side
+    edge_depth::Vector{Float64}                # caprock (fine: centroid) depth of side
     edge_midpoint::Vector{NTuple{2, Float64}}  # (x, y) midpoint of the top edge
     area::Vector{Float64}                      # side area
     centroid::Vector{NTuple{3, Float64}}       # side centroid
@@ -310,9 +313,11 @@ function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
         col, fs = cs.column[s], cs.boundary_faces[s]
 
         d, top = cs.direction[s], first(column_cells(columns, col))
-        depth, mid = _side_top_edge(g, bdir, top, d, col)
         centroid = (cc[1, col], cc[2, col], cc[3, col])
         A, C, N, t = _side_aggregate(g, fs, perm[col], centroid)
+        # a fine cell's side: its faces' centroid, the depth its flux uses
+        depth, mid = columns.is_ve[col] ? _side_top_edge(g, bdir, top, d, col) :
+                                          (C[3], (C[1], C[2]))
 
         push!(out.column, col); push!(out.dir, d)
         push!(out.depth, depth); push!(out.mid, mid)

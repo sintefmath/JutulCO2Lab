@@ -85,7 +85,8 @@ for use in [`setup_co2lab_model`](@ref)'s `wells`. `ve` is the NamedTuple from
   [`ve_well_index`](@ref)`(ve, col; radius, skin, inner_product)`.
 - `datum`: the depth the well's bottom-hole pressure refers to.
   `:caprock` is co2lab's convention: no hydrostatic term between the well and
-  the column's caprock pressure. `:bottom` puts it at the bottom of the column
+  the column's caprock pressure (in a fine cell of a hybrid grid: its
+  centroid, where its pressure is; the perforation is there too). `:bottom` puts it at the bottom of the column
   (caprock depth + `H`); the well model then adds the wellbore hydrostatic
   term `ρ·g·H` (JutulDarcy's `PerforationGravityDifference` = `-g·H`, with
   the wellbore mixture density). Under rate control the two give the same
@@ -93,7 +94,7 @@ for use in [`setup_co2lab_model`](@ref)'s `wells`. `ve` is the NamedTuple from
 - `kwarg...` go to JutulDarcy's `setup_well` (e.g. `dir`).
 
 Returns a new well `DataDomain` (JutulDarcy's `setup_well`): the perforation
-at the column's caprock depth, the well node at the datum depth, `WI` as its
+at the column's caprock depth (a fine cell's centroid), the well node at the datum depth, `WI` as its
 `:well_index`.
 """
 function setup_ve_well(ve, col::Integer; name::Symbol, datum::Symbol = :caprock,
@@ -101,20 +102,23 @@ function setup_ve_well(ve, col::Integer; name::Symbol, datum::Symbol = :caprock,
                        inner_product::Symbol = :ip_simple, kwarg...)
     g = ve.geometry
     WI = something(WI, ve_well_index(ve, col; radius, skin, inner_product))
-    z_ref = _well_datum_depth(g, col, datum)
+    z0 = ve.domain[:reference_depth][col]
+    z_ref = _well_datum_depth(g, col, datum; z0)
 
-    # perforation at the caprock: the depth of the column's pressure unknown
+    # perforation at the depth of the block's pressure unknown: a VE
+    # column's caprock, a fine cell's centroid
     centers = copy(ve.domain[:cell_centroids])
-    centers[3, col] = g.z_top[col]
+    centers[3, col] = z0
 
     return setup_well(ve.domain, [col]; name = name, WI = WI, radius = radius,
                       skin = skin, cell_centers = centers, reference_depth = z_ref,
                       kwarg...)
 end
 
-# depth of a VE well's pressure datum in column `col`
-function _well_datum_depth(geometry, col, datum::Symbol)
-    datum == :caprock && return geometry.z_top[col]
+# depth of a VE well's pressure datum in column `col` (z0: the column's
+# pressure datum, its caprock or a fine cell's centroid)
+function _well_datum_depth(geometry, col, datum::Symbol; z0 = geometry.z_top[col])
+    datum == :caprock && return z0
     datum == :bottom && return geometry.z_top[col] + geometry.H[col]
     throw(ArgumentError("datum must be :caprock or :bottom, got :$datum"))
 end

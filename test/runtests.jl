@@ -845,7 +845,9 @@ end
 
         sides, unassigned = ve_boundary_sides(m, cols, ve.domain)
         @test unassigned == cs.exposed_faces && !any(sides.across_fault)
-        @test_throws ErrorException setup_co2lab_model(ve.domain)
+        # stacked blocks: their faces take the transition flux (Stage 12)
+        law = setup_co2lab_model(ve.domain)[:Reservoir].equations[:mass_conservation]
+        @test Jutul.flux_type(law) isa JutulCO2Lab.VEFlux
 
         # layers that never communicate: warning
         cut = _cp_mesh(2, 3, layered; actnum = reshape([true, true, false, false,
@@ -1829,6 +1831,168 @@ end
         sd = simulate_reservoir(cd; simulator = sim, config = cfg).states[end]
         co2 = findall(>(1e-3), sd[:sG])
         @test !isempty(co2) && all(abs.(sd[:Rs][co2] .- 0.03) .< 1e-6)
+    end
+
+    @testset "transition flux (Stage 12 step 3)" begin
+        J = JutulCO2Lab
+        g = Jutul.gravity_constant
+        rw, RHOW, RHOC = 0.2, 1050.0, 700.0
+        drho = RHOW - RHOC
+        # nearly incompressible brine by default (its hydrostatic pressure
+        # linear, for the equilibrium checks); closed domains with injection
+        # need a compressible one
+        fine_fluid(curve; cw = 4.3e-14) =
+            FineScaleFluid(; rock_types = [RockCurves(; invPc3D = curve, kr3D = 2)],
+                           residual = (rw, 0.0), default_pvt = nothing,
+                           co2_rho_pvt = nothing, co2_rho_ref = RHOC,
+                           wat_rho_pvt = (cw, 1e7), wat_rho_ref = RHOW)
+        # the CO2 saturation of fine cell b at capillary pressure pc (bisection
+        # on the cell's own curve; zero below the entry pressure)
+        function fine_sg(f, b, pc)
+            pcf(s) = J._fine_capillary_pressure(f, b, s, s)
+            pcf(0.0) >= pc && return 0.0
+            lo, hi = 0.0, 1 - rw
+            for _ in 1:100
+                mid = (lo + hi) / 2
+                pcf(mid) < pc ? (lo = mid) : (hi = mid)
+            end
+            return (lo + hi) / 2
+        end
+
+        # P1: a VE column beside a fine column, both at capillary–gravity
+        # equilibrium with a 3 m plume, stays at rest (zero and nonzero entry
+        # pressure)
+        mesh = _cp_mesh_pillars(2, 12, (p, k) -> 1000.0 + 0.5 * (k - 1))
+        nc = number_of_cells(mesh)
+        poro, perm = fill(0.2, nc), fill(1e-13, nc)
+        cols, _ = ve_columns(mesh; is_ve = [cell_ijk(mesh, c)[1] == 2 for c in 1:nc])
+        ve = ve_domain(mesh, cols; perm_x = perm, poro, fault_flux = :virtual)
+        @test count(==(J._FACE_VE_FINE), ve.domain[:face_category]) == 12
+        P, h = 1e7, 3.0
+        for curve in (p -> 0.8 * (2e3 / (max(p, 0.0) + 2e3))^2 + 0.2,
+                      p -> 0.8 * (1e3 / max(p, 1e3))^2 + 0.2)
+            fl = co2lab_ve_fluid(fine_fluid(curve), mesh, cols; poro, perm_x = perm)
+            model = setup_co2lab_model(ve.domain; fluid = fl,
+                                       rock_compressibility = nothing)
+            f = J._fine_cell_fluid(fl.fine, ve.domain)
+            vb = findfirst(cols.is_ve)
+            m = model[:Reservoir].secondary_variables[:PlumeHeights].vertical
+            H = J._column_extent(m.cells, vb)[2]
+            x = ve.domain[:cell_centroids][3, :] .- ve.domain[:reference_depth][vb]
+            sg = [b == vb ? J._interval_integrals(m, vb, 0.0, H, h, h, drho).free / H :
+                  fine_sg(f, b, drho * g * (h - x[b])) for b in eachindex(x)]
+            p = [b == vb ? P : P + RHOW * g * x[b] for b in eachindex(x)]
+            state0 = setup_co2lab_state(model; pressure = p, sG = sg)
+            case = JutulCase(model, fill(30 * 86400.0, 3), setup_reservoir_forces(model);
+                             state0, parameters = setup_parameters(model))
+            sim, cfg = setup_co2lab_simulator(case; info_level = -1, tol_cnv = 1e-10,
+                                              tol_mb = 1e-10)
+            st = simulate_reservoir(case; simulator = sim, config = cfg).states
+            @test maximum(sg) > 0.3
+            @test maximum(abs.(st[end][:sG] .- sg)) < 1e-8
+            @test maximum(abs.(st[end][:Pressure] .- p)) < 1e-3
+        end
+
+        # open hydrostatic boundaries on the fine column's side (from each
+        # cell's centroid) and the VE column's: brine at rest stays at rest
+        sides, _ = ve_boundary_sides(mesh, cols, ve.domain)
+        ix = ve_select_sides(sides, cols; directions = (:left, :right))
+        @test length(ix) == 13
+        fl = co2lab_ve_fluid(fine_fluid(p -> 0.8 * (2e3 / (max(p, 0.0) + 2e3))^2 + 0.2),
+                             mesh, cols; poro, perm_x = perm)
+        model = setup_co2lab_model(ve.domain; fluid = fl, rock_compressibility = nothing)
+        hyd(z) = P + RHOW * g * (z - 1000.0)
+        p = hyd.(ve.domain[:reference_depth])
+        forces = setup_reservoir_forces(model;
+                                        bc = ve_boundary_conditions(ve, sides, ix;
+                                                                    pressure = hyd))
+        case = JutulCase(model, fill(30 * 86400.0, 3), forces;
+                         state0 = setup_co2lab_state(model; pressure = p),
+                         parameters = setup_parameters(model))
+        sim, cfg = setup_co2lab_simulator(case; info_level = -1)
+        st = simulate_reservoir(case; simulator = sim, config = cfg).states
+        @test maximum(abs.(st[end][:Pressure] .- p)) < 1e-3
+
+        # a thin plume under a fault offset larger than itself: co2lab's smooth
+        # flux spreads it across, the virtual cell keeps it (the caprock up-dip
+        # is below the plume); CO2 conserved either way
+        mesh = _cp_mesh(8, 6, (i, k) -> 1000.0 - 1.0 * i + (i > 4 ? 2.5 : 0.0) +
+                                         1.0 * (k - 1))
+        nc = number_of_cells(mesh)
+        cols, _ = ve_columns(mesh)
+        fl = co2lab_ve_fluid(; default_pvt = nothing, residual = (0.2, 0.2),
+                             wat_rho_pvt = (4.3e-10, 1e7), co2_rho_pvt = (4.3e-9, 1e7))
+        q, nt = 2e-5, 20
+        sG = map((:co2lab, :virtual)) do ff
+            ve = ve_domain(mesh, cols; perm_x = fill(1e-13, nc), poro = fill(0.2, nc),
+                           fault_flux = ff)
+            model = setup_co2lab_model(ve.domain; fluid = fl,
+                                       wells = [setup_ve_well(ve, 8; name = :inj)])
+            on = setup_reservoir_forces(model; control = Dict(
+                :inj => co2_injector_control(TotalRateTarget(q), fl)))
+            off = setup_reservoir_forces(model; control = Dict(:inj => DisabledControl()))
+            p0 = ve_hydrostatic_pressure(ve.geometry; rho_w = 1100.0)
+            case = JutulCase(model, fill(30 * 86400.0, nt),
+                             [k <= nt ÷ 2 ? on : off for k in 1:nt];
+                             state0 = setup_co2lab_state(model; pressure = p0, forces = on),
+                             parameters = setup_parameters(model))
+            sim, cfg = setup_co2lab_simulator(case; info_level = -1)
+            st = simulate_reservoir(case; simulator = sim, config = cfg).states
+            injected = nt ÷ 2 * 30 * 86400.0 * q * fl.rho_ref[2]
+            @test abs(sum(st[end][:TotalMasses][2, :]) - injected) / injected < 1e-4
+            st[end][:sG]
+        end
+        @test maximum(sG[1][1:6]) > 1e-4
+        @test maximum(sG[2][1:6]) < 1e-6 && sG[2][8] > maximum(sG[1][7:8])
+
+        # a fine column inside a sloping VE aquifer (20 layers of 0.3 m): CO2
+        # injected down-dip migrates through it into the VE columns up-dip.
+        # Under VE conditions fine cells approach VE only as they resolve the
+        # plume (0.6 m fringe): the hybrid lies between all-fine and all-VE and
+        # converges to VE with refinement (CO2 up-dip after 40 months, 6 / 24 /
+        # 60 / 120 layers: 0.17 / 0.76 / 1.8 / 2.25 t, VE 2.39 t; all-fine
+        # 2e-5 / 0.23 / 1.5 / 2.1 t). CO2 conserved.
+        mesh = _cp_mesh_pillars(6, 20, (p, k) -> 1000.0 + 2.0 * p + 0.3 * (k - 1))
+        nc = number_of_cells(mesh)
+        poro, perm = fill(0.2, nc), fill(5e-13, nc)
+        flf = fine_fluid(p -> 0.8 * (2e3 / (max(p, 0.0) + 2e3))^2 + 0.2; cw = 4.3e-10)
+        column(c) = cell_ijk(mesh, c)[1]
+        # CO2 in columns 1–2 after 40 months, the strip of column 3 fine (:hyb)
+        function updip(mode)
+            isve = [mode == :ve || (mode == :hyb && column(c) != 3) for c in 1:nc]
+            cols, _ = ve_columns(mesh; is_ve = isve)
+            ve = ve_domain(mesh, cols; perm_x = perm, poro)
+            fl = co2lab_ve_fluid(flf, mesh, cols; poro, perm_x = perm)
+            # the injector in column 6: its VE block, or all its fine cells (a
+            # simple well, its wellbore volume shrunk: the CO2 it starts with
+            # would otherwise drain into the reservoir, 0.2% of the injected)
+            wb = unique(cols.partition[c] for c in 1:nc if column(c) == 6)
+            well = mode == :fine ?
+                   setup_well(ve.domain, wb; name = :inj, WI = fill(1e-11, length(wb)),
+                              simple_well = true, volume_multiplier = 1e-3) :
+                   setup_ve_well(ve, only(wb); name = :inj)
+            model = setup_co2lab_model(ve.domain; fluid = fl, wells = [well])
+            on = setup_reservoir_forces(model; control = Dict(
+                :inj => co2_injector_control(TotalRateTarget(q), fl)))
+            off = setup_reservoir_forces(model;
+                                         control = Dict(:inj => DisabledControl()))
+            p0 = P .+ RHOW * g .* (ve.domain[:reference_depth] .- 1000.0)
+            case = JutulCase(model, fill(30 * 86400.0, 40), [k <= 10 ? on : off
+                                                             for k in 1:40];
+                             state0 = setup_co2lab_state(model; pressure = p0,
+                                                         forces = on),
+                             parameters = setup_parameters(model))
+            sim, cfg = setup_co2lab_simulator(case; info_level = -1)
+            M = simulate_reservoir(case; simulator = sim,
+                                   config = cfg).states[end][:TotalMasses][2, :]
+            injected = 10 * 30 * 86400.0 * q * fl.rho_ref[2]
+            @test abs(sum(M) - injected) / injected < 1e-4
+            colb(b) = column(cols.cells[cols.pos[b]])
+            return sum(M[b] for b in eachindex(M) if colb(b) < 3)
+        end
+        mve, mhyb, mfine = updip(:ve), updip(:hyb), updip(:fine)
+        # 20 layers: 0.12 / 0.71 / 2.61 t
+        @test mfine < mhyb < mve && mhyb > 0.2 * mve
     end
 
     @testset "endpoint-scaling hysteresis in fine 3D cells (Stage 6)" begin

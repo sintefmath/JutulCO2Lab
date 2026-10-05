@@ -37,7 +37,8 @@
 co2lab's pressure boundary condition on one lateral side of VE column `cell`:
 boundary pressure `pressure` (Pa, both phases), transmissibility `trans` (m³,
 permeability times geometry; the column's half transmissibility to the side),
-`dz` = caprock-edge depth − column caprock depth (m, depth positive down),
+`dz` = caprock-edge depth − column caprock depth (m, depth positive down;
+for a fine cell of a hybrid grid, side centroid − cell centroid),
 `sat` = saturations (brine, CO2) of inflowing fluid, `carry_dissolved`: with
 dissolution, whether brine carries its dissolved CO2 across (see the top of
 `vebc.jl`). Build with [`ve_boundary_conditions`](@ref).
@@ -46,7 +47,7 @@ struct VEBoundaryCondition{T <: Real}
     cell::Int              # VE column
     pressure::T            # boundary pressure (Pa)
     trans::T               # half transmissibility (m³)
-    dz::T                  # edge depth − caprock depth (m)
+    dz::T                  # edge depth − datum depth (m)
     sat::NTuple{2, T}      # inflow saturations
     carry_dissolved::Bool  # brine carries its rs across
 end
@@ -130,7 +131,8 @@ function ve_boundary_conditions(ve, sides::VEBoundarySides, ix; pressure,
     sum(s) ≈ 1 || throw(ArgumentError("inflow saturations must sum to 1, got $sat"))
 
     cols = sides.column[ix]
-    dz = z_edge .- ve.geometry.z_top[cols]
+    # from the block's datum: a VE column's caprock, a fine cell's centroid
+    dz = z_edge .- ve.domain[:reference_depth][cols]
     carry = dissolved == :carry
     return [VEBoundaryCondition(cols[k], p_bc[k], T[k], dz[k], s, carry) for k in 1:n]
 end
