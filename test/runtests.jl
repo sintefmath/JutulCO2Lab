@@ -24,6 +24,21 @@ function _cp_mesh(nx, nz, top; actnum = fill(true, nx, 1, nz))
     return JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
 end
 
+# As _cp_mesh, but depths per pillar (p = 0..nx): layer k between pillars
+# p and p+1 has corners top(p, k) and top(p + 1, k), so sloping layers are
+# conforming (neighbouring cells share their faces fully)
+function _cp_mesh_pillars(nx, nz, top)
+    coord = Float64[]
+    for j in 0:1, i in 0:nx
+        append!(coord, [i * 100.0, j * 100.0, 0.0, i * 100.0, j * 100.0, 2000.0])
+    end
+    zc = [top(ii ÷ 2, k + s) for k in 1:nz for s in (0, 1)
+          for jj in 1:2 for ii in 1:2nx]
+    grid = Dict("cartDims" => [nx, 1, nz], "COORD" => coord, "ZCORN" => zc,
+                "ACTNUM" => fill(true, nx, 1, nz))
+    return JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+end
+
 # ----------------- Helpers: a stand-in vertical model (Stage 6) -----------------
 
 # The sharp interface's formulas as a model of its own, so that it runs through
@@ -839,14 +854,92 @@ end
         @test_logs (:warn, r"2 unconnected pieces") ve_domain(
             cut, cols; perm_x = fill(1e-13, 4), poro = fill(0.2, 4))
 
-        # fine 3D cells are Stage 12; below_holes must be a known mode
-        @test_throws ArgumentError ve_columns(m; is_ve = [true; fill(false, nc(m) - 1)])
+        # fine 3D cells (Stage 12) are blocks of their own; below_holes must be
+        # a known mode
+        hyb, _ = ve_columns(m; is_ve = [true; fill(false, nc(m) - 1)])
+        @test count(hyb.is_ve) == 1 &&
+              all(length(column_cells(hyb, b)) == 1 for b in findall(!, hyb.is_ve))
         @test first(ve_columns(m; is_ve = fill(true, nc(m)))).pos == [1, 2, 3, 6]
         @test_throws ArgumentError ve_columns(m; below_holes = :bridge)
 
         # VE/fine branch points: compiled away for all-VE domains
         @test JutulCO2Lab._is_ve(nothing, 7)
         @test !JutulCO2Lab._is_ve([true, false], 2)
+    end
+
+    @testset "hybrid grid: blocks and face categories (Stage 12 step 1)" begin
+        J = JutulCO2Lab
+        nc(m) = number_of_cells(m)
+        dom(m, cols; ff = :virtual) = ve_domain(m, cols; perm_x = fill(1e-13, nc(m)),
+                                                poro = fill(0.2, nc(m)), fault_flux = ff)
+        counts(d) = Dict(c => count(==(c), d[:face_category])
+                         for c in unique(d[:face_category]))
+        # a conforming sloping layer: every lateral face continuous, nothing
+        # changes for pure VE (no transmissibilities set)
+        slope = _cp_mesh_pillars(4, 4, (p, k) -> 1000.0 + 3.0 * p + 2.0 * (k - 1))
+        cols, _ = ve_columns(slope)
+        d = dom(slope, cols).domain
+        @test counts(d) == Dict(J._FACE_VE => 3) && !haskey(d, :transmissibilities)
+
+        # a fault offset by 3 m (cells 2 m): the top cells do not connect —
+        # discontinuous with :virtual, continuous with co2lab's flux
+        fault = _cp_mesh(4, 4, (i, k) -> 1000.0 + (i > 2 ? 3.0 : 0.0) + 2.0 * (k - 1))
+        cols, _ = ve_columns(fault)
+        @test counts(dom(fault, cols; ff = :co2lab).domain) == Dict(J._FACE_VE => 3)
+        d = dom(fault, cols).domain
+        f = only(findall(==(J._FACE_VE_DISCONTINUOUS), d[:face_category]))
+        @test Set(d[:neighbors][:, f]) == Set([2, 3])
+        # each side's cells at the face, below its own top: 2–8 m and 0–6 m
+        @test d[:face_intervals][:, f] ≈ (d[:neighbors][1, f] == 2 ? [2, 8, 0, 6] :
+                                          [0, 6, 2, 8])
+        # the transmissibility summed from the fine grid's
+        fine = reservoir_domain(fault; permeability = 1e-13, porosity = 0.2)
+        Tf = JutulDarcy.reservoir_transmissibility(fine)
+        cf = ve_domain(fault, cols; perm_x = fill(1e-13, nc(fault)),
+                       poro = fill(0.2, nc(fault)), fault_flux = :virtual).coarse
+        @test d[:transmissibilities][f] ≈ sum(Tf[cf.coarse_faces_to_fine[f]])
+
+        # fine cells: pillar 1 and the top two cells of pillar 3
+        ijk = [cell_ijk(slope, c) for c in 1:nc(slope)]
+        isve = [!(x[1] == 1 || (x[1] == 3 && x[3] <= 2)) for x in ijk]
+        cols, _ = ve_columns(slope; is_ve = isve)
+        @test cols.is_ve == [false, false, false, false, true, false, false, true, true]
+        ve = dom(slope, cols)
+        d = ve.domain
+        # fine–fine 4, VE–fine 9 (lateral and the one vertical), and the VE
+        # blocks beside pillar 3's lower block discontinuous (2)
+        @test counts(d) == Dict(J._FACE_FINE => 4, J._FACE_VE_FINE => 9,
+                                J._FACE_VE_DISCONTINUOUS => 2)
+        @test d[:is_ve] == cols.is_ve
+        # the vertical VE–fine face: pillar 3's fine k = 2 above its VE block
+        fv = only(f for f in axes(d[:neighbors], 2) if
+                  Set(d[:neighbors][:, f]) == Set([7, 8]))
+        side = d[:neighbors][1, fv] == 8 ? 1 : 2
+        # the VE block's top cell (0–2 m below its top); common depth the fine
+        # cell's centroid
+        @test d[:face_intervals][2side - 1:2side, fv] ≈ [0.0, 2.0]
+        @test d[:face_depth][fv] ≈ d[:cell_centroids][3, 7]
+        # fine cells' gravity from their centroids
+        ff = only(f for f in axes(d[:neighbors], 2) if
+                  Set(d[:neighbors][:, f]) == Set([1, 2]))
+        @test abs(d[:gdz][ff]) ≈ Jutul.gravity_constant *
+                                 abs(d[:cell_centroids][3, 2] - d[:cell_centroids][3, 1])
+        @test_throws ErrorException setup_co2lab_model(d)
+
+        # a layer between k = 2 and 3: leaky — stacked blocks, vertical
+        # transitions with the fine grid's transmissibility; sealed — no flow
+        N = slope.faces.neighbors
+        lay = [f for f in 1:number_of_faces(slope) if
+               ijk[N[f][1]][1:2] == ijk[N[f][2]][1:2] &&
+               minmax(ijk[N[f][1]][3], ijk[N[f][2]][3]) == (2, 3)]
+        cols, _ = ve_columns(slope; leaky_faces = lay, below_holes = :stack)
+        d = dom(slope, cols).domain
+        @test count(==(J._FACE_VE_VERTICAL), d[:face_category]) == 4
+        @test all(d[:transmissibilities][d[:face_category] .== J._FACE_VE_VERTICAL] .> 0)
+        cols, _ = ve_columns(slope; sealed_faces = lay, below_holes = :stack)
+        d = dom(slope, cols).domain
+        @test count(==(J._FACE_SEALED), d[:face_category]) == 4
+        @test all(d[:transmissibilities][d[:face_category] .== J._FACE_SEALED] .== 0)
     end
 
     # Proves the toolchain end-to-end: local Jutul + JutulDarcy assemble,

@@ -74,8 +74,9 @@ end
 # ------------------------------- The VE domain --------------------------------
 
 """
-    ve_domain(mesh, columns; perm_x, perm_y = nothing, poro, ntg = nothing,
-              rugosity = 0.0, temperature = nothing) -> NamedTuple
+    ve_domain(mesh, columns; perm_x, perm_y = nothing, perm_z = nothing, poro,
+              ntg = nothing, rugosity = 0.0, temperature = nothing,
+              fault_flux = :co2lab) -> NamedTuple
 
 Build the VE reservoir domain: a `CoarseMesh` over `mesh`, one block per
 column, with thickness-averaged rock and the gravity term taken from the
@@ -87,21 +88,31 @@ properties (co2lab's `reservoirT`): a scalar, one value per column, or a
 function of depth evaluated at each column's caprock (e.g.
 [`geothermal_gradient`](@ref)); `nothing` leaves it to the model (30 °C).
 
-Stacked columns (`ve_columns(...; below_holes = :stack)`) are built fully:
-coarse faces between stacked columns of one pillar (sealed by construction)
-get zero transmissibility, and a warning is given if the columns fall apart
-into unconnected pieces (model them separately instead). Such a domain
-cannot be simulated before roadmap Stage 12 ([`setup_co2lab_model`](@ref)
-rejects it).
+Stacked columns (`ve_columns(...; below_holes = :stack)`) and hybrid grids
+(fine 3D cells, leaky faces; roadmap Stage 12) are built fully: every coarse
+face gets a category (`vehybrid.jl`: sealed, fine–fine, VE–VE continuous,
+VE–VE discontinuous, VE–VE vertical, VE–fine) with, for the transitions,
+the depth intervals and common depth of the virtual cells, and its
+transmissibility by category (sealed faces 0, continuous VE–VE faces the
+coarse mesh's, the others summed from the fine grid's with `perm_z` for
+vertical faces, default `perm_x`); a warning is given if the blocks fall
+apart into unconnected pieces. Fine cells take their own centroid as gravity
+datum, VE blocks their caprock. `fault_flux`: `:co2lab` (default until the
+transition flux exists) treats every lateral VE–VE face as continuous,
+co2lab's smooth flux across faults; `:virtual` makes faces whose blocks'
+top cells do not connect discontinuous (the virtual cell; researcher,
+2026-10-05). Such domains cannot be simulated before roadmap Stage 12 item 3
+([`setup_co2lab_model`](@ref) rejects them).
 
 Returns the NamedTuple `(domain, coarse, geometry, rock)`, all new:
 - `domain`: the `DataDomain` on the `CoarseMesh` (from `reservoir_domain`),
   with the averaged `:permeability`, `:porosity` (and `:net_to_gross`),
-  `:column_height`, `:rugosity` (and `:temperature`) per column, `:is_ve` (all true: fine
-  cells are Stage 12) and `:pillar_columns` (number of columns in the
-  column's pillar; 1 unless stacked), and `:gdz` on `Faces()` from the
-  caprock depths; `:transmissibilities` only if stacked columns need sealed
-  faces;
+  `:column_height`, `:rugosity` (and `:temperature`) per column, `:is_ve`
+  (`columns.is_ve`) and `:pillar_columns` (number of columns in the column's
+  pillar; 1 unless stacked), and on `Faces()` `:gdz` from the reference
+  depths, `:face_category` (0–5), `:face_intervals` (4 × faces, `NaN` but
+  for transitions) and `:face_depth`; `:transmissibilities` only if some face
+  is not continuous VE–VE;
 - `coarse`: that `CoarseMesh` — the same object `domain` wraps;
 - `geometry`: [`ve_column_geometry`](@ref)'s result;
 - `rock`: [`ve_average_rock`](@ref)'s result.
@@ -120,8 +131,9 @@ Deliberately **not** done, and why:
   else that reads centroid depths must be overridden where it is used — see
   roadmap Stage 1 item 7.
 """
-function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing, poro,
-                   ntg = nothing, rugosity = 0.0, temperature = nothing)
+function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing,
+                   perm_z = nothing, poro, ntg = nothing, rugosity = 0.0,
+                   temperature = nothing, fault_flux::Symbol = :co2lab)
     geometry = ve_column_geometry(mesh, columns)
     rock = ve_average_rock(columns, geometry.dz; perm_x, perm_y, poro, ntg)
 
@@ -131,19 +143,24 @@ function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing, poro,
     domain = reservoir_domain(coarse; permeability = rock.perm, porosity = rock.poro,
                               kw...)
 
-    # gravity between columns from caprock depths, not mid-column centroids
-    domain[:gdz, Faces()] = Jutul.compute_face_gdz(domain[:neighbors], geometry.z_top)
+    # gravity between VE blocks from caprock depths, not mid-column centroids;
+    # fine cells from their centroids
+    zref = [columns.is_ve[c] ? geometry.z_top[c] : geometry.z_cell[columns.pos[c]]
+            for c in 1:number_of_columns(columns)]
+    domain[:gdz, Faces()] = Jutul.compute_face_gdz(domain[:neighbors], zref)
     domain[:column_height, Cells()] = geometry.H
     ncol = number_of_columns(columns)
     domain[:rugosity, Cells()] = rugosity isa Number ? fill(Float64(rugosity), ncol) :
                                  collect(Float64, rugosity)
-    domain[:is_ve, Cells()] = fill(true, ncol)
+    domain[:is_ve, Cells()] = copy(columns.is_ve)
     domain[:pillar_columns, Cells()] = _pillar_columns(columns)
     isnothing(temperature) ||
         (domain[:temperature, Cells()] = _column_temperature(temperature, geometry))
 
-    # stacked columns of one pillar exchange no flow directly
-    any(>(1), domain[:pillar_columns]) && _seal_stacked!(domain, columns)
+    # the faces: categories, virtual cells, transmissibilities (vehybrid.jl)
+    perm = [perm_x'; something(perm_y, perm_x)'; something(perm_z, perm_x)']
+    _set_face_data!(domain, mesh, columns, coarse, geometry, perm, poro, ntg,
+                    fault_flux)
     return (domain = domain, coarse = coarse, geometry = geometry, rock = rock)
 end
 
@@ -172,28 +189,32 @@ function _pillar_columns(columns::VEColumns)
 end
 
 """
-    _seal_stacked!(domain, columns)
+    _set_face_data!(domain, mesh, columns, coarse, geometry, perm, poro, ntg,
+                    fault_flux)
 
-Zero the transmissibility of coarse faces between stacked columns of one
-pillar, and warn if the columns fall apart into unconnected pieces.
+Each coarse face's category, virtual-cell intervals and common depth, and
+the transmissibilities by category (`vehybrid.jl`), with a warning if the
+blocks fall apart.
 
-Modifies: `domain` (sets `:transmissibilities` on `Faces()`). `columns` is only
-read.
+Modifies: `domain` (sets `:face_category`, `:face_intervals`, `:face_depth`
+on `Faces()`, and `:transmissibilities` unless every face is continuous
+VE–VE). The other arguments are only read.
 """
-function _seal_stacked!(domain, columns)
-    N = domain[:neighbors]
-    T = JutulDarcy.reservoir_transmissibility(domain)
-    for f in axes(N, 2)
-        columns.pillar[N[1, f]] == columns.pillar[N[2, f]] && (T[f] = 0.0)
+function _set_face_data!(domain, mesh, columns, coarse, geometry, perm, poro, ntg,
+                         fault_flux)
+    category = _face_categories(mesh, columns, coarse, fault_flux)
+    intervals, depth = _face_intervals(mesh, columns, coarse, category, geometry)
+    domain[:face_category, Faces()] = category
+    domain[:face_intervals, Faces()] = intervals
+    domain[:face_depth, Faces()] = depth
+    T = _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro, ntg)
+    isnothing(T) || (domain[:transmissibilities, Faces()] = T)
+    # stacked or sealed blocks may fall apart
+    stacked = any(>(1), domain[:pillar_columns])
+    if stacked || !isnothing(T)
+        Tw = something(T, JutulDarcy.reservoir_transmissibility(domain))
+        _warn_disconnected(domain, Tw)
     end
-    domain[:transmissibilities, Faces()] = T
-
-    # do the remaining connections still join all columns?
-    g = SimpleGraph(number_of_columns(columns))
-    foreach(f -> T[f] > 0 && add_edge!(g, N[1, f], N[2, f]), axes(N, 2))
-    n = length(connected_components(g))
-    n > 1 && @warn "The stacked columns fall apart into $n unconnected pieces; " *
-                   "model them separately"
     return domain
 end
 

@@ -21,12 +21,17 @@
 
 Column partition of a 3D mesh. A column is a vertically connected stretch of
 one pillar; with `below_holes = :stack` ([`ve_columns`](@ref)) a pillar can
-hold several.
+hold several. On a hybrid grid (roadmap Stage 12) a "column" is a *block*: a
+VE block (a vertically connected stretch of VE cells) or a single fine 3D
+cell.
 
 - `cells`: fine cells of all columns, concatenated, each column top→bottom
 - `pos`: column `c` is `cells[pos[c]:pos[c+1]-1]`
 - `partition`: fine cell → column, as `CoarseMesh(mesh, partition)` expects
 - `pillar`: logical `(i, j)` of each column (not unique when stacked)
+- `is_ve`: per column, `true` for a VE block, `false` for a fine 3D cell
+- `sealed`, `leaky`: the interior faces of the mesh given as sealed (no
+  flow) and as leaky (cut into blocks, flow kept), sorted
 
 Columns are numbered in increasing pillar order (`i + nx*(j-1)`), top to bottom
 within a pillar — with one column per pillar the order MRST gives the cells
@@ -37,6 +42,9 @@ struct VEColumns
     pos::Vector{Int}                 # column c: cells[pos[c]:pos[c+1]-1]
     partition::Vector{Int}           # fine cell → column
     pillar::Vector{Tuple{Int, Int}}  # logical (i, j) per column
+    is_ve::Vector{Bool}              # per column: VE block (false: one fine cell)
+    sealed::Vector{Int}              # sealed interior faces (no flow)
+    leaky::Vector{Int}               # leaky interior faces (cut, flow kept)
 end
 
 """
@@ -84,16 +92,18 @@ end
 # ---------------------------- Columns and trimming ----------------------------
 
 """
-    ve_columns(mesh; below_holes = :discard, sealed_faces = (), is_ve = nothing)
-        -> (columns, discarded)
+    ve_columns(mesh; below_holes = :discard, sealed_faces = (), leaky_faces = (),
+               is_ve = nothing) -> (columns, discarded)
 
 Identify the VE columns of a 3D `mesh` with logical `(i, j, k)` indices.
 
 Cells are grouped by `(i, j)` pillar and ordered by `k` (top→bottom; `k` is
 assumed to increase downwards, as in MRST). A pillar is cut wherever two
 consecutive cells are *disconnected*: they share no interior face, or only
-faces listed in `sealed_faces` (interior face indices of `mesh`). A gap in `k`
-whose cells still share a face (a pinch-out) does not cut. Below a cut:
+faces listed in `sealed_faces` or `leaky_faces` (interior face indices of
+`mesh`; leaky faces separate VE blocks but keep their flow, roadmap Stage
+12). A gap in `k` whose cells still share a face (a pinch-out) does not cut.
+Below a cut:
 
 - `below_holes = :discard` — co2lab's treatment (`topSurfaceGrid`'s
   `discard_below_holes`): every cell below the pillar's first cut is
@@ -104,7 +114,9 @@ whose cells still share a face (a pinch-out) does not cut. Below a cut:
   rejects it.
 
 `is_ve` (one `Bool` per cell of `mesh`, `nothing` = all VE) marks fine 3D
-cells, which are roadmap Stage 12: any `false` is rejected for now.
+cells (`false`) of a hybrid grid (roadmap Stage 12): each becomes a block of
+its own, and a pillar's VE cells are also cut where fine cells interrupt
+them (not a hole: nothing is discarded for it).
 
 Returns `(columns, discarded)`: a new `VEColumns` of the cells kept (cell
 indices into `mesh`), and the discarded cells as a sorted `Vector{Int}` of
@@ -115,17 +127,19 @@ numbering and does **not** cover every cell, so it cannot be passed to
 `CoarseMesh` as-is; use [`ve_trim`](@ref) first.
 """
 function ve_columns(mesh; below_holes::Symbol = :discard, sealed_faces = (),
-                    is_ve = nothing)
-    _check_all_ve(is_ve, number_of_cells(mesh))
+                    leaky_faces = (), is_ve = nothing)
     below_holes in (:discard, :stack) ||
         throw(ArgumentError("below_holes must be :discard or :stack, got $below_holes"))
-
     nc = number_of_cells(mesh)
+    ve = _cell_is_ve(is_ve, nc)
+    sealed, leaky = sort!(unique(collect(Int, sealed_faces))),
+                    sort!(unique(collect(Int, leaky_faces)))
     ijk = [cell_ijk(mesh, c) for c in 1:nc]
     # per cell, the cell it connects to directly below (0: none)
-    below = _connected_below(mesh, ijk, sealed_faces)
+    below = _connected_below(mesh, ijk, union(sealed, leaky))
 
-    cells, pos, pillar, discarded = Int[], [1], Tuple{Int, Int}[], Int[]
+    cells, pos, pillar, block_ve, discarded = Int[], [1], Tuple{Int, Int}[], Bool[],
+                                              Int[]
     for col in _pillar_cells(mesh, ijk)
         # a pillar falls apart where a cell is not connected to the one below
         stretches = _connected_stretches(col, below)
@@ -135,10 +149,12 @@ function ve_columns(mesh; below_holes::Symbol = :discard, sealed_faces = (),
             stretches = stretches[1:1]
         end
 
-        for r in stretches
-            append!(cells, col[r])
-            push!(pos, pos[end] + length(r))
+        # each stretch in VE blocks, cut where fine cells interrupt it
+        for r in stretches, (b, isve) in _split_at_fine(col, r, ve)
+            append!(cells, col[b])
+            push!(pos, pos[end] + length(b))
             push!(pillar, ijk[col[1]][1:2])
+            push!(block_ve, isve)
         end
     end
 
@@ -147,16 +163,33 @@ function ve_columns(mesh; below_holes::Symbol = :discard, sealed_faces = (),
     for c in 1:(length(pos) - 1), m in pos[c]:(pos[c+1] - 1)
         partition[cells[m]] = c
     end
-    return (VEColumns(cells, pos, partition, pillar), sort!(discarded))
+    columns = VEColumns(cells, pos, partition, pillar, block_ve, sealed, leaky)
+    return (columns, sort!(discarded))
 end
 
-# Reject fine 3D cells (is_ve false) until roadmap Stage 12.
-function _check_all_ve(is_ve, nc)
-    isnothing(is_ve) && return nothing
+# One Bool per cell: true for VE cells (all for `nothing`)
+function _cell_is_ve(is_ve, nc)
+    isnothing(is_ve) && return fill(true, nc)
     length(is_ve) == nc || throw(ArgumentError("is_ve: one value per cell expected"))
-    all(is_ve) || throw(ArgumentError("fine 3D cells (is_ve false) need the hybrid " *
-                                      "model of roadmap Stage 12; not implemented yet"))
-    return nothing
+    return collect(Bool, is_ve)
+end
+
+# The blocks of the stretch `r` of a pillar's cells `col`: runs of VE cells,
+# and each fine cell alone; (index range into `col`, is VE) pairs, top first
+function _split_at_fine(col, r, ve)
+    out = Tuple{UnitRange{Int}, Bool}[]
+    first = 0
+    for m in r
+        if ve[col[m]]
+            first == 0 && (first = m)
+            continue
+        end
+        first > 0 && push!(out, (first:(m - 1), true))
+        push!(out, (m:m, false))
+        first = 0
+    end
+    first > 0 && push!(out, (first:last(r), true))
+    return out
 end
 
 """
@@ -283,15 +316,10 @@ exactly one of each. `mesh` and `columns` are only read.
 """
 function ve_column_geometry(mesh, columns::VEColumns)
     geo = tpfv_geometry(mesh)
-    nc = number_of_cells(mesh)
     bdir = _boundary_directions(mesh)
-    ijk = [cell_ijk(mesh, c) for c in 1:nc]
+    ijk = [cell_ijk(mesh, c) for c in 1:number_of_cells(mesh)]
     # each cell's top and bottom depth (face centroids)
-    ztop_cell = zeros(nc)
-    zbot_cell = zeros(nc)
-    for c in 1:nc
-        ztop_cell[c], zbot_cell[c] = _cell_top_bottom_depth(mesh, geo, ijk, bdir, c)
-    end
+    ztop_cell, zbot_cell = _fine_cell_depths(mesh, geo)
 
     ncol = number_of_columns(columns)
     dz = [zbot_cell[c] - ztop_cell[c] for c in columns.cells]
@@ -309,6 +337,23 @@ function ve_column_geometry(mesh, columns::VEColumns)
 
     z_cell = [geo.cell_centroids[3, c] for c in columns.cells]
     return (z_top = z_top, H = H, dz = dz, z = z, dx = dx, dy = dy, z_cell = z_cell)
+end
+
+"""
+    _fine_cell_depths(mesh, geo = tpfv_geometry(mesh)) -> (z_top, z_bottom)
+
+Every cell's top and bottom depth: the centroid depths of its top and bottom
+faces. Returns two new vectors, one entry per cell of `mesh`.
+"""
+function _fine_cell_depths(mesh, geo = tpfv_geometry(mesh))
+    nc = number_of_cells(mesh)
+    bdir = _boundary_directions(mesh)
+    ijk = [cell_ijk(mesh, c) for c in 1:nc]
+    zt, zb = zeros(nc), zeros(nc)
+    for c in 1:nc
+        zt[c], zb[c] = _cell_top_bottom_depth(mesh, geo, ijk, bdir, c)
+    end
+    return (zt, zb)
 end
 
 """

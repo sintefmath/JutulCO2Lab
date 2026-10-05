@@ -708,7 +708,9 @@ configuration decides the unknowns (see the top of `co2lab_fluid.jl`):
 - each well's CO2 counts as supply for dissolution in its cells
   ([`DissolutionWellSupplyCT`](@ref)).
 - stacked columns (`ve_columns(...; below_holes = :stack)`, `domain`'s
-  `:pillar_columns` above 1) need the transition flux of Stage 12: throws.
+  `:pillar_columns` above 1), fine 3D cells and discontinuous VE faces
+  (`ve_domain(...; fault_flux = :virtual)`) need the transition flux of
+  Stage 12: throws.
 
 With dissolution on, the wellbores use JutulDarcy's equilibrium formulation
 of the same fluid, while the reservoir uses co2lab's (the dissolved-CO2 law
@@ -731,6 +733,13 @@ function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve
     haskey(domain, :pillar_columns) && any(>(1), domain[:pillar_columns]) &&
         error("stacked columns connect through partial faces, which need the " *
               "transition flux of roadmap Stage 12; not implemented yet")
+    haskey(domain, :is_ve) && !all(domain[:is_ve]) &&
+        error("fine 3D cells need the transition flux of roadmap Stage 12; " *
+              "not implemented yet")
+    haskey(domain, :face_category) &&
+        any(c -> c in _TRANSITIONS, domain[:face_category]) &&
+        error("discontinuous VE faces need the transition flux of roadmap " *
+              "Stage 12; not implemented yet (fault_flux = :co2lab)")
     # the column-specific vertical model, built once (fringe tables)
     m = _vertical_model(fluid.vertical, domain, fluid)
     model = _co2lab_multimodel(domain, wells, fluid, m)
