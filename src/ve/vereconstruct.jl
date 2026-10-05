@@ -101,6 +101,12 @@ end
 
 # ------------------------------- Reconstruction -------------------------------
 
+# Modifies: `out.pressure`, `out.sG`, `out.sGmax` at `cell` (block `col`'s)
+function _set_fine!(out, cell, p, sG, sGmax, col)
+    out.pressure[cell], out.sG[cell], out.sGmax[cell] = p[col], sG[col], sGmax[col]
+    return out
+end
+
 """
     ve_reconstruct(state, ve, columns, fluid; poro3D = nothing) -> NamedTuple
 
@@ -117,8 +123,9 @@ one value per cell of the 3D mesh, in the mesh's cell order: brine pressure
 extended hydrostatically from the caprock (Pa), CO2 saturation, maximum CO2
 saturation, and dissolved CO2 ratio (`rs`; `nothing` without dissolution).
 The heights are recomputed from `sG` and `sGmax` by the fluid's vertical
-model (for the sharp interface co2lab's `upscaledSat2height`). Arguments are
-only read.
+model (for the sharp interface co2lab's `upscaledSat2height`); a fine 3D
+cell of a hybrid grid takes its block's own values. Arguments are only
+read.
 """
 function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid;
                         poro3D = nothing)
@@ -136,6 +143,9 @@ function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid;
     for col in 1:number_of_columns(columns)
         r = columns.pos[col]:(columns.pos[col+1] - 1)
         cells = columns.cells[r]
+        # a fine 3D cell of a hybrid grid: its own state (pressure at its
+        # centroid)
+        columns.is_ve[col] || (_set_fine!(out, only(cells), p, sG, sGmax, col); continue)
 
         drho = _density_difference(fluid, p[col], rs_ve[col], T[col])
         h, h_max = _column_heights(m, col, sG[col], sGmax[col], geo.H[col], drho, rw, rg)
@@ -154,6 +164,7 @@ function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid;
     rs = zeros(nc)
     for col in 1:number_of_columns(columns)
         r = columns.pos[col]:(columns.pos[col+1] - 1)
+        columns.is_ve[col] || (rs[only(columns.cells[r])] = state[:Rs][col]; continue)
         brine = poro[r] .* (1 .- out.sG[columns.cells[r]])
         f = _column_dissolved(view(geo.z, r), view(geo.dz, r), brine,
                               state[:Rs][col] / fluid.dis_max)

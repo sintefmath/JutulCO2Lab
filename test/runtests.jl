@@ -1897,6 +1897,12 @@ end
             st = simulate_reservoir(case; simulator = sim, config = cfg).states
             @test maximum(sg) > 0.3
             @test maximum(abs.(st[end][:sG] .- sg)) < 1e-8
+            # reconstruction: the fine cells keep their own state
+            rec = ve_reconstruct(st[end], ve, cols, fl)
+            fb = findall(.!cols.is_ve)
+            fc = cols.cells[cols.pos[fb]]
+            @test rec.sG[fc] == st[end][:sG][fb]
+            @test rec.pressure[fc] == st[end][:Pressure][fb]
             @test maximum(abs.(st[end][:Pressure] .- p)) < 1e-3
         end
 
