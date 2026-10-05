@@ -901,8 +901,15 @@ end
                        poro = fill(0.2, nc(fault)), fault_flux = :virtual).coarse
         @test d[:transmissibilities][f] ≈ sum(Tf[cf.coarse_faces_to_fine[f]])
 
-        # fine cells: pillar 1 and the top two cells of pillar 3
+        # whole fine pillars, given as (i, j) pairs or as a function of them
         ijk = [cell_ijk(slope, c) for c in 1:nc(slope)]
+        @test ve_except_pillars(slope, [(1, 1), (3, 1)]) ==
+              ve_except_pillars(slope, (i, j) -> i in (1, 3)) ==
+              [!(x[1] in (1, 3)) for x in ijk]
+        cols, _ = ve_columns(slope; is_ve = ve_except_pillars(slope, [(2, 1)]))
+        @test cols.is_ve == [true, false, false, false, false, true, true]
+
+        # fine cells: pillar 1 and the top two cells of pillar 3
         isve = [!(x[1] == 1 || (x[1] == 3 && x[3] <= 2)) for x in ijk]
         cols, _ = ve_columns(slope; is_ve = isve)
         @test cols.is_ve == [false, false, false, false, true, false, false, true, true]
@@ -1993,6 +2000,107 @@ end
         mve, mhyb, mfine = updip(:ve), updip(:hyb), updip(:fine)
         # 20 layers: 0.12 / 0.71 / 2.61 t
         @test mfine < mhyb < mve && mhyb > 0.2 * mve
+    end
+
+    @testset "exact checks P0, P2, P3 (Stage 12 step 4)" begin
+        J = JutulCO2Lab
+        g = Jutul.gravity_constant
+        rw, rg = 0.2, 0.2
+        curve = p -> 0.8 * (2e3 / (max(p, 0.0) + 2e3))^2 + 0.2
+        # fringe, residual CO2 (hysteresis) and dissolution: every equation
+        ff = FineScaleFluid(; rock_types = [RockCurves(; invPc3D = curve, kr3D = 2)],
+                            residual = (rw, rg), default_pvt = nothing,
+                            co2_rho_pvt = (4.3e-9, 1e7), wat_rho_pvt = (4.3e-10, 1e7),
+                            dissolution = true, dis_max = 0.03)
+        nt, dt = 24, 30 * 86400.0
+        # fixed steps: the adaptive step control reacts to iteration counts,
+        # so mirrored runs could take different steps (P3)
+        kw = (info_level = -1, tol_cnv = 1e-10, tol_mb = 1e-12, timesteps = :none,
+              max_timestep = Inf)
+        # a closed run from CO2 placed in the blocks `co2` (no wells)
+        function closed_run(mesh, cols, co2; kwarg...)
+            nc = number_of_cells(mesh)
+            poro, perm = fill(0.2, nc), fill(5e-13, nc)
+            ve = ve_domain(mesh, cols; perm_x = perm, poro)
+            fl = co2lab_ve_fluid(ff, mesh, cols; poro, perm_x = perm, dis_rate = 1e-10)
+            model = setup_co2lab_model(ve.domain; fluid = fl)
+            p0 = 1e7 .+ 1050.0 * g .* (ve.domain[:reference_depth] .- 1000.0)
+            sg = [b in co2 ? 0.3 : 0.0 for b in 1:number_of_columns(cols)]
+            case = JutulCase(model, fill(dt, nt), setup_reservoir_forces(model);
+                             state0 = setup_co2lab_state(model; pressure = p0, sG = sg),
+                             parameters = setup_parameters(model))
+            return (model = model, ve = ve, case = case, kwarg...)
+        end
+        function simulate(r)
+            sim, cfg = setup_co2lab_simulator(r.case; kw...)
+            return simulate_reservoir(r.case; simulator = sim, config = cfg).states
+        end
+
+        # P0: on a VE grid of continuous faces the transition flux type gives
+        # the stock flux exactly (its ordinary faces untouched)
+        mesh = _cp_mesh_pillars(5, 8, (p, k) -> 1000.0 - 1.0 * p + 0.75 * (k - 1))
+        cols, _ = ve_columns(mesh)
+        r = closed_run(mesh, cols, (1, 2))
+        @test J._ve_faces(r.ve.domain) === nothing
+        st = simulate(r)
+        N, zref = r.ve.domain[:neighbors], r.ve.domain[:reference_depth]
+        faces = [J.VEFace(N[1, f], N[2, f], J._FACE_VE, NaN, (NaN, NaN, NaN, NaN),
+                          (zref[N[1, f]], zref[N[2, f]]), (true, true))
+                 for f in axes(N, 2)]
+        J._set_transition_flux!(r.model[:Reservoir], faces)
+        sf = simulate(r)
+        @test maximum(st[end][:sG]) > 0.05 && maximum(st[end][:Rs]) > 1e-3
+        for k in (:Pressure, :sG, :sGmax, :Rs)
+            @test sf[end][k] == st[end][k]
+        end
+
+        # a stepped sloping grid (0.3 m per column) with a fault (offset 1.5
+        # m, cells 0.6 m: the virtual cell) between columns 4 and 5 and a fine
+        # pillar 2; CO2 placed in columns 1 and 3 migrates up-dip through the
+        # fine pillar and towards the fault. `mirror` flips it left to right.
+        nx = 6
+        top(i, k) = 1000.0 - 0.3 * i + (i > 4 ? 1.5 : 0.0) + 0.6 * (k - 1)
+        grid(mirror) = _cp_mesh(nx, 10, mirror ? (i, k) -> top(nx + 1 - i, k) : top)
+        pillar(i, mirror) = mirror ? nx + 1 - i : i
+        function hybrid(mirror)
+            mesh = grid(mirror)
+            cols, _ = ve_columns(mesh; is_ve = ve_except_pillars(mesh,
+                                                [(pillar(2, mirror), 1)]))
+            col(b) = cell_ijk(mesh, cols.cells[cols.pos[b]])[1]
+            co2 = [b for b in 1:number_of_columns(cols) if cols.is_ve[b] &&
+                   col(b) in pillar.((1, 3), mirror)]
+            return closed_run(mesh, cols, co2; mesh = mesh, cols = cols)
+        end
+
+        # P2: brine and CO2 (free and dissolved) conserved across the
+        # transitions, to the solver's tolerance
+        a = hybrid(false)
+        @test count(==(J._FACE_VE_DISCONTINUOUS), a.ve.domain[:face_category]) == 1
+        @test count(==(J._FACE_VE_FINE), a.ve.domain[:face_category]) >= 20
+        sa = simulate(a)
+        M0 = sum(sa[1][:TotalMasses]; dims = 2)
+        fine = .!a.cols.is_ve
+        @test maximum(sa[end][:sG][fine]) > 0.01 && maximum(sa[end][:Rs][fine]) > 0.01
+        for k in eachindex(sa)
+            M = sum(sa[k][:TotalMasses]; dims = 2)
+            @test maximum(abs.(M .- M0) ./ M0) < 1e-10
+        end
+
+        # P3: the mirrored grid gives the mirrored solution (each face's flux
+        # independent of its orientation)
+        b = hybrid(true)
+        sb = simulate(b)
+        # block of b holding the mirror image of a's block's top cell
+        ijk_b = Dict(cell_ijk(b.mesh, c) => c for c in 1:number_of_cells(b.mesh))
+        image = map(1:number_of_columns(a.cols)) do blk
+            i, j, k = cell_ijk(a.mesh, a.cols.cells[a.cols.pos[blk]])
+            b.cols.partition[ijk_b[(nx + 1 - i, j, k)]]
+        end
+        @test sort(image) == 1:number_of_columns(b.cols)
+        for k in (:sG, :sGmax, :Rs)
+            @test maximum(abs.(sb[end][k][image] .- sa[end][k])) < 1e-8
+        end
+        @test maximum(abs.(sb[end][:Pressure][image] .- sa[end][:Pressure])) < 0.1
     end
 
     @testset "endpoint-scaling hysteresis in fine 3D cells (Stage 6)" begin

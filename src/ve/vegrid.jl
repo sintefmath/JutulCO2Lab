@@ -109,14 +109,14 @@ Below a cut:
   `discard_below_holes`): every cell below the pillar's first cut is
   discarded; one column per pillar.
 - `below_holes = :stack` — each connected stretch is its own column. Such
-  columns connect laterally through partial faces, which need the transition
-  flux of roadmap Stage 12: the domain can be built, but `setup_co2lab_model`
-  rejects it.
+  columns connect laterally through partial faces, which take the transition
+  flux (roadmap Stage 12, `transition_flux.jl`).
 
 `is_ve` (one `Bool` per cell of `mesh`, `nothing` = all VE) marks fine 3D
-cells (`false`) of a hybrid grid (roadmap Stage 12): each becomes a block of
-its own, and a pillar's VE cells are also cut where fine cells interrupt
-them (not a hole: nothing is discarded for it).
+cells (`false`) of a hybrid grid (roadmap Stage 12; whole pillars with
+[`ve_except_pillars`](@ref)): each becomes a block of its own, and a
+pillar's VE cells are also cut where fine cells interrupt them (not a hole:
+nothing is discarded for it).
 
 Returns `(columns, discarded)`: a new `VEColumns` of the cells kept (cell
 indices into `mesh`), and the discarded cells as a sorted `Vector{Int}` of
@@ -190,6 +190,23 @@ function _split_at_fine(col, r, ve)
     end
     first > 0 && push!(out, (first:last(r), true))
     return out
+end
+
+"""
+    ve_except_pillars(mesh, fine) -> Vector{Bool}
+
+The `is_ve` argument of [`ve_columns`](@ref) for a hybrid grid whose fine
+3D regions are whole pillars: `fine` gives the pillars as logical `(i, j)`
+pairs (any collection) or as a function `(i, j) -> Bool`.
+
+Returns a new `Vector{Bool}`, one entry per cell of `mesh`: `false` for the
+cells of the chosen pillars, `true` elsewhere. `mesh` is only read.
+"""
+function ve_except_pillars(mesh, fine)
+    # a collection of pillars: membership; a function: its value
+    isfine = fine isa Function ? ij -> fine(ij...) :
+             (set = Set(Tuple{Int, Int}.(fine)); ij -> ij in set)
+    return [!isfine(cell_ijk(mesh, c)[1:2]) for c in 1:number_of_cells(mesh)]
 end
 
 """

@@ -263,9 +263,6 @@ saturation linear in `S`, as [`CapillaryFringeTable`](@ref). Zero for
 `drho ≤ 0`.
 """
 function _layered_height(m::LayeredFringeModel, i, S, drho)
-    # no buoyancy (CO2 as dense as brine, an unphysical state Newton may pass
-    # through): no height, as CapillaryFringeTable's
-    Jutul.value(drho) > 0 || return zero(S) + zero(drho)
     tip = _settings(m).tip
     Jutul.value(S) < tip && return _layered_newton(m, i, tip, drho) * S / tip
     return _layered_newton(m, i, S, drho)
@@ -273,6 +270,10 @@ end
 
 # The root on plain values, then one Newton step with the AD values
 function _layered_newton(m, i, S, drho)
+    # no buoyancy (CO2 as dense as brine: an unphysical state Newton may pass
+    # through, or Jutul's sparsity detection's placeholder state): no height,
+    # as CapillaryFringeTable's
+    Jutul.value(drho) > 0 || return zero(S) + zero(drho)
     _, V = _column_extent(m.cells, i)
     h = _solve_layered(m, i, Jutul.value(S) * V, Jutul.value(drho))
     F = _profile_volume(m, i, h, drho) - S * V
