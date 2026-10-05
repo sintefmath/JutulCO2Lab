@@ -2109,6 +2109,144 @@ end
         @test maximum(abs.(sb[end][:Pressure][image] .- sa[end][:Pressure])) < 0.1
     end
 
+    @testset "fixed residual, capped (later item: co2lab's 'fixed residual')" begin
+        J = JutulCO2Lab
+        g = Jutul.gravity_constant
+        mesh = _cp_mesh_pillars(4, 6, (p, k) -> 1000.0 - 2.0 * p + 1.0 * (k - 1))
+        nc = number_of_cells(mesh)
+        layer = [cell_ijk(mesh, c)[3] for c in 1:nc]
+        perm = [1e-13 * (1 + 0.5 * sin(l)) for l in layer]
+        poro = [0.15 + 0.01 * l for l in layer]
+        rw, rg, pe = 0.2, 0.25, 2e3
+        sand = p -> 0.8 * (pe / (max(p, 0.0) + pe))^2 + 0.2
+        shale = p -> 0.8 * (4pe / max(p, 4pe))^2 + 0.2
+        krg(s) = min(s, 1 - rw)^2
+        krw(sw) = (max(sw - rw, 0.0) / (1 - rw))^2
+        rt = [l in (3, 4) ? 2 : 1 for l in layer]
+        cols, _ = ve_columns(mesh)
+        dom = Dict(:column_height => fill(6.0, 4))
+        drho, H = 300.0, 6.0
+        fluid(law; kw = krw) = FineScaleFluid(;
+            rock_types = [RockCurves(; invPc3D = sand, kr3D = krg, krw3D = kw),
+                          RockCurves(; invPc3D = shale, kr3D = krg, krw3D = kw)],
+            residual = (rw, rg), hysteresis = law, default_pvt = nothing)
+        build(ff; types = rt) = (fl = co2lab_ve_fluid(ff, mesh, cols; poro, perm_x = perm,
+                                                      rock_type = types);
+                     J._vertical_model(fl.vertical, dom, fl))
+        mf, me = build(fluid(FixedResidual())), build(fluid(EndpointScaling()))
+        @test mf.law isa FixedResidual && mf.p_res[1] > 0 && mf.p_res[2] > 4pe
+
+        # the depth rule by brute-force quadrature: per 1 m layer its rock type
+        typ(z) = clamp(ceil(Int, z), 1, 6) in (3, 4) ? 2 : 1
+        ph(z) = 0.15 + 0.01 * clamp(ceil(Int, z), 1, 6)
+        kx(z) = 1e-13 * (1 + 0.5 * sin(clamp(ceil(Int, z), 1, 6)))
+        sgz(z, hh) = hh > z ? 1 - (typ(z) == 1 ? sand : shale)(drho * g * (hh - z)) : 0.0
+        loc(z, h, hm) = max(sgz(z, h), min(rg, sgz(z, hm)))
+        mob(z, h, hm) = sgz(z, h) > rg ? sgz(z, h) : 0.0
+        zs = range(0, H; length = 600_001)
+        mid = zs[1:end-1] .+ step(zs) / 2
+        quad(f) = sum(f(z) for z in mid) * step(zs)
+        # (imbibed states hold at least the trapped CO2: 0.11 after 0.3)
+        for (S, Smax) in ((0.15, 0.3), (0.12, 0.3), (0.3, 0.3), (0.03, 0.04))
+            h, hm = J._column_heights(mf, 2, S, Smax, H, drho, rw, rg)
+            @test h <= hm + 1e-12
+            # the column's CO2 is S; relperms against the depth rule
+            @test quad(z -> ph(z) * loc(z, h, hm)) / quad(ph) ≈ S rtol = 1e-5
+            krW, krG = J._column_relperm(mf, 2, S, Smax, h, hm, H, drho, 0.0, 1.0, 1.0,
+                                         rw, rg)
+            K = quad(kx)
+            @test quad(z -> kx(z) * krg(mob(z, h, hm))) / K ≈ krG rtol = 1e-4 atol = 1e-9
+            @test quad(z -> kx(z) * krw(1 - loc(z, h, hm))) / K ≈ krW rtol = 1e-5
+            # reconstruction: the cells' averages of the depth rule
+            zb = 1.0:1.0:6.0
+            s, _ = J._fine_saturations(mf, 2, collect(zb), h, hm, drho, rw, rg)
+            @test s[2] ≈ quad(z -> 1.0 < z < 2.0 ? loc(z, h, hm) : 0.0) rtol = 1e-4
+        end
+        # drainage: as endpoint scaling
+        @test all(J._column_heights(mf, 2, 0.2, 0.2, H, drho, rw, rg) .≈
+                  J._column_heights(me, 2, 0.2, 0.2, H, drho, rw, rg))
+        # the height grows with S at fixed S_max (monotone); below the trapped
+        # CO2 (reached by dissolution only) linearly to 0
+        hs = [J._column_heights(mf, 2, S, 0.3, H, drho, rw, rg)[1]
+              for S in range(0.0, 0.3; length = 61)]
+        @test issorted(hs) && hs[1] == 0
+
+        # a curve whose fringe holds r_g from its tip on (a critical saturation
+        # of r_g): co2lab's 'fixed residual', the
+        # profile of h plus r_g over [h, h_max]
+        tipped = p -> max(0.8 * (pe / (max(p, 0.0) + pe))^2 + 0.2 - rg, rw)
+        mt = build(FineScaleFluid(; rock_types = [RockCurves(; invPc3D = tipped, kr3D = krg)],
+                                  residual = (rw, rg), hysteresis = FixedResidual(),
+                                  default_pvt = nothing); types = nothing)
+        @test mt.p_res == [0.0]
+        h, hm = J._column_heights(mt, 2, 0.12, 0.3, H, drho, rw, rg)
+        I = J._interval_integrals(mt, 2, 0.0, H, h, hm, drho)
+        pvh(a, b) = J._integral(mt.cells, 2, mt.cells.V, b) -
+                    J._integral(mt.cells, 2, mt.cells.V, a)
+        @test I.co2 ≈ I.free + rg * pvh(h, hm) rtol = 1e-10
+
+        # derivatives (one Newton step with AD) against central differences
+        f(x) = (hh = J._column_heights(mf, 2, x[1], x[2], H, x[3], rw, rg);
+                [hh..., J._column_relperm(mf, 2, x[1], x[2], hh..., H, x[3], 0.0, 1.0,
+                                          1.0, rw, rg)...])
+        for x0 in ([0.15, 0.3, 300.0], [0.25, 0.3, 280.0])
+            jac = Jutul.ForwardDiff.jacobian(f, x0)
+            e = [1e-7, 1e-7, 1e-4] .* x0
+            fd = reduce(hcat, [(f(x0 .+ e[j] .* (1:3 .== j)) .-
+                                f(x0 .- e[j] .* (1:3 .== j))) ./ (2e[j]) for j in 1:3])
+            @test jac ≈ fd rtol = 1e-4
+        end
+
+        # runs, VE and hybrid (a fine pillar), injection then migration: CO2
+        # conserved, imbibition reached, and more CO2 left behind trapped than
+        # with endpoint scaling (r_g where the plume swept, not r_g·s_max/(1 − r_w))
+        slope = _cp_mesh_pillars(6, 6, (p, k) -> 1000.0 - 2.0 * p + 1.0 * (k - 1))
+        ns = number_of_cells(slope)
+        ps, ks = fill(0.2, ns), fill(5e-13, ns)
+        function run(law, is_ve)
+            c6, _ = ve_columns(slope; is_ve)
+            ve = ve_domain(slope, c6; perm_x = ks, poro = ps)
+            ff = FineScaleFluid(; rock_types = [RockCurves(; invPc3D = sand, kr3D = krg)],
+                                residual = (rw, rg), hysteresis = law,
+                                default_pvt = nothing, wat_rho_pvt = (4.3e-10, 1e7),
+                                co2_rho_pvt = (4.3e-9, 1e7))
+            fl = co2lab_ve_fluid(ff, slope, c6; poro = ps, perm_x = ks)
+            wb = c6.partition[findfirst(c -> cell_ijk(slope, c) == (1, 1, 1), 1:ns)]
+            well = c6.is_ve[wb] ? setup_ve_well(ve, wb; name = :inj) :
+                   setup_well(ve.domain, [wb]; name = :inj, WI = 1e-11)
+            model = setup_co2lab_model(ve.domain; fluid = fl, wells = [well])
+            q = 2e-4
+            on = setup_reservoir_forces(model; control = Dict(
+                :inj => co2_injector_control(TotalRateTarget(q), fl)))
+            off = setup_reservoir_forces(model; control = Dict(:inj => DisabledControl()))
+            p0 = 1e7 .+ 1050.0 * g .* (ve.domain[:reference_depth] .- 990.0)
+            nt = 24
+            case = JutulCase(model, fill(30 * 86400.0, nt), [k <= 6 ? on : off
+                                                             for k in 1:nt];
+                             state0 = setup_co2lab_state(model; pressure = p0,
+                                                         forces = on),
+                             parameters = setup_parameters(model))
+            sim, cfg = setup_co2lab_simulator(case; info_level = -1)
+            st = simulate_reservoir(case; simulator = sim, config = cfg).states[end]
+            injected = 6 * 30 * 86400.0 * q * fl.rho_ref[2]
+            @test abs(sum(st[:TotalMasses][2, :]) - injected) / injected < 1e-4
+            return st
+        end
+        allve = fill(true, ns)
+        hyb = ve_except_pillars(slope, [(3, 1)])
+        sf, se = run(FixedResidual(), allve), run(EndpointScaling(), allve)
+        @test any(sf[:sG] .< sf[:sGmax] .- 0.01)
+        @test sum(sf[:sG] .* (sf[:sG] .< sf[:sGmax])) > sum(se[:sG] .* (se[:sG] .< se[:sGmax]))
+        sh = run(FixedResidual(), hyb)
+        @test any(sh[:sG] .< sh[:sGmax] .- 0.01)
+
+        # fine cells: the drainage curve until trapped at min(r_g, s_max)
+        @test J._fine_kr_saturation(FixedResidual(), 0.3, 0.5, rw, rg) == 0.3
+        @test J._fine_kr_saturation(FixedResidual(), 0.25, 0.5, rw, rg) == 0.0
+        @test J._fine_kr_saturation(FixedResidual(), 0.1, 0.1, rw, rg) == 0.1
+        @test J._fine_pc_saturation(FixedResidual(), 0.1, 0.5, rw, rg) == 0.1
+    end
+
     @testset "endpoint-scaling hysteresis in fine 3D cells (Stage 6)" begin
         J = JutulCO2Lab
         rw, rg = 0.2, 0.25

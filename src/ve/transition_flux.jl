@@ -229,7 +229,6 @@ function _interval_relperm(m::LayeredFringeModel, i, T, B, sG, smax, h, h_max, d
     kz = _interval_integrals(m, i, T, B, h, h_max, drho).kz
     (kz > 0 && B > Tm) || return (z0, z0)
     I = _interval_integrals(m, i, Tm, B, h, h_max, drho)
-    Sf = _free_saturation(sG, smax, rw, rg)
-    krW = _tip_brine_relperm(m, i, Sf, smax, h_max, drho, Tm, B, I)
+    krW = _column_brine(m.law, m, i, sG, smax, h_max, drho, Tm, B, I, rw, rg)
     return (krW / kz, I.krG / kz)
 end

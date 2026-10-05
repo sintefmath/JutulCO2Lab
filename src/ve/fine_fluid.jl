@@ -12,32 +12,6 @@
 # Not part of the fine-scale fluid: co2lab's dissolution rate (an upscaled
 # parameter, given to the VE fluid) and the caprock's rugosity (the grid's).
 
-# ------------------------------ Hysteresis laws -------------------------------
-
-"""
-    HysteresisLaw
-
-How the residual CO2 depends on the saturation history, for VE blocks and
-fine cells alike. A law gives the free saturation, `_free_saturation(law, s,
-s_max, r_w, r_g)`, the part that flows and holds capillary pressure. A law
-linear in `(s, s_max)` at each depth holds for column averages too (VE needs
-only `S_max` per column). Implemented: [`EndpointScaling`](@ref); co2lab's
-`'fixed residual'`, a law over the column, is planned (roadmap).
-"""
-abstract type HysteresisLaw end
-
-"""
-    EndpointScaling()
-
-co2lab's endpoint scaling (its default, `'endpoint scaling'`): at each depth
-the residual CO2 scales with the largest saturation reached there,
-`r_g·s_max/(1 − r_w)`; the free saturation is `((1 − r_w)·s − r_g·s_max)/(1 −
-r_w − r_g)` while `s < s_max`, else `s`.
-"""
-struct EndpointScaling <: HysteresisLaw end
-
-_free_saturation(::EndpointScaling, s, smax, rw, rg) = _free_saturation(s, smax, rw, rg)
-
 # ------------------------------ The fine fluid --------------------------------
 
 """
@@ -99,9 +73,10 @@ end
 
 The VE fluid of the fine-scale `fluid` on the blocks of `columns` (of the 3D
 `mesh`; `poro`, `perm_x`, `rock_type` per cell of `mesh`, rock type 1 for
-all if `nothing`): the vertical model [`LayeredFringe`](@ref) of its curves,
-or, with no capillarity in any rock type, [`SharpInterfaceIntegrated`](@ref)
-(the same limit) with the curves' endpoints; residual, PVT and dissolution
+all if `nothing`): the vertical model [`LayeredFringe`](@ref) of its curves
+and hysteresis law, or, with no capillarity in any rock type,
+[`SharpInterfaceIntegrated`](@ref) (the same limit, where both laws agree)
+with the curves' endpoints; residual, PVT and dissolution
 from `fluid`; `dis_rate` co2lab's upscaled dissolution rate (VE blocks; fine
 cells dissolve instantaneously). The fine cells' fluid rides along (the
 result's `fine`). Returns a new `CO2LabVEFluid`; the arguments are only read.
@@ -113,7 +88,7 @@ function co2lab_ve_fluid(fluid::FineScaleFluid, mesh, columns::VEColumns; poro, 
         throw(ArgumentError("rock_type beyond the fluid's $(length(fluid.rock_types))"))
     rc, (rw, rg) = fluid.rock_types, fluid.residual
     fluid.fine_hysteresis == :killough && rg > 0 &&
-        @warn "Killough's hysteresis in fine cells, endpoint scaling in VE blocks"
+        @warn "Killough's hysteresis in fine cells, $(fluid.hysteresis) in VE blocks"
     if all(r -> isnothing(r.invPc3D), rc)
         vertical = SharpInterfaceIntegrated(mesh, columns; poro, perm_x, perm_y)
         krmax = _sharp_endpoints(rc, rw, rg)
@@ -121,7 +96,8 @@ function co2lab_ve_fluid(fluid::FineScaleFluid, mesh, columns::VEColumns; poro, 
         vertical = LayeredFringe(mesh, columns; poro, perm_x, perm_y, rock_type = types,
                                  invPc3D = [r.invPc3D for r in rc],
                                  kr3D = [r.kr3D for r in rc],
-                                 krw3D = [r.krw3D for r in rc])
+                                 krw3D = [r.krw3D for r in rc],
+                                 hysteresis = fluid.hysteresis)
         krmax = (-1.0, -1.0)
     end
     ve = co2lab_ve_fluid(; vertical, residual = (rw, rg), krmax, dis_rate,
@@ -220,27 +196,28 @@ end
     _fine_relperm(f, i, sG, smax) -> (krW, krG)
 
 Fine cell `i`'s relperms (brine, CO2) at CO2 saturation `sG` and maximum
-`smax`: the CO2's by the hysteresis law (its drainage curve at the free
-saturation) or Killough's, the brine's at `1 − sG`.
+`smax`: the CO2's by the hysteresis law (its drainage curve at the law's
+saturation: the free one, or the saturation itself unless trapped) or
+Killough's, the brine's at `1 − sG`.
 """
 function _fine_relperm(f::FineCellFluid, i, sG, smax)
     t = f.rock_type[i]
     krg = f.killough ?
           JutulDarcy.kr_hysteresis(JutulDarcy.KilloughHysteresis(), f.drain[t], f.imb[t],
                                    sG, smax) :
-          f.drain[t](_free_saturation(f.law, sG, smax, f.res_water, f.res_gas))
+          f.drain[t](_fine_kr_saturation(f.law, sG, smax, f.res_water, f.res_gas))
     return (f.brine[t](1 - sG), krg)
 end
 
 """
     _fine_capillary_pressure(f, i, sG, smax) -> Real
 
-Fine cell `i`'s capillary pressure (CO2 relative to brine): at the free
-saturation by the hysteresis law (zero free CO2: the entry pressure), or at
-`sG` with Killough's model.
+Fine cell `i`'s capillary pressure (CO2 relative to brine): at the hysteresis
+law's saturation (endpoint scaling: the free one, zero free CO2 the entry
+pressure; a fixed residual: `sG`), or at `sG` with Killough's model.
 """
 function _fine_capillary_pressure(f::FineCellFluid, i, sG, smax)
     t = f.rock_type[i]
-    s = f.killough ? sG : _free_saturation(f.law, sG, smax, f.res_water, f.res_gas)
+    s = f.killough ? sG : _fine_pc_saturation(f.law, sG, smax, f.res_water, f.res_gas)
     return f.pc[t](s)
 end
