@@ -198,6 +198,11 @@ src/ve/              the VE simulator
                      column's fine cells, integrals over any depth interval
   fine_hysteresis.jl  co2lab's endpoint-scaling hysteresis for fine 3D cells
                      (JutulDarcy relperm hysteresis and capillary pressure)
+  fine_fluid.jl      the fluid at the fine scale: rock types' curves, the
+                     hysteresis law; the VE fluid built from it; hybrid
+                     grids' fine cells
+  vehybrid.jl        hybrid grids' faces: categories, virtual-cell intervals,
+                     transmissibilities
   co2lab_fluid.jl    co2lab's fluid system: black-oil with a :co2lab formulation,
                      unknowns by configuration; dissolution transfer, hysteresis;
                      model, state and simulator setup

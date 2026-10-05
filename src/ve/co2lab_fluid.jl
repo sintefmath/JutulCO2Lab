@@ -347,7 +347,7 @@ end
 
 """
     DissolvedCO2Equation(flow_discretization, dis_rate, dis_max,
-                         vertical = SharpInterface())
+                         vertical = SharpInterface(), is_ve = nothing)
 
 Conservation of dissolved CO2 with co2lab's transfer term (rate-driven mode,
 `CO2VEBlackOilTypeModel.m:84-97`): `d/dt(M_dis) + div(F_dis) − η = 0`.
@@ -356,15 +356,19 @@ is the dissolved part of black-oil's CO2 flux (`JutulDarcy/src/blackoil/
 flux.jl`): `ρ_VS · rs_up · (bλ)_L,up · ∇ψ_L`. The transfer `η` is co2lab's
 `computeDissolutionTransfer` ([`_dissolution_transfer`](@ref)), with the
 brine CO2 has touched from the column-specific vertical model `vertical`.
+Fine 3D cells of a hybrid grid (`is_ve` false; `nothing` = all VE) dissolve
+instantaneously: co2lab's rate law is an upscaled phenomenon, the convective
+mixing below a segregated plume (researcher, 2026-10-05).
 """
-struct DissolvedCO2Equation{D, M} <: Jutul.JutulEquation
+struct DissolvedCO2Equation{D, M, V} <: Jutul.JutulEquation
     flow_discretization::D  # faces and stencil (TPFA)
     dis_rate::Float64       # co2lab dis_rate
     dis_max::Float64        # saturated rs
     vertical::M             # vertical model (column-specific): the touched brine
+    is_ve::V                # true for VE columns, per cell (nothing: all)
 end
-DissolvedCO2Equation(flow, dis_rate, dis_max) =
-    DissolvedCO2Equation(flow, dis_rate, dis_max, SharpInterface())
+DissolvedCO2Equation(flow, dis_rate, dis_max, vertical = SharpInterface()) =
+    DissolvedCO2Equation(flow, dis_rate, dis_max, vertical, nothing)
 Jutul.number_of_equations_per_entity(::Jutul.SimulationModel, ::DissolvedCO2Equation) = 1
 function Jutul.local_discretization(eq::DissolvedCO2Equation, i)
     # the half-faces of cell i
@@ -449,6 +453,8 @@ function _dissolution_transfer(eq, ρV, state, state0, c, dt, out_dis, in_free, 
     demand = (pv * sW * bW * eq.dis_max * ρV - state0.DissolvedCO2[c]) / dt + out_dis
     supply = pv0 * state0.sG[c] * bG0 * ρV / dt + in_free + src
     max_transfer = _max_c(_min_v(demand, supply), 0.0) / (bW * ρV)
+    # a fine cell: instantaneous equilibrium, as much as brine and CO2 allow
+    _is_ve(eq.is_ve, c) || return max_transfer * ρV * bW
 
     # brine touched by the plume (above h_max) is kept saturated; sGmax as it
     # stands within the step (as for the heights)
@@ -707,10 +713,11 @@ configuration decides the unknowns (see the top of `co2lab_fluid.jl`):
   dissolution, residual CO2 is consumed by the transfer, as co2lab.
 - each well's CO2 counts as supply for dissolution in its cells
   ([`DissolutionWellSupplyCT`](@ref)).
-- stacked columns (`ve_columns(...; below_holes = :stack)`, `domain`'s
-  `:pillar_columns` above 1), fine 3D cells and discontinuous VE faces
-  (`ve_domain(...; fault_flux = :virtual)`) need the transition flux of
-  Stage 12: throws.
+- transition faces (`ve_domain`'s `:face_category` 3–5: VE–fine faces,
+  discontinuous VE–VE faces such as faults with `fault_flux = :virtual` or
+  stacked blocks, vertical VE–VE faces through leaky layers) need the
+  transition flux of Stage 12: throws. Fine 3D cells without them (an
+  all-fine grid) run, with the fluid's fine-scale part.
 
 With dissolution on, the wellbores use JutulDarcy's equilibrium formulation
 of the same fluid, while the reservoir uses co2lab's (the dissolved-CO2 law
@@ -730,16 +737,10 @@ dissolution) besides JutulDarcy's defaults. The wells get the same PVT.
 function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve_fluid(),
                             rock_compressibility = (reference_pressure = 100e5,
                                                     compressibility = 1e-10))
-    haskey(domain, :pillar_columns) && any(>(1), domain[:pillar_columns]) &&
-        error("stacked columns connect through partial faces, which need the " *
-              "transition flux of roadmap Stage 12; not implemented yet")
-    haskey(domain, :is_ve) && !all(domain[:is_ve]) &&
-        error("fine 3D cells need the transition flux of roadmap Stage 12; " *
-              "not implemented yet")
     haskey(domain, :face_category) &&
         any(c -> c in _TRANSITIONS, domain[:face_category]) &&
-        error("discontinuous VE faces need the transition flux of roadmap " *
-              "Stage 12; not implemented yet (fault_flux = :co2lab)")
+        error("transition faces (VE–fine, discontinuous or vertical VE–VE) need " *
+              "the transition flux of roadmap Stage 12; not implemented yet")
     # the column-specific vertical model, built once (fringe tables)
     m = _vertical_model(fluid.vertical, domain, fluid)
     model = _co2lab_multimodel(domain, wells, fluid, m)
@@ -848,8 +849,11 @@ function _co2lab_multimodel(domain, wells, fluid::CO2LabVEFluid, vertical)
     # the reservoir alone, in co2lab's formulation, plus the dissolved-CO2 law
     rmodel = setup_reservoir_model(domain, sys)[:Reservoir]
     flow = rmodel.domain.discretizations.mass_flow
+    d = rmodel.data_domain
+    is_ve = haskey(d, :is_ve) && !all(d[:is_ve]) ? collect(Bool, d[:is_ve]) : nothing
     rmodel.equations[:dissolved_co2] = DissolvedCO2Equation(flow, fluid.dis_rate,
-                                                            fluid.dis_max, vertical)
+                                                            fluid.dis_max, vertical,
+                                                            is_ve)
     push!(rmodel.output_variables, :Rs, :DissolvedCO2)
 
     # the wells and facility from `full`, the reservoir with co2lab's formulation

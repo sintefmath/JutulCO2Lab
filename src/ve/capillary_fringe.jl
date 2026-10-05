@@ -179,6 +179,8 @@ end
 # A function, or co2lab's (C, alpha), scaled by the pressure drop over the
 # tallest column (`dp_max` = Hmax·Δρ_ref·g)
 _fine_capillary_curve(f, dp_max, rw) = f
+# no capillarity: a step at p = 0, from brine to the residual brine
+_fine_capillary_curve(::Nothing, dp_max, rw) = p -> p > 0 ? rw : 1.0
 function _fine_capillary_curve((C, a)::Tuple{Real, Real}, dp_max, rw)
     Cs = C * dp_max
     return p -> max((Cs / (p + Cs))^(1 / a), rw)

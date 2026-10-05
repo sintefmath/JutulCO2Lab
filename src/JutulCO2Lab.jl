@@ -54,10 +54,12 @@ include("ve/capillary_fringe.jl")
 include("ve/sharp_interface_integrated.jl")
 include("ve/layered_fringe.jl")
 include("ve/fine_hysteresis.jl")
+include("ve/fine_fluid.jl")
 export co2lab_ve_fluid, CO2LabVEFluid, instantaneous_dissolution, needs_temperature
 export VerticalModel, SharpInterface, SharpInterfaceIntegrated, CapillaryFringeTable
 export LayeredFringe, co2lab_capillary_curve
 export EndpointScalingHysteresis, FreeSaturationCapillaryPressure
+export HysteresisLaw, EndpointScaling, RockCurves, FineScaleFluid
 
 include("ve/co2lab_fluid.jl")
 export co2lab_system, has_dissolution

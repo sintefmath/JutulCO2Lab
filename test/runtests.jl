@@ -1681,6 +1681,156 @@ end
               J.LayeredFringeModel
     end
 
+    @testset "fine-scale fluid and fine cells (Stage 12 step 2)" begin
+        J = JutulCO2Lab
+        mesh = _cp_mesh_pillars(4, 6, (p, k) -> 1000.0 - 2.0 * p + 1.0 * (k - 1))
+        nc = number_of_cells(mesh)
+        layer = [cell_ijk(mesh, c)[3] for c in 1:nc]
+        perm = [1e-13 * (1 + 0.5 * sin(l)) for l in layer]
+        poro = [0.15 + 0.01 * l for l in layer]
+        rw, rg, pe, g = 0.2, 0.2, 2e3, Jutul.gravity_constant
+        sand = p -> 0.8 * (pe / (max(p, 0.0) + pe))^2 + 0.2
+        # a tighter rock with an entry pressure, in layers 3 and 4
+        shale = p -> 0.8 * (4pe / max(p, 4pe))^2 + 0.2
+        krg(s) = min(s, 1 - rw)^2
+        krw(sw) = (max(sw - rw, 0.0) / (1 - rw))^2
+        rt = [l in (3, 4) ? 2 : 1 for l in layer]
+        ff = FineScaleFluid(; rock_types = [RockCurves(; invPc3D = sand, kr3D = krg,
+                                                         krw3D = krw),
+                                            RockCurves(; invPc3D = shale, kr3D = 3)],
+                            residual = (rw, rg), default_pvt = nothing,
+                            co2_rho_pvt = nothing, wat_rho_pvt = (4.3e-10, 1e7))
+        cols, _ = ve_columns(mesh)
+        fl = co2lab_ve_fluid(ff, mesh, cols; poro, perm_x = perm, rock_type = rt)
+        @test fl.vertical isa LayeredFringe && fl.fine.rock_type == rt
+
+        # the VE column of two rock types against quadrature (1 m layers)
+        dom = Dict(:column_height => fill(6.0, 4))
+        m = J._vertical_model(fl.vertical, dom, fl)
+        drho = 300.0
+        h, hmax = J._column_heights(m, 2, 0.2, 0.3, 6.0, drho, rw, rg)
+        typ(z) = clamp(ceil(Int, z), 1, 6) in (3, 4) ? 2 : 1
+        ph(z) = 0.15 + 0.01 * clamp(ceil(Int, z), 1, 6)
+        sg(z, hh) = 1 - (typ(z) == 1 ? sand : shale)(max(drho * g * (hh - z), 0.0))
+        C = rg / (1 - rw)
+        zs = range(0, 6; length = 600_001)
+        mid = zs[1:end-1] .+ step(zs) / 2
+        quad(f) = sum(f(z) for z in mid) * step(zs)
+        @test quad(z -> ph(z) * ((1 - C) * sg(z, h) + C * sg(z, hmax))) / quad(ph) ≈ 0.2 rtol = 1e-5
+        @test quad(z -> ph(z) * sg(z, hmax)) / quad(ph) ≈ 0.3 rtol = 1e-5
+
+        # without capillarity: the integrated sharp interface, the curves'
+        # endpoints; rock types with different endpoints refused
+        flat = FineScaleFluid(; rock_types = [RockCurves(; kr3D = krg, krw3D = krw)],
+                              residual = (rw, rg), default_pvt = nothing)
+        fs = co2lab_ve_fluid(flat, mesh, cols; poro, perm_x = perm)
+        @test fs.vertical isa SharpInterfaceIntegrated
+        @test fs.krg ≈ krg(1 - rw) && fs.krw ≈ krw(1 - rg)
+        two = FineScaleFluid(; rock_types = [RockCurves(kr3D = 2), RockCurves(kr3D = 3)],
+                             residual = (rw, rg), default_pvt = nothing)
+        @test_throws ArgumentError co2lab_ve_fluid(two, mesh, cols; poro, perm_x = perm,
+                                                   rock_type = rt)
+
+        # fine cells: relperm at the free saturation, the brine at 1 − sG; the
+        # capillary pressure at the free saturation, the entry pressure at none
+        hcols, _ = ve_columns(mesh; is_ve = fill(false, nc), below_holes = :stack)
+        hve = ve_domain(mesh, hcols; perm_x = perm, poro, fault_flux = :virtual)
+        hfl = co2lab_ve_fluid(ff, mesh, hcols; poro, perm_x = perm, rock_type = rt)
+        f = J._fine_cell_fluid(hfl.fine, hve.domain)
+        b2 = findfirst(==(2), f.rock_type)
+        b1 = findfirst(==(1), f.rock_type)
+        sf = J._free_saturation(0.3, 0.5, rw, rg)
+        @test all(isapprox.(J._fine_relperm(f, b1, 0.3, 0.5), (krw(0.7), krg(sf));
+                            atol = 1e-6))
+        @test J._fine_capillary_pressure(f, b2, 0.0, 0.0) ≈ 4pe rtol = 1e-3
+        p1 = J._fine_capillary_pressure(f, b1, 0.3, 0.3)
+        @test 1 - sand(p1) ≈ 0.3 rtol = 1e-3
+
+        # an all-fine grid runs, and reproduces JutulDarcy's 3D model with the
+        # same curves (to the formulations' difference: linear against
+        # exponential brine compressibility, black-oil against immiscible)
+        RHOW, RHOC = 1050.0, 700.0
+        ff1 = FineScaleFluid(; rock_types = [RockCurves(; invPc3D = sand, kr3D = krg,
+                                                          krw3D = krw)],
+                             residual = (rw, 0.0), default_pvt = nothing,
+                             co2_rho_pvt = nothing, co2_rho_ref = RHOC,
+                             wat_rho_pvt = (4.3e-10, 1e7), wat_rho_ref = RHOW,
+                             co2_mu_pvt = nothing, co2_mu_ref = 6e-5,
+                             wat_mu_pvt = nothing, wat_mu_ref = 8e-4)
+        hf1 = co2lab_ve_fluid(ff1, mesh, hcols; poro, perm_x = perm)
+        cell(i, k) = findfirst(c -> cell_ijk(mesh, c) == (i, 1, k), 1:nc)
+        ic, pc_ = cell(1, 6), cell(4, 1)
+        blk(c) = hcols.partition[c]
+        z = hve.domain[:cell_centroids][3, :]
+        p0 = RHOW * g .* z
+        bhp, q = p0[blk(pc_)], 5e-5
+        dt = fill(2 * 86400.0, 8)
+        kw = (info_level = -1, tol_cnv = 1e-10, tol_mb = 1e-12, timesteps = :none,
+              max_timestep = Inf)
+        wells = [setup_well(hve.domain, [blk(ic)]; name = :inj, WI = 1e-12),
+                 setup_well(hve.domain, [blk(pc_)]; name = :prod, WI = 1e-12)]
+        model = setup_co2lab_model(hve.domain; wells, fluid = hf1,
+                                   rock_compressibility = nothing)
+        ctrl = Dict(:inj => co2_injector_control(TotalRateTarget(q), hf1),
+                    :prod => ProducerControl(BottomHolePressureTarget(bhp)))
+        forces = setup_reservoir_forces(model; control = ctrl)
+        state0 = setup_co2lab_state(model; pressure = p0, forces)
+        case = JutulCase(model, dt, forces; state0, parameters = setup_parameters(model))
+        sim, cfg = setup_co2lab_simulator(case; kw...)
+        sh = simulate_reservoir(case; simulator = sim, config = cfg).states
+
+        fine = reservoir_domain(mesh; permeability = perm, porosity = poro)
+        sys = ImmiscibleSystem((AqueousPhase(), VaporPhase());
+                               reference_densities = (RHOW, RHOC))
+        m3 = setup_reservoir_model(fine, sys;
+                                   wells = [setup_well(fine, [ic]; name = :inj, WI = 1e-12),
+                                            setup_well(fine, [pc_]; name = :prod, WI = 1e-12)])
+        s = collect(range(0.0, 1.0; length = 2001))
+        replace_variables!(m3; RelativePermeabilities = JutulDarcy.ReservoirRelativePermeabilities(
+                               w = JutulDarcy.PhaseRelativePermeability(s, krw.(s); label = :w),
+                               g = JutulDarcy.PhaseRelativePermeability(s, krg.(s); label = :g)),
+                           PhaseMassDensities = ConstantCompressibilityDensities(
+                               p_ref = 1e7, density_ref = [RHOW, RHOC],
+                               compressibility = [4.3e-10, 0.0]))
+        pcf = J._capillary_of_co2(sand, rw)
+        set_secondary_variables!(m3[:Reservoir]; CapillaryPressure =
+            JutulDarcy.SimpleCapillaryPressure(Jutul.get_1d_interpolator(s, pcf.(s))))
+        f3 = setup_reservoir_forces(m3; control = Dict(
+            :inj => InjectorControl(TotalRateTarget(q), [0.0, 1.0], density = RHOC),
+            :prod => ProducerControl(BottomHolePressureTarget(bhp))))
+        prm = setup_parameters(m3)
+        prm[:Reservoir][:PhaseViscosities][1, :] .= 8e-4
+        prm[:Reservoir][:PhaseViscosities][2, :] .= 6e-5
+        s3 = simulate_reservoir(setup_reservoir_state(m3; Pressure = RHOW * g .*
+                                                      fine[:cell_centroids][3, :],
+                                                      Saturations = [1.0, 0.0]),
+                                m3, dt; parameters = prm, forces = f3, kw...).states
+        cellof = [hcols.cells[hcols.pos[b]] for b in 1:number_of_columns(hcols)]
+        @test maximum(sh[end][:sG]) > 0.01
+        @test maximum(abs.(sh[end][:sG] .- s3[end][:Saturations][2, cellof])) < 1e-4
+        @test maximum(abs.(sh[end][:Pressure] .- s3[end][:Pressure][cellof])) <
+              1e-5 * maximum(s3[end][:Pressure])
+
+        # instantaneous dissolution in fine cells: the brine saturated wherever
+        # CO2 is present, under co2lab's rate law for VE blocks
+        ffd = FineScaleFluid(; rock_types = [RockCurves(; invPc3D = sand, kr3D = krg)],
+                             residual = (rw, 0.0), default_pvt = nothing,
+                             co2_rho_pvt = nothing, wat_rho_pvt = (4.3e-10, 1e7),
+                             dissolution = true, dis_max = 0.03)
+        hfd = co2lab_ve_fluid(ffd, mesh, hcols; poro, perm_x = perm, dis_rate = 1e-12)
+        md = setup_co2lab_model(hve.domain; wells, fluid = hfd)
+        ctrl = Dict(:inj => co2_injector_control(TotalRateTarget(q), hfd),
+                    :prod => ProducerControl(BottomHolePressureTarget(bhp)))
+        fd = setup_reservoir_forces(md; control = ctrl)
+        cd = JutulCase(md, dt, fd; state0 = setup_co2lab_state(md; pressure = p0,
+                                                                forces = fd),
+                       parameters = setup_parameters(md))
+        sim, cfg = setup_co2lab_simulator(cd; info_level = -1)
+        sd = simulate_reservoir(cd; simulator = sim, config = cfg).states[end]
+        co2 = findall(>(1e-3), sd[:sG])
+        @test !isempty(co2) && all(abs.(sd[:Rs][co2] .- 0.03) .< 1e-6)
+    end
+
     @testset "endpoint-scaling hysteresis in fine 3D cells (Stage 6)" begin
         J = JutulCO2Lab
         rw, rg = 0.2, 0.25

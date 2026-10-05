@@ -37,16 +37,17 @@
 
 """
     LayeredFringe(mesh, columns; poro, perm_x, invPc3D, kr3D = 3, krw3D = :linear,
-                  perm_y = nothing, geometry = ve_column_geometry(mesh, columns),
-                  tolerance = 1e-6, tip_saturation = 1e-6,
-                  touched_saturation = 1e-3) -> LayeredFringe
+                  rock_type = nothing, perm_y = nothing,
+                  geometry = ve_column_geometry(mesh, columns), tolerance = 1e-6,
+                  tip_saturation = 1e-6, touched_saturation = 1e-3) -> LayeredFringe
 
 A capillary fringe in VE columns whose rock varies with depth: the columns
 `columns` of the 3D `mesh`, with the fine cells' porosity `poro` and
 x-permeability `perm_x` (per cell of `mesh`, as given to
 [`ve_domain`](@ref); `perm_y` only checked, as for
-[`SharpInterfaceIntegrated`](@ref)). One fine-scale capillary curve for all
-cells:
+[`SharpInterfaceIntegrated`](@ref)). The fine-scale curves, one set for all
+cells, or one per rock type (vectors, with `rock_type` the type of each cell
+of `mesh`, 1, 2, …):
 - `invPc3D`: the fine-scale brine saturation as a function of capillary
   pressure (Pa); a physical curve (for co2lab's dimensionless `(C, alpha)`
   see [`co2lab_capillary_curve`](@ref));
@@ -54,6 +55,8 @@ cells:
   `β` for `s^β`;
 - `krw3D`: the fine-scale brine relperm of the brine saturation, or
   `:linear` for `(s_w − r_w)/(1 − r_w)`;
+- `nothing` for `invPc3D` is a rock type without capillarity (a sharp
+  interface in it);
 - `tolerance`, `tip_saturation`, `touched_saturation`: as for
   [`CapillaryFringeTable`](@ref).
 
@@ -67,26 +70,50 @@ capillarity co2lab's accretion layer, as [`SharpInterfaceIntegrated`](@ref)).
 Returns a new `LayeredFringe` to give to [`co2lab_ve_fluid`](@ref) as
 `vertical`; it belongs to this grid. The arguments are only read.
 """
-struct LayeredFringe{F, K, W} <: VerticalModel
-    cells::SharpInterfaceIntegrated     # per column: cell boundaries, ∫φ·area, ∫k_x dz
-    fringe::CapillaryFringeTable{F, K}  # fine-scale curves and table settings
-    krw3D::W                            # brine relperm of brine saturation, or :linear
+struct LayeredFringe{W} <: VerticalModel
+    cells::SharpInterfaceIntegrated          # per column: cell boundaries, ∫φA, ∫k_x dz
+    fringes::Vector{<:CapillaryFringeTable}  # per rock type: curves, table settings
+    krw3D::Vector{W}                         # per rock type: brine relperm, or :linear
+    cell_type::Vector{Int}                   # rock type of cell a of `cells`
 end
 
 function LayeredFringe(mesh, columns::VEColumns; poro, perm_x, invPc3D, kr3D = 3,
-                       krw3D = :linear, perm_y = nothing,
+                       krw3D = :linear, rock_type = nothing, perm_y = nothing,
                        geometry = ve_column_geometry(mesh, columns),
                        tolerance = 1e-6, tip_saturation = 1e-6,
                        touched_saturation = 1e-3)
-    invPc3D isa Tuple &&
-        throw(ArgumentError("LayeredFringe takes a physical capillary curve; " *
-                            "co2lab_capillary_curve converts co2lab's (C, alpha)"))
-    krw3D isa Symbol && krw3D != :linear &&
-        throw(ArgumentError("krw3D: a function of the brine saturation, or :linear"))
+    types = something(rock_type, ones(Int, number_of_cells(mesh)))
+    n = maximum(types)
+    curves = [_per_type(x, n) for x in (invPc3D, kr3D, krw3D)]
+    for (pc, kw) in zip(curves[1], curves[3])
+        pc isa Tuple &&
+            throw(ArgumentError("LayeredFringe takes physical capillary curves; " *
+                                "co2lab_capillary_curve converts co2lab's (C, alpha)"))
+        kw isa Symbol && kw != :linear &&
+            throw(ArgumentError("krw3D: a function of the brine saturation, or :linear"))
+    end
     cells = SharpInterfaceIntegrated(mesh, columns; poro, perm_x, perm_y, geometry)
-    fringe = CapillaryFringeTable(; invPc3D, kr3D, tolerance, tip_saturation,
-                                  touched_saturation)
-    return LayeredFringe(cells, fringe, krw3D)
+    # (nothing: no capillarity, a step at p = 0 to the residual brine)
+    fringes = [CapillaryFringeTable(; invPc3D = pc, kr3D = kr, tolerance,
+                                    tip_saturation, touched_saturation)
+               for (pc, kr) in zip(curves[1], curves[2])]
+    krw = [kw for kw in curves[3]]
+    return LayeredFringe(cells, fringes, krw, _cell_types(cells, columns, types))
+end
+
+# One value per rock type: a vector as given, a single value for all n
+_per_type(x, n) = x isa AbstractVector ? (length(x) == n ? x :
+                  throw(ArgumentError("one curve per rock type ($n) expected"))) :
+                  fill(x, n)
+
+# The rock type of each cell a of `cells` (indexed as its boundaries; the
+# last entry of each column unused)
+function _cell_types(cells::SharpInterfaceIntegrated, columns::VEColumns, types)
+    out = zeros(Int, length(cells.z))
+    for i in 1:number_of_columns(columns), (j, c) in enumerate(column_cells(columns, i))
+        out[cells.pos[i] + j - 1] = types[c]
+    end
+    return out
 end
 
 """
@@ -108,23 +135,29 @@ end
     LayeredFringeModel
 
 The built form of [`LayeredFringe`](@ref) for a domain and fluid: the
-columns' rock, the fringe table and the residual saturations.
+columns' rock, a fringe table per rock type and the residual saturations.
 """
 struct LayeredFringeModel{T, W} <: VerticalModel
     cells::SharpInterfaceIntegrated  # per column: cell boundaries, ∫φ·area, ∫k_x dz
-    table::T                         # fine-scale integrals over capillary pressure
-    krw3D::W                         # brine relperm of brine saturation, or :linear
+    tables::Vector{T}                # per rock type: integrals over capillary pressure
+    krw3D::Vector{W}                 # per rock type: brine relperm, or :linear
+    cell_type::Vector{Int}           # rock type of cell a of `cells`
     res_water::Float64               # residual brine saturation
     res_gas::Float64                 # residual CO2 saturation
 end
 
-# The model belongs to its grid; the table as CapillaryFringeTable's
+# The model belongs to its grid; the tables as CapillaryFringeTable's
 function _vertical_model(spec::LayeredFringe, domain, fluid)
     _vertical_model(spec.cells, domain, fluid)
-    table = _fringe_table(spec.fringe, domain, fluid)
-    return LayeredFringeModel(spec.cells, table, spec.krw3D, fluid.res_water,
-                              fluid.res_gas)
+    tables = [_fringe_table(f, domain, fluid) for f in spec.fringes]
+    return LayeredFringeModel(spec.cells, tables, spec.krw3D, spec.cell_type,
+                              fluid.res_water, fluid.res_gas)
 end
+
+# Cell a's table and brine curve; the settings common to all rock types
+_table(m::LayeredFringeModel, a) = m.tables[m.cell_type[a]]
+_krw(m::LayeredFringeModel, a) = m.krw3D[m.cell_type[a]]
+_settings(m::LayeredFringeModel) = first(m.tables)
 
 # ----------------------------- Interval integrals -----------------------------
 
@@ -153,7 +186,7 @@ interval's pore volume and `∫ k_x dz`. The column's quantities are those over
 carry AD derivatives. Returns a new NamedTuple.
 """
 function _interval_integrals(m::LayeredFringeModel, i, T, B, h, h_max, drho)
-    c, t = m.cells, m.table
+    c = m.cells
     dg = drho * Jutul.gravity_constant
     C = m.res_gas / (1 - m.res_water)
     z0 = zero(h) + zero(h_max) + zero(drho)
@@ -169,37 +202,40 @@ function _interval_integrals(m::LayeredFringeModel, i, T, B, h, h_max, drho)
         # below both profiles: brine only (the top cell of an empty column
         # counts, for the slope at S = 0)
         if top > hv
-            krW += k * (bot - top) * _brine_relperm_full(m)
+            krW += k * (bot - top) * _brine_relperm_full(_krw(m, a))
             continue
         end
 
+        t = _table(m, a)
         sf = _depth_integral(t, t.SP, t.s, h, top, bot, dg)
         sm = _depth_integral(t, t.SP, t.s, h_max, top, bot, dg)
         s = (1 - C) * sf + C * sm
         free, smax, co2 = free + phiA * sf, smax + phiA * sm, co2 + phiA * s
         kf, km = kf + k * sf, km + k * sm
         krG += k * _depth_integral(t, t.krP, t.kr, h, top, bot, dg)
-        krW += k * _brine_integral(m, top, bot, s, h, h_max, dg)
+        krW += k * _brine_integral(m, a, top, bot, s, h, h_max, dg)
     end
     return (free = free, max = smax, co2 = co2, kfree = kf, kmax = km, krG = krG,
             krW = krW, pv = pv, kz = kz)
 end
 
-# The brine relperm of brine alone (s_w = 1)
-_brine_relperm_full(m::LayeredFringeModel{<:Any, Symbol}) = 1.0
-_brine_relperm_full(m::LayeredFringeModel) = m.krw3D(1.0)
+# The brine relperm of brine alone (s_w = 1), for brine curve `kw`
+_brine_relperm_full(kw::Symbol) = 1.0
+_brine_relperm_full(kw) = kw(1.0)
 
-# ∫ krw3D(1 − s(z)) dz over [top, bot] (`s` the actual profile's ∫ s dz there):
-# linear, (s_w − r_w)/(1 − r_w), in closed form
-_brine_integral(m::LayeredFringeModel{<:Any, Symbol}, top, bot, s, h, h_max, dg) =
-    (bot - top) - s / (1 - m.res_water)
+# ∫ krw3D(1 − s(z)) dz over [top, bot] of cell a (`s` the actual profile's
+# ∫ s dz there): linear, (s_w − r_w)/(1 − r_w), in closed form
+function _brine_integral(m::LayeredFringeModel, a, top, bot, s, h, h_max, dg)
+    kw = _krw(m, a)
+    kw isa Symbol && return (bot - top) - s / (1 - m.res_water)
+    return _brine_quadrature(_table(m, a), kw, m, top, bot, h, h_max, dg)
+end
 
 # A function krw3D: Gauss–Legendre between the profiles' kinks (where the
 # capillary pressure of either reaches 0 or the entry pressure). The kinks
 # carry their AD derivatives: the saturation may jump there (an entry
 # pressure, no capillarity), and the moving jump is part of the derivative.
-function _brine_integral(m::LayeredFringeModel, top, bot, s, h, h_max, dg)
-    t = m.table
+function _brine_quadrature(t, krw3D, m, top, bot, h, h_max, dg)
     C = m.res_gas / (1 - m.res_water)
     sg(p) = 1 - t.invpc(_max_c(p, 0.0))
     sw(z) = 1 - (1 - C) * sg(dg * (h - z)) - C * sg(dg * (h_max - z))
@@ -207,7 +243,7 @@ function _brine_integral(m::LayeredFringeModel, top, bot, s, h, h_max, dg)
     kinks = [z0 + x - e / dg for x in (h, h_max) for e in (0.0, t.entry)]
     inside = filter(z -> top < Jutul.value(z) < bot, kinks)
     cuts = sort!([z0 + top; inside; z0 + bot]; by = Jutul.value)
-    return sum(_gl_integral(z -> m.krw3D(sw(z)), a, b)
+    return sum(_gl_integral(z -> krw3D(sw(z)), a, b)
                for (a, b) in zip(cuts[1:end-1], cuts[2:end]))
 end
 
@@ -230,7 +266,7 @@ function _layered_height(m::LayeredFringeModel, i, S, drho)
     # no buoyancy (CO2 as dense as brine, an unphysical state Newton may pass
     # through): no height, as CapillaryFringeTable's
     Jutul.value(drho) > 0 || return zero(S) + zero(drho)
-    tip = m.table.tip
+    tip = _settings(m).tip
     Jutul.value(S) < tip && return _layered_newton(m, i, tip, drho) * S / tip
     return _layered_newton(m, i, S, drho)
 end
@@ -249,7 +285,7 @@ end
 # The drainage profile's pore volume of CO2 at height h, Σ φA ∫ s dz (the
 # cells below h hold none); h and drho may carry AD derivatives
 function _profile_volume(m, i, h, drho)
-    c, t = m.cells, m.table
+    c = m.cells
     dg = drho * Jutul.gravity_constant
     v = zero(h) + zero(dg)
     for a in _cell_range(c, i)
@@ -257,6 +293,7 @@ function _profile_volume(m, i, h, drho)
         dz = c.z[a+1] - c.z[a]
         dz > 0 || continue
         phiA = (c.V[a+1] - c.V[a]) / dz
+        t = _table(m, a)
         v += phiA * _depth_integral(t, t.SP, t.s, h, c.z[a], c.z[a+1], dg)
     end
     return v
@@ -264,16 +301,17 @@ end
 
 # d/dh of the drainage profile's pore volume of CO2: Σ φA (s(top) − s(bottom))
 function _profile_slope(m, i, h, drho)
-    c, t = m.cells, m.table
+    c = m.cells
     dg = drho * Jutul.gravity_constant
-    slope(x) = _table_slope(t, t.SP, t.s, x)
+    slope(t, x) = _table_slope(t, t.SP, t.s, x)
     d = 0.0
     for a in _cell_range(c, i)
         c.z[a] > h && break
         dz = c.z[a+1] - c.z[a]
         dz > 0 || continue
         phiA = (c.V[a+1] - c.V[a]) / dz
-        d += phiA * (slope(dg * (h - c.z[a])) - slope(dg * (h - c.z[a+1])))
+        t = _table(m, a)
+        d += phiA * (slope(t, dg * (h - c.z[a])) - slope(t, dg * (h - c.z[a+1])))
     end
     return d
 end
@@ -285,7 +323,8 @@ function _solve_layered(m, i, v, drho)
     v <= 0 && return 0.0
     H, V = _column_extent(m.cells, i)
     f(h) = _profile_volume(m, i, h, drho) - v
-    lo, hi = 0.0, m.table.p[end] / (drho * Jutul.gravity_constant) + H
+    pend = maximum(t.p[end] for t in m.tables)
+    lo, hi = 0.0, pend / (drho * Jutul.gravity_constant) + H
     f(hi) <= 0 && return hi
     # start near the root: the plume fully saturated (1 − r_w) at the
     # column's mean porosity
@@ -335,12 +374,12 @@ end
 # subscale relief), and so does the result.
 function _tip_brine_relperm(m::LayeredFringeModel, i, Sf, Sm, h_max, drho, top, Hc,
                             I)
-    tip = m.table.tip
+    tip = _settings(m).tip
     sf, sm = Jutul.value(Sf), Jutul.value(Sm)
     (sf >= tip && sm >= tip) && return I.krW
     ht = _layered_newton(m, i, tip, drho)
     at(hf, hm) = _interval_integrals(m, i, top, Hc, hf, hm, drho)
-    if m.krw3D isa Symbol
+    if all(kw -> kw isa Symbol, m.krw3D)
         # linear krw3D: the deficit is ((1 − C)·kfree + C·kmax)/(1 − r_w)
         C = m.res_gas / (1 - m.res_water)
         Kt = at(ht, ht).kfree
@@ -365,29 +404,46 @@ end
 # Each fine cell's average of the actual and the maximum profile (cell
 # bottoms `zb`; the rock is constant within a cell, so plain depth averages)
 function _fine_saturations(m::LayeredFringeModel, i, zb, h, h_max, drho, rw, rg)
-    t = m.table
     dg = drho * Jutul.gravity_constant
     C = rg / (1 - rw)
     tops = [0.0; zb[1:end-1]]
-    avg(hh, a, b) = b > a ? _depth_integral(t, t.SP, t.s, hh, a, b, dg) / (b - a) : 0.0
-    s_max = [avg(h_max, a, b) for (a, b) in zip(tops, zb)]
-    s_free = [avg(h, a, b) for (a, b) in zip(tops, zb)]
+    # the column's cells in order, each with its rock type's table
+    tabs = [_table(m, a) for a in _cell_range(m.cells, i)]
+    avg(t, hh, a, b) = b > a ? _depth_integral(t, t.SP, t.s, hh, a, b, dg) / (b - a) :
+                       0.0
+    s_max = [avg(t, h_max, a, b) for (t, a, b) in zip(tabs, tops, zb)]
+    s_free = [avg(t, h, a, b) for (t, a, b) in zip(tabs, tops, zb)]
     return ((1 - C) .* s_free .+ C .* s_max, s_max)
 end
 
-# The pore volume below the touched depth (h_max less the entry height; below
-# the touched saturation linear in smax, as CapillaryFringeTable's)
+# The pore volume below the touched depth (the deepest the maximum profile's
+# CO2 reaches; below the touched saturation linear in smax, as
+# CapillaryFringeTable's)
 function _untouched_brine(m::LayeredFringeModel, i, smax, h_max, H, drho)
-    t, c = m.table, m.cells
-    dg = drho * Jutul.gravity_constant
-    if Jutul.value(smax) < t.touched
-        h_t = _max_c(_layered_height(m, i, t.touched, drho) - t.entry / dg, 0.0) *
-              smax / t.touched
+    c, touched = m.cells, _settings(m).touched
+    if Jutul.value(smax) < touched
+        ht = _layered_height(m, i, touched, drho)
+        h_t = _touched_depth(m, i, ht, drho) * smax / touched
     else
-        h_t = _max_c(h_max - t.entry / dg, 0.0)
+        h_t = _touched_depth(m, i, h_max, drho)
     end
     Hc, V = _column_extent(c, i)
     return (V - _integral(c, i, c.V, _min_c(h_t, Hc))) / V
+end
+
+# The deepest point the drainage profile of capillary height hh reaches:
+# where the capillary pressure Δρ g (hh − z) falls to the entry pressure of
+# the rock there (cell by cell, top first)
+function _touched_depth(m::LayeredFringeModel, i, hh, drho)
+    c = m.cells
+    dg = drho * Jutul.gravity_constant
+    d = zero(hh) + zero(dg)
+    for a in _cell_range(c, i)
+        reach = hh - _table(m, a).entry / dg
+        Jutul.value(reach) > c.z[a] || continue
+        d = _min_c(reach, c.z[a+1])
+    end
+    return _max_c(d, 0.0)
 end
 
 # The inventory's split as CapillaryFringeTable's, each profile's fraction

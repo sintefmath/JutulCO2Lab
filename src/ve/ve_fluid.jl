@@ -166,7 +166,7 @@ function co2lab_ve_fluid(; vertical::VerticalModel = SharpInterface(),
     mu_ref = _reference_viscosities(mu, (wat_mu_ref, co2_mu_ref))
     dmax = _dis_max(dis_max, dis_max_mass, rho_ref)
     return CO2LabVEFluid(vertical, rw, rg, krw, krg, rho_ref, rho, mu_ref, mu,
-                         dissolution, Float64(dis_rate), dmax)
+                         dissolution, Float64(dis_rate), dmax, nothing)
 end
 
 # One phase property: `missing` (not given) is `default`, a table only if its
@@ -229,9 +229,12 @@ Settings of co2lab's VE fluid; build with [`co2lab_ve_fluid`](@ref). Phase
 order in all tuples: (brine, CO2). Type parameters: the vertical model, and
 the density and viscosity specifications. `rho_pvt`/`mu_pvt` hold per phase
 `(c, p_ref)` (linear; `(0.0, 0.0)` for constant) or a [`PhaseTable`](@ref).
-`dissolution`, `dis_rate`, `dis_max` as makeVEFluid's options.
+`dissolution`, `dis_rate`, `dis_max` as makeVEFluid's options. `fine`: the
+fine-scale fluid of a hybrid grid's fine 3D cells (a `FineScaleFluid` with
+its rock types per cell, from [`co2lab_ve_fluid`](@ref)`(::FineScaleFluid,
+…)`), or `nothing`.
 """
-struct CO2LabVEFluid{M <: VerticalModel, R, U}
+struct CO2LabVEFluid{M <: VerticalModel, R, U, F}
     vertical::M                  # vertical model (specification)
     res_water::Float64           # residual brine saturation
     res_gas::Float64             # residual CO2 saturation
@@ -244,6 +247,7 @@ struct CO2LabVEFluid{M <: VerticalModel, R, U}
     dissolution::Bool            # CO2 dissolves into brine
     dis_rate::Float64            # dissolution rate; 0 or Inf: instantaneous
     dis_max::Float64             # saturated rs
+    fine::F                      # fine cells' fluid (hybrid grids), or nothing
 end
 
 """
@@ -435,10 +439,8 @@ end
 _is_ve(::Nothing, i) = true
 _is_ve(is_ve::AbstractVector{Bool}, i) = is_ve[i]
 
-# Fine-cell sides of the relperm and capillary pressure: roadmap Stage 12.
-_fine_relperm(fine, i) = error("fine 3D cells (relperm) are roadmap Stage 12")
-_fine_capillary_pressure(i) = error("fine 3D cells (capillary pressure) are " *
-                                    "roadmap Stage 12")
+# Fine-cell sides of the relperm and capillary pressure (`fine_fluid.jl`,
+# roadmap Stage 12): from the fluid's `FineCellFluid`.
 
 """
 Capillary heights per column (m): row 1 `h`, row 2 `h_max` — the plume
@@ -517,7 +519,7 @@ VERelPerm(vertical, krw, krg, rw, rg; is_ve = nothing, fine = nothing) =
 function _update_relperm!(kr, v::VERelPerm, hh, H, dh, sat, drho, ix)
     for i in ix
         if !_is_ve(v.is_ve, i)
-            kr[1, i], kr[2, i] = _fine_relperm(v.fine, i)
+            kr[1, i], kr[2, i] = _fine_relperm(v.fine, i, sat(i)...)
             continue
         end
 
@@ -541,9 +543,11 @@ end
                      i -> ρ[1, i] - ρ[2, i], ix)
 end
 
-# The sharp interfaces: heights only, no saturations or densities.
+# The sharp interfaces: heights only, no saturations or densities (without
+# fine cells, which read their saturations).
 # Modifies: `kr` (relative permeabilities).
-@jutul_secondary function update_ve_relperm!(kr, v::VERelPerm{<:_DensityFreeModel},
+@jutul_secondary function update_ve_relperm!(kr,
+                                            v::VERelPerm{<:_DensityFreeModel, Nothing},
                                             model, PlumeHeights, ColumnHeight, Rugosity,
                                             ix)
     _update_relperm!(kr, v, PlumeHeights, ColumnHeight, Rugosity, i -> nothing,
@@ -552,26 +556,41 @@ end
 
 """
 `pcWG = (ρ_brine − ρ_CO2)·g·h`, added to the brine pressure for CO2. Fine cells
-(`is_ve`): roadmap Stage 12.
+(`is_ve`, roadmap Stage 12): their capillary pressure from `fine` (a
+`FineCellFluid`).
 """
-struct VECapillaryPressure{V} <: JutulDarcy.AbstractCapillaryPressure
+struct VECapillaryPressure{V, F} <: JutulDarcy.AbstractCapillaryPressure
     is_ve::V  # true for VE columns, per cell
+    fine::F   # fine cells' fluid (FineCellFluid), or nothing
 end
-VECapillaryPressure(; is_ve = nothing) = VECapillaryPressure(is_ve)
+VECapillaryPressure(; is_ve = nothing, fine = nothing) = VECapillaryPressure(is_ve, fine)
 
+# The VE columns' pcWG: the brine–CO2 density difference over the plume height
+_ve_pc(PlumeHeights, ρ, i) = (ρ[1, i] - ρ[2, i]) * Jutul.gravity_constant *
+                             PlumeHeights[1, i]
+
+# All VE: heights and densities only.
+# Modifies: `pc` (capillary pressure, one row: CO2 relative to brine).
+@jutul_secondary function update_ve_pc!(pc, v::VECapillaryPressure{Nothing}, model,
+                                       PlumeHeights, PhaseMassDensities, ix)
+    for i in ix
+        pc[1, i] = _ve_pc(PlumeHeights, PhaseMassDensities, i)
+    end
+end
+
+# With fine cells, which read their saturations (sGmax as it stands within the
+# step, as for the heights).
 # Modifies: `pc` (capillary pressure, one row: CO2 relative to brine).
 @jutul_secondary function update_ve_pc!(pc, v::VECapillaryPressure, model, PlumeHeights,
-                                       PhaseMassDensities, ix)
-    g = Jutul.gravity_constant
+                                       PhaseMassDensities, sG, sGmax, ix)
+    f = v.fine
     for i in ix
-        if !_is_ve(v.is_ve, i)
-            pc[1, i] = _fine_capillary_pressure(i)
-            continue
+        if _is_ve(v.is_ve, i)
+            pc[1, i] = _ve_pc(PlumeHeights, PhaseMassDensities, i)
+        else
+            smax = _effective_max(sGmax[i], sG[i], f.res_water, f.res_gas)
+            pc[1, i] = _fine_capillary_pressure(f, i, sG[i], smax)
         end
-
-        # the brine–CO2 density difference over the plume height
-        pc[1, i] = (PhaseMassDensities[1, i] - PhaseMassDensities[2, i]) * g *
-                   PlumeHeights[1, i]
     end
 end
 
@@ -607,6 +626,14 @@ end
 
 # --------------------- Installing the VE fluid in a model ---------------------
 
+# A fluid's fine-scale part, required on a grid with fine cells
+function _fine_spec(fluid)
+    isnothing(fluid.fine) &&
+        error("fine 3D cells need a fluid built from a fine-scale one: " *
+              "co2lab_ve_fluid(::FineScaleFluid, mesh, columns; ...)")
+    return fluid.fine
+end
+
 """
     _set_ve_fluid!(model, fluid, m = _vertical_model(fluid.vertical, ...))
 
@@ -631,12 +658,14 @@ function _set_ve_fluid!(model, fluid::CO2LabVEFluid,
     # per-cell VE flag; `nothing` (branch compiled away) when all cells are VE
     d = model.data_domain
     is_ve = haskey(d, :is_ve) && !all(d[:is_ve]) ? collect(Bool, d[:is_ve]) : nothing
+    # fine cells: their functions from the fine-scale fluid
+    fine = isnothing(is_ve) ? nothing : _fine_cell_fluid(_fine_spec(fluid), d)
 
     # the column-specific vertical model is shared by heights and relperm
     rw, rg = fluid.res_water, fluid.res_gas
     S[:PlumeHeights] = PlumeHeights(m, rw, rg; is_ve)
-    S[:RelativePermeabilities] = VERelPerm(m, fluid.krw, fluid.krg, rw, rg; is_ve)
-    S[:CapillaryPressure] = VECapillaryPressure(; is_ve)
+    S[:RelativePermeabilities] = VERelPerm(m, fluid.krw, fluid.krg, rw, rg; is_ve, fine)
+    S[:CapillaryPressure] = VECapillaryPressure(; is_ve, fine)
 
     push!(model.output_variables, :PlumeHeights, :CapillaryPressure)
     unique!(model.output_variables)

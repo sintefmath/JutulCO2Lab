@@ -18,8 +18,9 @@
 # transmissibility summed from the fine grid's. Category 2 keeps the coarse
 # mesh's transmissibility (as the pure VE gates), 1 takes the fine grid's.
 #
-# `fault_flux = :co2lab` makes every lateral VE–VE face continuous (co2lab's
-# smooth flux across faults, for the gates against MRST); `:virtual` is the
+# `fault_flux = :co2lab` makes lateral VE–VE faces between pillars with one VE
+# block each continuous (co2lab's smooth flux across faults, for the gates
+# against MRST; stacked blocks follow the topology in any case); `:virtual` is the
 # researcher's choice (2026-10-05), the default once the transition flux
 # exists (roadmap Stage 12 item 3).
 
@@ -43,6 +44,12 @@ function _face_categories(mesh, columns::VEColumns, coarse, fault_flux::Symbol)
         throw(ArgumentError("fault_flux: :co2lab or :virtual, got $fault_flux"))
     sealed = Set(columns.sealed)
     top(b) = columns.cells[columns.pos[b]]
+    # VE blocks per pillar: co2lab's smooth flux only where a pillar has one
+    nve = Dict{Tuple{Int, Int}, Int}()
+    for b in eachindex(columns.is_ve)
+        columns.is_ve[b] && (nve[columns.pillar[b]] = get(nve, columns.pillar[b], 0) + 1)
+    end
+    single(b) = nve[columns.pillar[b]] == 1
     map(1:number_of_faces(coarse)) do f
         L, R = coarse.face_neighbors[f]
         F = coarse.coarse_faces_to_fine[f]
@@ -51,7 +58,7 @@ function _face_categories(mesh, columns::VEColumns, coarse, fault_flux::Symbol)
         !vl && !vr && return _FACE_FINE
         vl != vr && return _FACE_VE_FINE
         columns.pillar[L] == columns.pillar[R] && return _FACE_VE_VERTICAL
-        fault_flux == :co2lab && return _FACE_VE
+        fault_flux == :co2lab && single(L) && single(R) && return _FACE_VE
         # the caprock continues if the blocks' top cells share a face
         tops = minmax(top(L), top(R))
         continuous = any(ff -> minmax(mesh.faces.neighbors[ff]...) == tops, F)
