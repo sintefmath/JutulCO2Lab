@@ -47,6 +47,10 @@ and a height equation that is not monotone for thin plumes (its Newton can
 fail; analysis/co2lab-issues.org). The two agree for curves whose fringe
 holds at least `r_g` everywhere (a critical saturation of at least `r_g`).
 co2lab's reconstruction (`height2finescaleSat.m`) uses this capped rule.
+
+Best with a CO2 relperm curve that is 0 up to `r_g`: one still positive
+there drops to 0 when the CO2 is trapped, and Newton needs small steps at
+the switch to imbibition (analysis/fixed-residual-hysteresis.md).
 """
 struct FixedResidual <: HysteresisLaw end
 

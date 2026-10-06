@@ -2185,6 +2185,30 @@ end
                     J._integral(mt.cells, 2, mt.cells.V, a)
         @test I.co2 ≈ I.free + rg * pvh(h, hm) rtol = 1e-10
 
+        # the trapping inventory's split: immobile the residual min(r_g, s_max)
+        # (what stays when the mobile CO2 has gone), mobile the rest; the
+        # parts sum to S; a trap 2 m deep and a 0.5 m relief in column 2
+        Sv, Smv = [0.15, 0.12, 0.3, 0.03], [0.3, 0.3, 0.3, 0.04]
+        hh = [J._column_heights(mf, i, Sv[i], Smv[i], H, drho, rw, rg) for i in 1:4]
+        col = (H = fill(H, 4), dh = [0.0, 0.5, 0.0, 0.0], zt = [0.0, 2.0, 1.0, 0.0])
+        c = J._category_saturations(mf, Sv, Smv, first.(hh), last.(hh), col,
+                                    fill(drho, 4), rw, rg)
+        parts = c.immob_sub .+ c.immob_struct .+ c.immob_free .+ c.mobile_sub .+
+                c.mobile_struct .+ c.mobile_free
+        @test parts ≈ Sv rtol = 1e-8
+        @test all(c.res .<= c.immob_free .+ 1e-12)
+        h2, hm2 = hh[2]
+        res2(z) = min(rg, sgz(z, hm2))
+        @test c.immob_struct[2] ≈ quad(z -> 0.5 < z < 2.0 ? ph(z) * res2(z) : 0.0) /
+                                 quad(ph) rtol = 1e-4
+        @test c.mobile_struct[2] ≈
+              quad(z -> 0.5 < z < 2.0 ? ph(z) * (loc(z, h2, hm2) - res2(z)) : 0.0) /
+              quad(ph) rtol = 1e-4
+        # co2lab's split (endpoint scaling's trapped amount) on request
+        cc = J._category_saturations(mf, Sv, Smv, first.(hh), last.(hh), col,
+                                     fill(drho, 4), rw, rg; co2lab_compatible = true)
+        @test cc.immob_free .+ cc.immob_struct .+ cc.immob_sub ≈ Smv .* rg ./ (1 - rw)
+
         # derivatives (one Newton step with AD) against central differences
         f(x) = (hh = J._column_heights(mf, 2, x[1], x[2], H, x[3], rw, rg);
                 [hh..., J._column_relperm(mf, 2, x[1], x[2], hh..., H, x[3], 0.0, 1.0,

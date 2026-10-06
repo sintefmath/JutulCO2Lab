@@ -61,8 +61,7 @@ of `mesh`, 1, 2, …):
 - `nothing` for `invPc3D` is a rock type without capillarity (a sharp
   interface in it);
 - `hysteresis`: the [`HysteresisLaw`](@ref), [`EndpointScaling`](@ref)
-  (co2lab's default) or [`FixedResidual`](@ref) (the trapping inventory
-  takes endpoint scaling only, for now);
+  (co2lab's default) or [`FixedResidual`](@ref);
 - `tolerance`, `tip_saturation`, `touched_saturation`: as for
   [`CapillaryFringeTable`](@ref).
 
@@ -610,10 +609,8 @@ end
 # between two depths by pore volume; co2lab_compatible: co2lab's by height
 function _category_saturations(m::LayeredFringeModel, S, Smax, h, h_max, col, drho,
                                rw, rg; co2lab_compatible::Bool = false)
-    m.law isa EndpointScaling ||
-        throw(ArgumentError("the trapping inventory takes endpoint scaling only, " *
-                            "for now (not $(m.law))"))
     co2lab_compatible && return _height_split(S, Smax, h, h_max, col, rw, rg)
+    m.law isa FixedResidual && return _fixed_categories(m, S, h, h_max, col, drho)
     S_immob = Smax .* rg ./ (1 - rw)
     S_mob = S .- S_immob
     # the fraction of a drainage profile (height hh) between depths a and b
@@ -635,6 +632,37 @@ function _category_saturations(m::LayeredFringeModel, S, Smax, h, h_max, col, dr
     mobile_struct = [S_mob[i] * mob(i, dh[i], struct_end(i)) for i in n]
     # residual below the plume: the immobile part below h and the trap
     res = [S_immob[i] * imm(i, max(h[i], zt[i]), col.H[i]) for i in n]
+    return (immob_sub = immob_sub, mobile_sub = mobile_sub,
+            immob_struct = immob_struct, mobile_struct = mobile_struct,
+            immob_free = S_immob .- immob_struct .- immob_sub,
+            mobile_free = S_mob .- mobile_struct .- mobile_sub, res = res)
+end
+
+# The inventory's split with a fixed residual: the immobile part is the
+# residual min(r_g, s_max) the column keeps when its mobile CO2 is gone (the
+# profile at h = 0), the mobile part the rest, (s_h − r_g)⁺ at each depth;
+# each part's share of a zone from its own depth distribution. "Below the
+# plume" is below the capillary height h, as for endpoint scaling.
+function _fixed_categories(m::LayeredFringeModel, S, h, h_max, col, drho)
+    n = eachindex(S)
+    I(i, hh, a, b) = (Hc = _column_extent(m.cells, i)[1];
+                      _interval_integrals(m, i, clamp(a, 0.0, Hc), clamp(b, 0.0, Hc), hh,
+                                          h_max[i], drho[i]).co2)
+    V(i) = _column_extent(m.cells, i)[2]
+    # each part's pore volume of CO2 between depths a and b
+    imm(i, a, b) = I(i, 0.0, a, b)
+    mob(i, a, b) = I(i, h[i], a, b) - I(i, 0.0, a, b)
+    S_immob = [min(imm(i, 0.0, col.H[i]) / V(i), S[i]) for i in n]
+    S_mob = S .- S_immob
+    # a part's share of the zone [a, b] (0 for an empty part)
+    share(f, i, a, b) = (t = f(i, 0.0, col.H[i]); t > 0 ? max(f(i, a, b), 0.0) / t : 0.0)
+    dh, zt = col.dh, col.zt
+    struct_end(i) = max(zt[i], dh[i])
+    immob_sub = [S_immob[i] * share(imm, i, 0.0, dh[i]) for i in n]
+    mobile_sub = [S_mob[i] * share(mob, i, 0.0, dh[i]) for i in n]
+    immob_struct = [S_immob[i] * share(imm, i, dh[i], struct_end(i)) for i in n]
+    mobile_struct = [S_mob[i] * share(mob, i, dh[i], struct_end(i)) for i in n]
+    res = [S_immob[i] * share(imm, i, max(h[i], zt[i]), col.H[i]) for i in n]
     return (immob_sub = immob_sub, mobile_sub = mobile_sub,
             immob_struct = immob_struct, mobile_struct = mobile_struct,
             immob_free = S_immob .- immob_struct .- immob_sub,
