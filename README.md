@@ -102,10 +102,14 @@ registry — the port tracks those working trees, and several roadmap decisions
 cite them by `file:line`:
 
 - `Jutul`: `../../Jutul.jl-fork`, the researcher's fork (github.com/Oddan/Jutul.jl)
-  checked out on branch `co2lab-jutul-merge` = the pinned upstream commit
-  `36166ba6` plus the Jutul fixes this project needs (so far: the cross-term
-  row stride). `../../Jutul.jl` (upstream) is kept at `36166ba6` for reference.
-- `JutulDarcy`: `../../JutulDarcy.jl`.
+  checked out on branch `co2lab-jutul-merge` (`aa88f180`) = the pinned upstream
+  commit `36166ba6` (Jutul 0.4.31) plus the Jutul fixes this project needs: the
+  cross-term row stride (#358) and signed tetrahedron volumes (#360). Both are
+  merged upstream, but only in the Jutul 0.5 line, which no JutulDarcy release
+  accepts yet (2026-10-06). `../../Jutul.jl` (upstream) is kept at `36166ba6`
+  for reference.
+- `JutulDarcy`: `../../JutulDarcy.jl`, the release 0.3.11 (`2c92d4d5`),
+  unmodified.
 
 For a dev-ed package, `Manifest.toml` records only `path` and `version` — no
 commit — so it does **not** pin what actually ran. Every `OracleReport`
@@ -131,6 +135,57 @@ information on demand.
 The test suite ends with a **toolchain smoke test** that assembles and solves a
 small stock immiscible case. If it passes, Jutul/JutulDarcy work here; failures
 in it are environment problems, not VE problems.
+
+### Installing on another machine
+
+1. Put the checkouts side by side (the manifests use these relative paths):
+
+   ```
+   <parent>/
+     co2lab-jutul-merge-work/   this project
+     Jutul.jl-fork/             Jutul, the fork's working branch
+     JutulDarcy.jl/             JutulDarcy 0.3.11
+     mrst/, mrst-data/          only for the gates against MRST (step 5)
+   ```
+
+2. Clone them:
+
+   ```
+   cd <parent>
+   git clone https://github.com/Oddan/co2lab-jutul-merge-work.git   # private
+   git clone -b co2lab-jutul-merge https://github.com/Oddan/Jutul.jl.git Jutul.jl-fork
+   git clone https://github.com/sintefmath/JutulDarcy.jl.git JutulDarcy.jl
+   git -C JutulDarcy.jl checkout v0.3.11
+   ```
+
+3. With Julia 1.12 (1.12.6 here), instantiate the package's and the examples'
+   environments, then run the tests (6–7 minutes on 8 threads):
+
+   ```
+   cd <parent>/co2lab-jutul-merge-work
+   julia --project=JutulCO2Lab -e 'using Pkg; Pkg.instantiate()'
+   julia --project=JutulCO2Lab/examples -e 'using Pkg; Pkg.instantiate()'
+   julia --threads=8 --project=JutulCO2Lab -e 'using Pkg; Pkg.test()'
+   ```
+
+   `scripts/julia` pins Julia to the researcher's laptop's P-cores with
+   `taskset`; elsewhere call `julia --threads=N` directly (or set
+   `JULIA_CORES`). Tests needing MRST reference dumps are skipped until step 5.
+
+4. Examples: `julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/<file>.jl`
+   (`JUTULCO2LAB_BACKEND=CairoMakie` writes figures to files).
+
+5. The gates against MRST (optional) need Octave (11.1 here; not MATLAB, whose
+   Atlas grids differ), MRST on `gigaccs-working-branch`
+   (`git clone -b gigaccs-working-branch https://github.com/SINTEF-AppliedCompSci/MRST.git mrst`,
+   reference commit `50d892ad`) and `mrst-data/` (the CO2 Storage Atlas and
+   the Sleipner benchmark; copied, not downloadable). The reference dumps
+   (`analysis/reference-data/*.mat`) are not in git: the gate scripts
+   regenerate missing ones through Octave, the `scripts/mrst_dump_*.m`
+   scripts the rest.
+
+Once a JutulDarcy release accepts Jutul 0.5 and Jutul 0.5.2 (with #360) is
+released, the fork can give way to registered versions.
 
 ## The oracle
 
