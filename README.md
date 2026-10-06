@@ -39,7 +39,11 @@ plots: `show_co2_atlas.jl`, `models_from_atlas.jl`,
 interactive trap viewer, `showTrapsInteractively`) and
 `examples/inventory/` (Stage 9, the trapping inventory of a run);
 `examples/demos/` (Stage 11, interactive demos: the trap viewer,
-co2lab's `exploreCapacity` and `exploreSimulation`). The plan
+co2lab's `exploreCapacity` and `exploreSimulation`);
+`examples/layered_fringe.jl` (Stage 6, the capillary fringe in layered rock,
+`LayeredFringe`, against the single-effect models and 3D) and
+`examples/hybrid_grid.jl` (Stage 12, fine 3D cells around the injector, VE
+elsewhere, against pure VE and 3D). The plan
 lives in `../analysis/roadmap.org`; the evidence behind it in
 `../analysis/ve-meshing/hybrid-ve-feasibility.md`.
 
