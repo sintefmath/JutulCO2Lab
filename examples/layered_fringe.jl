@@ -52,7 +52,7 @@ layer(c) = cell_ijk(mesh, c)[3]
 # Ten geological layers of 1 m; permeability growing upwards (a prograding
 # sequence: 30 mD at the bottom, 1 D at the top), porosity with it.
 geo_layer(c) = cld(layer(c) * 10, nz)
-md = 9.869233e-16
+md = 9.869233e-16 # millidarcy
 perm = [30md * (1000 / 30)^((10 - geo_layer(c)) / 9) for c in 1:nc]
 poro = [0.15 + 0.15 * (10 - geo_layer(c)) / 9 for c in 1:nc]
 
@@ -199,3 +199,36 @@ for (name, r) in runs
 end
 axislegend(ax; position = :rb)
 show_figure(fig, "layered_fringe_profile")
+
+# The same plumes drawn on the grid itself: each cell as its own quadrilateral
+# (its corners on the face y = 0), so the undulating caprock shows as it is
+function cell_outline(c)
+    bf = mesh.boundary_faces
+    nodes = Set(n for f in bf.cells_to_faces[c] for n in bf.faces_to_nodes[f])
+    pts = [Point2(p[1], p[3]) for p in mesh.node_points[collect(nodes)] if p[2] == 0]
+    # corners in order around the cell's centre
+    m = sum(pts) / length(pts)
+    return Makie.Polygon(sort(pts; by = p -> atan(p[2] - m[2], p[1] - m[1])))
+end
+outlines = cell_outline.(1:nc)
+fig = Figure(size = (1200, 900))
+for (row, (name, r)) in enumerate(runs), (col, k) in enumerate((24, length(dt)))
+    local ax = Axis(fig[row, col]; xlabel = "x (m)", ylabel = "depth (m)",
+                    title = "$name — $(k == 24 ? "2 years" : "10 years")",
+                    yreversed = true)
+    sG = ve_reconstruct(r.states[k], r.ve, r.columns, r.fluid).sG
+    poly!(ax, outlines; color = sG, colorrange = (0, 0.8))
+end
+Colorbar(fig[:, 3]; colorrange = (0, 0.8), label = "CO2 saturation")
+show_figure(fig, "layered_fringe_plumes_grid")
+
+# Every report step of every model in Jutul's interactive viewer (GLMakie
+# only): the menu at the bottom right picks the model, the slider the step
+if backend == :GLMakie
+    sat = [name => [ve_reconstruct(s, r.ve, r.columns, r.fluid).sG for s in r.states]
+           for (name, r) in runs]
+    states = [Dict(Symbol(name) => s[k] for (name, s) in sat) for k in eachindex(dt)]
+    fig = plot_interactive(mesh, states; new_window = false, axis_view = :xz,
+                           aspect = (6, 0.1, 1))
+    show_figure(fig, "layered_fringe_viewer")
+end
