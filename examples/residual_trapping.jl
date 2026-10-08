@@ -5,25 +5,20 @@
 #
 #   scripts/julia --project=JutulCO2Lab JutulCO2Lab/examples/residual_trapping.jl
 #
-# Input: analysis/reference-data/sloping_aquifer_z40.mat, from
-# scripts/mrst_dump_sloping_aquifer.m (co2lab's grid, rock, fluid and schedule).
+# No input files: co2lab's case is built by `sloping_aquifer` (40 layers); CO2
+# properties from JutulDarcy's tables at its reference conditions.
 
-using JutulCO2Lab, Jutul, JutulDarcy, MAT, Printf
+using JutulCO2Lab, Jutul, JutulDarcy, Printf
 
-# ----------------------------- 1. co2lab's input ------------------------------
+# ------------------------------- 1. The case ----------------------------------
 
-refdir = joinpath(@__DIR__, "..", "..", "analysis", "reference-data")
-d = matread(joinpath(refdir, "sloping_aquifer_z40.mat"))
-
-g = d["gravity"]
-rho_w, rho_co2 = d["rhow"], d["rhoc"]           # brine; CO2 at reference p and T
+aq = sloping_aquifer(; nz = 40)
+g = Jutul.gravity_constant
+rho_w, rho_co2 = aq.rho_w, aq.co2_rho           # brine; CO2 at reference p and T
 
 # --------------------------------- 2. VE grid ---------------------------------
 
-mesh = ve_mesh_from_mrst(d["G3"])
-columns, _ = ve_columns(mesh)
-ve = ve_domain(mesh, columns; perm_x = vec(d["rock"]["perm"]),
-               poro = vec(d["rock"]["poro"]))
+mesh, columns, ve = aq.mesh, aq.columns, aq.ve
 geo = ve.geometry
 
 # --------------------- 3. Fluid with residual saturations ---------------------
@@ -36,19 +31,18 @@ srw, srg = 0.25, 0.25
 fluid = co2lab_ve_fluid(default_pvt = nothing,
                         residual = (srw, srg), krmax = (1.0, (1 - srw)^2),
                         co2_rho_ref = rho_co2, wat_rho_ref = rho_w,
-                        co2_mu_ref = d["muco2"], wat_mu_ref = d["muw"])
+                        co2_mu_ref = aq.co2_mu, wat_mu_ref = aq.mu_w)
 
-rock_c = (reference_pressure = d["p_ref"], compressibility = d["cf_rock"])
+rock_c = (reference_pressure = aq.p_ref, compressibility = aq.rock_compressibility)
 
 # ----------------------- 4. Well, open boundary, model ------------------------
 
-well_column = Int(d["well"]["cells"])
-well = setup_ve_well(ve, well_column; name = :inj, radius = d["well"]["r"])
-inject = co2_injector_control(TotalRateTarget(d["injection_rate"]), fluid)
+well_column = aq.well_column
+well = setup_ve_well(ve, well_column; name = :inj, radius = aq.well_radius)
+inject = co2_injector_control(TotalRateTarget(aq.mass_rate / rho_co2), fluid)
 
 # The updip end (x = L) is open, at hydrostatic brine pressure.
-sides, _ = ve_boundary_sides(mesh, columns, ve.domain)
-open_sides = ve_select_sides(sides, columns; directions = (:right,))
+sides, open_sides = aq.sides, aq.open_sides
 bc = ve_boundary_conditions(ve, sides, open_sides; pressure = z -> rho_w * g * z)
 
 model = setup_co2lab_model(ve.domain; wells = [well], fluid = fluid,
@@ -65,8 +59,8 @@ f_inject = setup_reservoir_forces(model; control = Dict(:inj => inject), bc = bc
 f_shut = setup_reservoir_forces(model; control = Dict(:inj => DisabledControl()),
                                 bc = bc)
 
-dt = vec(d["dT"])                                 # 31 injection + 12 migration steps
-injecting = vec(d["step_control"]) .== 1
+dt = aq.dt                                        # 31 injection + 12 migration steps
+injecting = aq.injecting
 forces = [i ? f_inject : f_shut for i in injecting]
 
 # Brine at hydrostatic pressure, no CO2; sGmax starts at sG = 0.
@@ -95,7 +89,7 @@ function split_co2(s)
     return sum(m .* (1 .- share)), sum(m .* share)
 end
 
-injected = cumsum([i ? d["injection_rate"] * rho_co2 * t : 0.0
+injected = cumsum([i ? aq.mass_rate * t : 0.0
                    for (i, t) in zip(injecting, dt)])
 years = cumsum(dt) ./ (365.25 * 86400)
 

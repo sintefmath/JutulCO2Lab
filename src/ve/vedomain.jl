@@ -57,6 +57,63 @@ Returns a new vector, one value per column; `geometry` is only read.
 ve_hydrostatic_pressure(geometry; rho_w, g = Jutul.gravity_constant) =
     rho_w * g .* geometry.z_top
 
+"""
+    ve_hydrostatic_profile(fluid, ve; g = Jutul.gravity_constant, dz = 1.0)
+        -> Function
+
+Hydrostatic brine pressure as a function of depth, `z -> p`, for the brine
+of `fluid` ([`co2lab_ve_fluid`](@ref)) in the formation `ve`
+([`ve_domain`](@ref)): `dp/dz = g ρ_w(p, T(z))` integrated from `p = 0` at
+`z = 0` (co2lab's convention, no surface pressure) in steps of `dz` (Heun's
+method), with `T(z)` the columns' temperatures interpolated linearly in
+caprock depth (constant beyond the shallowest and deepest; JutulDarcy's 30 °C
+if the domain has none). With a constant brine density this is
+`ρ_w g z`, as [`ve_hydrostatic_pressure`](@ref); with a tabulated or linear
+one, brine at these pressures (at the caprocks, and on open sides at their
+depths) is at rest, which a constant `ρ_w` other than the fluid's would not
+be.
+
+Returns a new closure, linear between the steps and extrapolated with the
+last step's gradient below them. `fluid` and `ve` are only read.
+"""
+function ve_hydrostatic_profile(fluid, ve; g = Jutul.gravity_constant, dz = 1.0)
+    z_top, d = ve.geometry.z_top, ve.domain
+    T = haskey(d, :temperature, Cells()) ? d[:temperature] :
+        fill(Jutul.default_value(nothing, JutulDarcy.Temperature()), length(z_top))
+    Tz = _depth_interpolant(z_top, T)
+    rho(p, z) = _phase_value(fluid.rho_ref[1], fluid.rho_pvt[1], p, Tz(z))
+
+    # Heun's method from the surface to below the deepest caprock
+    n = max(ceil(Int, (maximum(z_top) + maximum(ve.geometry.H)) / dz), 1)
+    zs, ps = collect(range(0.0, n * dz; length = n + 1)), zeros(n + 1)
+    for k in 1:n
+        r = rho(ps[k], zs[k])
+        ps[k+1] = ps[k] + g * dz * (r + rho(ps[k] + g * dz * r, zs[k+1])) / 2
+    end
+    return _depth_interpolant(zs, ps; extrapolate = true)
+end
+
+# A function z -> value, linear in z between the points (z, v) (equal z
+# averaged); beyond them constant, or (`extrapolate`) continued linearly
+function _depth_interpolant(z, v; extrapolate = false)
+    zu, vu, nu = Float64[], Float64[], Int[]
+    for i in sortperm(z)
+        if isempty(zu) || z[i] != zu[end]
+            push!(zu, z[i]); push!(vu, 0.0); push!(nu, 0)
+        end
+        vu[end] += v[i]; nu[end] += 1
+    end
+    vu ./= nu
+    length(zu) == 1 && return _ -> vu[1]
+    function f(x)
+        k = clamp(searchsortedlast(zu, x), 1, length(zu) - 1)
+        x = extrapolate ? x : clamp(x, zu[1], zu[end])
+        w = (x - zu[k]) / (zu[k+1] - zu[k])
+        return (1 - w) * vu[k] + w * vu[k+1]
+    end
+    return f
+end
+
 # Warn if kx and ky differ; `what` (VE permeability, or the integrated relperm)
 # then uses kx (see ve_average_rock).
 function _warn_lateral_anisotropy(kx, ky, rtol; what = "VE permeability")

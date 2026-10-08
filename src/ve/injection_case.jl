@@ -9,7 +9,7 @@ const MRST_YEAR = 365.2425 * 86400
 """
     setup_injection_case(a, wells; fluid, boundary = :open, inj_time = 50 years,
                          inj_steps = 10, mig_time = 3000 years, mig_steps = 30,
-                         temperature = nothing, rugosity = 0.0, rho_w = 1000.0,
+                         temperature = nothing, rugosity = 0.0, rho_w = nothing,
                          well_radius = 0.3, outside_distance = 100e3,
                          pore_compressibility = 1e-10, dissolved = :carry,
                          well_volume = 1.0) -> NamedTuple
@@ -23,11 +23,14 @@ vector of `(column, rate)` pairs, the CO2 mass rate in kg/s; `fluid` from
 - Each outer side of the formation is `:closed`, `:open` or `:semi_open`
   (`boundary`: one for all, or one per side of [`ve_boundary_sides`](@ref)'s
   `sides`); sealed fault sides (`across_fault`) are closed whatever is given.
-  Open sides are held at hydrostatic brine pressure `rho_w·g·z` at the
-  side's depth, brine flowing in. A semi-open side is an open one behind an
-  imagined stretch of formation `outside_distance` long: its transmissibility
-  is scaled by `d/(d + outside_distance)`, `d` the map distance from the
-  centroid of the column's top face to the side (co2lab's). `dissolved`: how
+  Open sides are held at hydrostatic brine pressure at the side's depth,
+  brine flowing in: by default the fluid's brine at rest
+  ([`ve_hydrostatic_profile`](@ref), in the formation's temperatures);
+  `rho_w` (kg/m³) gives co2lab's `rho_w·g·z` instead. A semi-open side is
+  an open one behind an imagined stretch of formation `outside_distance`
+  long: its transmissibility is scaled by `d/(d + outside_distance)`, `d`
+  the map distance from the centroid of the column's top face to the side
+  (co2lab's). `dissolved`: how
   brine crossing them books its dissolved CO2 (see
   [`ve_boundary_conditions`](@ref); `:co2lab` for comparisons with co2lab).
 - The wells: co2lab's VE wells (`addWellVE`: [`setup_ve_well`](@ref) with
@@ -38,8 +41,8 @@ vector of `(column, rate)` pairs, the CO2 mass rate in kg/s; `fluid` from
   pressure crosses CO2's boiling curve (a shallow, cold caprock) converges
   slowly: JutulDarcy's well injects at the density of its own pressure, which
   jumps there (co2lab converts at the cell's).
-- The initial state: hydrostatic brine pressure at the caprock
-  ([`ve_hydrostatic_pressure`](@ref)), no CO2. The pore volume grows by
+- The initial state: the same hydrostatic brine pressure at the caprock, no
+  CO2. The pore volume grows by
   `pore_compressibility` (1/Pa) about the mean initial pressure (co2lab's
   `pvMult`).
 - `temperature` (K; a number, one per column or a function of depth, as
@@ -55,7 +58,7 @@ conditions, the well columns, the report steps (s) and the initial pressure.
 function setup_injection_case(a, wells; fluid, boundary = :open,
                               inj_time = 50MRST_YEAR, inj_steps::Integer = 10,
                               mig_time = 3000MRST_YEAR, mig_steps::Integer = 30,
-                              temperature = nothing, rugosity = 0.0, rho_w = 1000.0,
+                              temperature = nothing, rugosity = 0.0, rho_w = nothing,
                               well_radius = 0.3, outside_distance = 100e3,
                               pore_compressibility = 1e-10, dissolved::Symbol = :carry,
                               well_volume = 1.0)
@@ -63,13 +66,15 @@ function setup_injection_case(a, wells; fluid, boundary = :open,
     g = Jutul.gravity_constant
     sides, _ = ve_boundary_sides(a.mesh, a.columns, ve.domain)
     types = _side_types(sides, boundary)
-    bc = _injection_bc(a, ve, sides, types, rho_w * g, outside_distance, dissolved)
+    # hydrostatic brine: the fluid's at rest, or co2lab's constant rho_w
+    p_of_z = isnothing(rho_w) ? ve_hydrostatic_profile(fluid, ve; g) : z -> rho_w * g * z
+    bc = _injection_bc(a, ve, sides, types, p_of_z, outside_distance, dissolved)
 
     cols = [Int(w[1]) for w in wells]
     vewells = [setup_ve_well(ve, c; name = Symbol("I$k"), radius = well_radius,
                              volume_multiplier = well_volume)
                for (k, c) in enumerate(cols)]
-    p0 = ve_hydrostatic_pressure(ve.geometry; rho_w, g)
+    p0 = p_of_z.(ve.geometry.z_top)
     # the pore volume's reference pressure: the mean initial pressure
     rock = (reference_pressure = sum(p0) / length(p0),
             compressibility = pore_compressibility)
@@ -117,10 +122,10 @@ function _side_types(sides, boundary)
 end
 
 # The conditions of the open and semi-open sides: hydrostatic pressure at the
-# side's depth (`rho_g` = ρ_w·g), a semi-open side's transmissibility scaled
+# side's depth (`p_of_z`), a semi-open side's transmissibility scaled
 # by d/(d + L), d the map distance from the centroid of its column's top face
 # (co2lab's Gt.cells.centroids) to the side
-function _injection_bc(a, ve, sides, types, rho_g, L, dissolved)
+function _injection_bc(a, ve, sides, types, p_of_z, L, dissolved)
     ix = findall(!=(:closed), types)
     s = trap_surface(a.mesh, a.columns)
     trans = map(ix) do k
@@ -128,7 +133,7 @@ function _injection_bc(a, ve, sides, types, rho_g, L, dissolved)
         d = hypot(s.cx[c] - ex, s.cy[c] - ey)
         sides.half_trans[k] * (types[k] == :semi_open ? d / (d + L) : 1.0)
     end
-    return ve_boundary_conditions(ve, sides, ix; pressure = z -> rho_g * z, trans,
+    return ve_boundary_conditions(ve, sides, ix; pressure = p_of_z, trans,
                                   dissolved)
 end
 

@@ -3,14 +3,16 @@
 # more, in a vertical-equilibrium model with a capillary fringe — the CO2 and
 # brine meet in a transition zone set by the rock's capillary pressure, not at
 # a sharp interface — and residual trapping. At the end, where the CO2 is, by
-# trapping mechanism (co2lab's postprocessStates).
+# trapping mechanism (co2lab's postprocessStates). The CO2 and brine
+# properties are JutulDarcy's, not co2lab's.
 #
 #   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/johansen_ve.jl
 #
-# Input: co2lab's grid and open boundary (analysis/reference-data/
-# johansen_grids.mat and stage1_johansen.mat, from scripts/mrst_dump_stage1.m)
-# and the example's CO2 properties at its reference conditions
-# (johansen_case.mat, from scripts/mrst_ref_johansen.m 'case').
+# Input: the Johansen data set's sector model, read directly — NPD5.grdecl
+# (ECLIPSE grid) and NPD5_Permeability.txt, NPD5_Porosity.txt, in
+# johansen_data_directory() (../mrst-data/Johansen; from MRST's Johansen data
+# set, https://www.sintef.no/contentassets/124f261f170947a6bc51dd76aea66129/
+# johansen.zip). No MRST output is needed.
 #
 # Plotting backend: GLMakie (a window per figure, 3D views rotatable with the
 # mouse; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie
@@ -19,35 +21,30 @@
 using JutulCO2Lab
 backend = Symbol(get(ENV, "JUTULCO2LAB_BACKEND", "GLMakie"))
 @eval using $backend
-using Jutul, JutulDarcy, MAT, Printf
+using Jutul, JutulDarcy, Printf
 
-refdir = joinpath(@__DIR__, "..", "..", "analysis", "reference-data")
-year = 365.25 * 86400
+year = si_unit(:year)
 
 # ------------------------------ 1. The formation ------------------------------
 
-# co2lab's Johansen VE grid: the sector model's cells with permeability above
-# 0.11 mD, columns down to the first hole (topSurfaceGrid's
-# discard_below_holes), the rock averaged over each column. Across the faults
-# where the caprock breaks off (146 faces) the flux compares the two sides'
-# pressures at a common depth (a virtual cell); co2lab joins the caprocks
-# smoothly instead (`fault_flux = :co2lab`).
-d = matread(joinpath(refdir, "johansen_grids.mat"))
-mesh = ve_mesh_from_mrst(d["G3"])
-columns, _ = ve_columns(mesh)
-K = d["rock3D"]["perm"]
-ve = ve_domain(mesh, columns; perm_x = K[:, 1], perm_y = K[:, 2],
-               poro = vec(d["rock3D"]["poro"]))
+# co2lab's Johansen VE grid (makeJohansenVEgrid), built from the deck: the
+# sector model's cells with permeability above 0.11 mD, columns down to the
+# first hole (topSurfaceGrid's discard_below_holes), the rock averaged over
+# each column. Across the faults where the caprock breaks off (146 faces) the
+# flux compares the two sides' pressures at a common depth (a virtual cell);
+# co2lab joins the caprocks smoothly instead (`fault_flux = :co2lab`).
+# The formation at the example's temperature, 94 °C, for the fluid tables.
+johansen = johansen_ve_domain(; temperature = 273.15 + 94)
+mesh, columns, ve, sides = johansen.mesh, johansen.columns, johansen.ve, johansen.sides
 @printf("%d columns of %.0f-%.0f m\n", length(ve.geometry.H),
         extrema(ve.geometry.H)...)
 
 # --------------------------- 2. A capillary fringe ----------------------------
 
-# The example's constants: brine 1000 kg/m³, CO2 at 300 bar and 94 °C from
-# co2lab's equation of state, linearised (compressible CO2, incompressible
-# brine), rock compressibility 4.35e-5 /bar.
-c = matread(joinpath(refdir, "johansen_case.mat"))
-srw, src, pe = c["srw"], c["src"], c["pe"]
+# CO2 and brine from JutulDarcy's CO2–brine tables, in pressure and the
+# columns' temperature (co2lab's example linearises its own equation of state
+# at 300 bar instead); rock compressibility 4.35e-5 /bar at 300 bar.
+srw, src, pe = 0.27, 0.2, 5e3
 
 # Below the caprock the capillary pressure falls off linearly with depth, and
 # the rock's capillary curve turns it into a CO2 saturation that fades from
@@ -55,38 +52,31 @@ srw, src, pe = c["srw"], c["src"], c["pe"]
 # its residual 0.27; CO2 relperm zero below the residual CO2 saturation 0.2.
 fringe = CapillaryFringeTable(; invPc3D = p -> (1 - srw) * (pe / max(p, pe))^2 + srw,
                               kr3D = s -> max((s - src) / (1 - src), 0.0)^2)
-fluid = co2lab_ve_fluid(; default_pvt = nothing,
-                        vertical = fringe, residual = (srw, src),
-                        co2_rho_ref = c["co2_rho"], wat_rho_ref = c["rhow"],
-                        co2_rho_pvt = (c["co2_c"], c["p_ref"]),
-                        wat_rho_pvt = (c["wat_c"], c["p_ref"]),
-                        co2_mu_ref = c["muco2"], wat_mu_ref = c["muw"])
-rock_c = (reference_pressure = c["p_ref"], compressibility = c["c_rock"])
+fluid = co2lab_ve_fluid(; vertical = fringe, residual = (srw, src))
+rock_c = (reference_pressure = 300e5, compressibility = 4.35e-5 / 1e5)
 
 # ------------------------- 3. Boundary, well, schedule -------------------------
 
 # Parts of the outer edges are open, as co2lab's example sets them
-# (makeJohansenVEgrid's bcIxVE: its faces, matched to our sides by column and
-# edge midpoint), the rest closed; the open sides at hydrostatic pressure.
-g, rhow = c["gravity"], c["rhow"]
-s1 = matread(joinpath(refdir, "stage1_johansen.mat"))
-sides, _ = ve_boundary_sides(mesh, columns, ve.domain)
-Nt = Int.(d["Gt"]["faces"]["neighbors"])
-ct = d["Gt"]["faces"]["centroids"]
-open_faces = Set(Int.(vec(s1["bc_faces_ve"])))
-function is_open(i)
-    col, m = sides.column[i], sides.edge_midpoint[i]
-    return any(f in open_faces && 0 in Nt[f, :] && col in Nt[f, :] &&
-               hypot(ct[f, 1] - m[1], ct[f, 2] - m[2]) < 1e-6 for f in axes(Nt, 1))
-end
-bc = ve_boundary_conditions(ve, sides, filter(is_open, 1:length(sides));
-                            pressure = z -> rhow * g * z)
+# (makeJohansenVEgrid's searchForBoundaryFaces calls, by logical i and j;
+# MRST's 'BACK' is Jutul's :lower, 'FRONT' :upper), the rest closed; the
+# open sides at hydrostatic pressure: that of the tables' brine at rest
+# (lighter than co2lab's 1000 kg/m³ at 94 °C).
+hydrostatic = ve_hydrostatic_profile(fluid, ve)
+open_on(dir; i = nothing, j = nothing) =
+    ve_select_sides(sides, columns; directions = (dir,), i, j)
+open_sides = sort(union(open_on(:lower; i = 1:94, j = 1:4), open_on(:left; i = 1:20),
+                        open_on(:right; j = 90:100),
+                        open_on(:upper; i = 1:42, j = 50:100)))
+bc = ve_boundary_conditions(ve, sides, open_sides; pressure = hydrostatic)
 
-# One injector far down-dip near the major sealing fault, 3.5 Mt of CO2 a
-# year for 50 years; then 950 years of migration in 10-year report steps.
-well_column = Int(only(s1["well_cells"]))
+# One injector far down-dip near the major sealing fault, in the column of
+# pillar (48, 48), 3.5 Mt of CO2 a year for 50 years; then 950 years of
+# migration in 10-year report steps.
+well_column = findfirst(==((48, 48)), columns.pillar)
 well = setup_ve_well(ve, well_column; name = :inj)
-inject = co2_injector_control(TotalRateTarget(c["inj_rate"]), fluid)
+# (the rate as a volume at the fluid's reference CO2 density)
+inject = co2_injector_control(TotalRateTarget(3.5e9 / year / fluid.rho_ref[2]), fluid)
 model = setup_co2lab_model(ve.domain; wells = [well], fluid,
                            rock_compressibility = rock_c)
 f_inj = setup_reservoir_forces(model; control = Dict(:inj => inject), bc = bc)
@@ -97,7 +87,7 @@ forces = [k <= 50 ? f_inj : f_shut for k in eachindex(dt)]
 
 # ---------------------------------- 4. Run ------------------------------------
 
-p0 = ve_hydrostatic_pressure(ve.geometry; rho_w = rhow, g = g)
+p0 = hydrostatic.(ve.geometry.z_top)
 state0 = setup_co2lab_state(model; pressure = p0, forces = f_inj)
 prm = setup_parameters(model)
 run = JutulCase(model, dt, forces; state0 = state0, parameters = prm)

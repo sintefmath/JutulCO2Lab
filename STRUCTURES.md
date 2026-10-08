@@ -129,6 +129,8 @@ Constants: `_WELL_CONSTANT_RATIO`, `_WELL_CONSTANT_VALUE` (MRST's
 | 46 | *Sleipner VE model* (NamedTuple) | `sleipner.jl` | `(mesh, columns, ve, grid, sides)`: 3D mesh (discarded cells removed), `VEColumns` (1), `ve_domain`'s result, the grid section (GeoEnergyIO `Dict`, global coordinates, rock arrays), the lateral boundary sides (co2lab's `bcIxVE`) | the Sleipner benchmark files (`sleipner_ve_domain`) |
 | 53 | *Grid section subset* (NamedTuple) | `atlas_domain.jl` | `(mesh, columns, grid)`: the mesh of a grid section with only chosen cells active, its `VEColumns` (1), the section (a copy with a new `ACTNUM`) | a grid section and its mesh (`grid_section_subset`) |
 | 54 | *Johansen NPD mesh* (NamedTuple) | `johansen.jl` | `(mesh, columns, grid)`: the Johansen layers of the NPD sector or full-field deck (cut out, layer 1 the first Johansen layer; `co2lab_compatible`: no pinch-out connections), its `VEColumns` (1), the cut grid section (`cartDims`, `COORD`, `ZCORN`, `ACTNUM`) | the NPD decks (`johansen_mesh`) |
+| 60 | *Johansen sector grid section* (`Dict{String, Any}`) | `johansen.jl` | GeoEnergyIO grid section of the NPD5 deck's layers holding active cells (`cartDims`, `COORD`, `ZCORN`, `ACTNUM` `Array{Bool, 3}`: permeability ≥ `min_perm` mD), `layers` (deck layers kept, `UnitRange`; 6:10), and `PERMX/Y/Z` (m², z = 0.1 x), `PORO` as `Array{Float64, 3}` | `NPD5.grdecl`, `NPD5_Permeability.txt`, `NPD5_Porosity.txt` (`johansen_grid_section`) |
+| 61 | *Johansen VE model* (NamedTuple) | `johansen.jl` | `(mesh, columns, ve, grid, sides)`: 3D mesh of the largest piece (discarded cells removed, GeoEnergyIO's lateral boundary directions corrected), `VEColumns` (1), `ve_domain`'s result, the grid section (60, `ACTNUM` the largest piece), the lateral boundary sides (all closed) | 60, 1, `ve_domain` (`johansen_ve_domain`) |
 
 Constants: `_ATLAS_DATASETS` (the three data-set directories),
 `_ATLAS_AVERAGE_ROCK` (co2lab's `getAvgRock` table), `_JURASSIC_MID`,
@@ -136,7 +138,9 @@ Constants: `_ATLAS_DATASETS` (the three data-set directories),
 `atlas_grid.jl`), `_UTM_A`, `_UTM_F`, `_UTM_K0` (GRS80 semi-major axis and
 flattening, UTM scale factor; `projection.jl`), `_SLEIPNER_FILES` (the
 benchmark files read, `sleipner.jl`), `_JOHANSEN_MODELS` (deck file, Johansen
-layers and download address of the two NPD models, `johansen.jl`).
+layers and download address of the two NPD models, `johansen.jl`),
+`_JOHANSEN_VE_FILES` (the sector-model files `johansen_grid_section` reads)
+and `_JOHANSEN_ZIP` (download address of the whole Johansen data set).
 
 ## H. Trapping analysis (roadmap Stage 8), on A
 
@@ -175,6 +179,8 @@ traps' colours), `_PIE_COLOURS` (the pie's three colours, co2lab's).
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
 | 59 | *Injection case* (NamedTuple) | `ve/injection_case.jl` | `(case, model, ve, sides, side_types, bc, wells, dt, pressure0)`: co2lab-demo's exploreSimulation launch — the `JutulCase`, its model, the formation with its domain copied (temperature, rugosity set), the boundary sides and their types (`:closed`, `:open`, `:semi_open`), the boundary conditions of the open and semi-open ones, the well columns, the report steps (s), the initial pressure | an Atlas formation (`atlas_ve_domain`), wells, a fluid (`setup_injection_case`) |
+| 62 | *Sloping-aquifer grid section* (`Dict{String, Any}`) | `ve/sloping_aquifer.jl` | co2lab's `make_testgrid` as a GeoEnergyIO grid section: `cartDims`, `COORD` (vertical pillars), `ZCORN` (node depths shifted by the sloped, bent, trapped caprock), `ACTNUM` (all `true`) | grid parameters (`sloping_aquifer_grid`) |
+| 63 | *Sloping-aquifer case* (NamedTuple) | `ve/sloping_aquifer.jl` | `(mesh, columns, ve, grid, sides, open_sides, well_column, well_radius, rho_w, mu_w, co2_rho, co2_mu, temperature, p_ref, rock_compressibility, mass_rate, dt, injecting)`: co2lab's `sloping_aquifer.m` case — mesh, `VEColumns` (1), `ve_domain`'s result (400 mD, 0.2), the section (62), boundary sides and the open ones, the injector's column and radius, the constants (SI; CO2 by default JutulDarcy's at `p_ref`, 70 °C), co2lab's report steps and injection flags | 62, 1, `ve_domain` (`sloping_aquifer`) |
 
 Constants: `MRST_YEAR` (MRST's year, 365.2425 days, in seconds; internal).
 

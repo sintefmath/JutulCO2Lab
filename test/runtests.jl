@@ -667,6 +667,93 @@ end
         end
     end
 
+    @testset "sloping aquifer built in Julia vs MRST" begin
+        # co2lab's ramp-up: 7 halvings, then whole steps (MRST's rampupTimesteps)
+        dts = JutulCO2Lab._rampup_timesteps(24.0, 1.0, 7)
+        @test dts == [1 / 128; 1 ./ 2.0 .^ (7:-1:1); fill(1.0, 23)]
+        f = joinpath(refdir, "sloping_aquifer.mat")
+        if !isfile(f)
+            @info "Skipping: $f not generated"
+        else
+            d = matread(f)
+            aq = sloping_aquifer(; nz = 5, co2_rho = d["rhoc"], co2_mu = d["muco2"])
+            m0 = ve_mesh_from_mrst(d["G3"])
+            # make_testgrid's nodes exactly, the cells in MRST's order
+            X0 = Set(Tuple(r) for r in eachrow(d["G3"]["nodes"]["coords"]))
+            @test Set(Tuple(x) for x in aq.mesh.node_points) == X0
+            @test [cell_ijk(aq.mesh, c) for c in 1:number_of_cells(aq.mesh)] ==
+                  [cell_ijk(m0, c) for c in 1:number_of_cells(m0)]
+            @test isapprox(aq.ve.geometry.H, vec(d["Gt_H"]); rtol = 1e-12)
+            @test isapprox(aq.p_ref, d["p_ref"]; rtol = 1e-15)
+            @test aq.well_column == Int(d["well"]["cells"])
+            @test aq.mass_rate / aq.co2_rho == d["injection_rate"]
+            @test aq.dt == vec(d["dT"]) && aq.injecting == (vec(d["step_control"]) .== 1)
+            @test aq.sides.column[aq.open_sides] == [Int(d["bc"]["cell"])]
+        end
+    end
+
+    @testset "hydrostatic brine of the fluid (ve_hydrostatic_profile)" begin
+        aq = sloping_aquifer(; nz = 5, co2_rho = 700.0, co2_mu = 5e-5)
+        geo = aq.ve.geometry
+        # constant brine: co2lab's rho_w·g·z
+        f0 = co2lab_ve_fluid(; default_pvt = nothing, wat_rho_ref = 1050.0)
+        p = ve_hydrostatic_profile(f0, aq.ve).(geo.z_top)
+        @test isapprox(p, ve_hydrostatic_pressure(geo; rho_w = 1050.0); rtol = 1e-12)
+        # JutulDarcy's brine (30 °C here): at rest between columns, which
+        # 1050 kg/m³ is not
+        f1 = co2lab_ve_fluid()
+        N, gdz = aq.ve.domain[:neighbors], aq.ve.domain[:gdz]
+        function imbalance(p)
+            rho = [JutulCO2Lab._phase_value(f1.rho_ref[1], f1.rho_pvt[1], q, 303.15)
+                   for q in p]
+            return maximum(abs((p[N[2, k]] - p[N[1, k]]) +
+                               (rho[N[1, k]] + rho[N[2, k]]) / 2 * gdz[k]) /
+                           (1000 * abs(gdz[k]) + 1e-12) for k in axes(N, 2))
+        end
+        @test imbalance(ve_hydrostatic_profile(f1, aq.ve).(geo.z_top)) < 1e-5
+        @test imbalance(ve_hydrostatic_pressure(geo; rho_w = 1050.0)) > 1e-2
+    end
+
+    @testset "Johansen VE domain from the data set vs MRST" begin
+        # without the data: an error naming the download address
+        withenv("CO2LAB_ATLAS_DATA" => mktempdir()) do
+            err = try johansen_grid_section(); nothing catch e; e end
+            @test err isa ArgumentError && occursin("johansen.zip", err.msg)
+        end
+        fg = joinpath(refdir, "johansen_grids.mat")
+        dir = johansen_data_directory()
+        if !(isfile(fg) && isfile(joinpath(dir, "NPD5_Permeability.txt")))
+            @info "Skipping: Johansen data set or reference data not present"
+        else
+            jo = johansen_ve_domain()
+            d = matread(fg)
+            @test jo.grid["layers"] == 6:10
+            # the same cells in the same order, the same rock bit for bit
+            G3 = d["G3"]
+            nx, ny = Int.(G3["cartDims"][1:2])
+            ijk0 = [((m - 1) % nx + 1, ((m - 1) ÷ nx) % ny + 1, (m - 1) ÷ (nx * ny) + 1)
+                    for m in Int.(vec(G3["cells"]["indexMap"]))]
+            ijk = [cell_ijk(jo.mesh, c) .+ (0, 0, 5) for c in 1:number_of_cells(jo.mesh)]
+            @test ijk == ijk0
+            at(key) = [jo.grid[key][c[1], c[2], c[3] - 5] for c in ijk0]
+            K = d["rock3D"]["perm"]
+            @test at("PERMX") == K[:, 1] && at("PERMY") == K[:, 2] &&
+                  at("PERMZ") == K[:, 3] && at("PORO") == vec(d["rock3D"]["poro"])
+            # the same columns; one side per outer edge of co2lab's Gt (GeoEnergyIO's
+            # side directions corrected); co2lab's open boundary from its ranges
+            mcols, _ = ve_columns(ve_mesh_from_mrst(G3))
+            @test jo.columns.pillar == mcols.pillar
+            Nt = Int.(d["Gt"]["faces"]["neighbors"])
+            @test length(jo.sides) == count((Nt[:, 1] .== 0) .| (Nt[:, 2] .== 0))
+            sel(dir, i, j) = ve_select_sides(jo.sides, jo.columns; directions = (dir,),
+                                             i, j)
+            n_open = length(union(sel(:lower, 1:94, 1:4), sel(:left, 1:20, nothing),
+                                  sel(:right, nothing, 90:100),
+                                  sel(:upper, 1:42, 50:100)))
+            @test n_open == 234                         # co2lab's bcIxVE
+        end
+    end
+
     @testset "face directions and column sides: Johansen (topology)" begin
         f = joinpath(refdir, "johansen_grids.mat")
         if !isfile(f)

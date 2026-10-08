@@ -87,7 +87,8 @@ end
 """
     _set_boundary_directions!(mesh, dirs)
 
-Store one direction per boundary face as entity tags.
+Store one direction per boundary face as entity tags, replacing any there.
+Returns `mesh` itself.
 
 Modifies: `mesh` (its entity tags, group `:direction` on `BoundaryFaces()`).
 `dirs` is only read.
@@ -95,11 +96,51 @@ Modifies: `mesh` (its entity tags, group `:direction` on `BoundaryFaces()`).
 function _set_boundary_directions!(mesh, dirs)
     length(dirs) == length(mesh.boundary_faces.neighbors) ||
         error("one direction per boundary face expected")
+    # Jutul's tag setter appends, so the old group goes first
+    delete!(Jutul.mesh_entity_tags(mesh)[BoundaryFaces()].tags, :direction)
     for (k, name) in enumerate(_DIRECTIONS)
         faces = findall(==(k), dirs)
         Jutul.set_mesh_entity_tag!(mesh, BoundaryFaces(), :direction, name, faces)
     end
     return mesh
+end
+
+"""
+    _fix_cpgrid_boundary_directions!(mesh, grid) -> mesh
+
+Correct the lateral `:direction` tags of a mesh built by GeoEnergyIO's
+`mesh_from_grid_section` from the grid section `grid`. Where an active cell
+faces an inactive one across two active pillar columns, GeoEnergyIO tags the
+boundary face with the column pair's direction (`:right`, `:upper`) also when
+the active cell is the right (upper) one (`insert_boundary_face!`,
+GeoEnergyIO 1.1.36). The axis (`i` or `j`) is right; the side is taken from
+the face centroid's offset from the cell centroid along the cell's logical
+axis on the map (from the tops of its four pillars in `COORD`). Returns
+`mesh` itself.
+
+Modifies: `mesh` (its entity tags, group `:direction` on `BoundaryFaces()`).
+`grid` is only read.
+"""
+function _fix_cpgrid_boundary_directions!(mesh, grid)
+    dirs = _boundary_directions(mesh)
+    geo = tpfv_geometry(mesh)
+    nx, ny = grid["cartDims"][1], grid["cartDims"][2]
+    # pillar (a, b): x, y, z of its top, then of its bottom
+    P = reshape(grid["COORD"], 6, nx + 1, ny + 1)
+    top(a, b) = SVector(P[1, a, b], P[2, a, b])
+    for (f, d) in enumerate(dirs)
+        d > 4 && continue
+        c = mesh.boundary_faces.neighbors[f]
+        i, j = cell_ijk(mesh, c)
+        # the cell's logical i (d = 1, 2) or j (d = 3, 4) axis on the map
+        axis = d <= 2 ? top(i + 1, j) + top(i + 1, j + 1) - top(i, j) - top(i, j + 1) :
+                        top(i, j + 1) + top(i + 1, j + 1) - top(i, j) - top(i + 1, j)
+        offset = SVector(geo.boundary_centroids[1, f] - geo.cell_centroids[1, c],
+                         geo.boundary_centroids[2, f] - geo.cell_centroids[2, c])
+        positive = dot(offset, axis) > 0
+        dirs[f] = d <= 2 ? (positive ? 2 : 1) : (positive ? 4 : 3)
+    end
+    return _set_boundary_directions!(mesh, dirs)
 end
 
 # -------------- Boundary directions from MRST and after trimming --------------

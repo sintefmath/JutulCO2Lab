@@ -42,7 +42,7 @@ export VEColumnSides, ve_column_sides
 include("ve/vehybrid.jl")
 include("ve/vedomain.jl")
 export ve_average_rock, ve_domain, VEBoundarySides, ve_boundary_sides
-export ve_hydrostatic_pressure, geothermal_gradient
+export ve_hydrostatic_pressure, ve_hydrostatic_profile, geothermal_gradient
 
 include("ve/rock_compressibility.jl")
 export set_co2lab_rock_compressibility!
@@ -84,7 +84,9 @@ include("ve/vereconstruct.jl")
 export ve_reconstruct
 
 include("ve/injection_case.jl")
+include("ve/sloping_aquifer.jl")
 export setup_injection_case, simulate_injection_case, ve_boundary_loops
+export sloping_aquifer_grid, sloping_aquifer
 
 include("ve/ve_top_surface.jl")
 export ve_top_surface, ve_contour_lines
@@ -105,6 +107,7 @@ export sleipner_data_directory, sleipner_grid_section, sleipner_ve_domain
 
 include("atlas/johansen.jl")
 export johansen_data_directory, johansen_mesh, johansen_well_point
+export johansen_grid_section, johansen_ve_domain
 
 include("trapping/trap_surface.jl")
 include("trapping/cell_traps.jl")

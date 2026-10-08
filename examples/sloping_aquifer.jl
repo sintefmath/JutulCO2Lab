@@ -3,56 +3,56 @@
 #
 #   scripts/julia --project=JutulCO2Lab JutulCO2Lab/examples/sloping_aquifer.jl
 #
-# Input: analysis/reference-data/sloping_aquifer.mat, from
-# scripts/mrst_dump_sloping_aquifer.m (co2lab's grid, rock, fluid and schedule).
+# No input files: the case is built here as co2lab's sloping_aquifer.m builds
+# it (its grid, make_testgrid, matches co2lab's node for node).
 
-using JutulCO2Lab, Jutul, JutulDarcy, MAT, Printf
+using JutulCO2Lab, Jutul, JutulDarcy, Printf
 
-# ----------------------------- 1. co2lab's input ------------------------------
+# ------------------------------- 1. The case ----------------------------------
 
-refdir = joinpath(@__DIR__, "..", "..", "analysis", "reference-data")
-d = matread(joinpath(refdir, "sloping_aquifer.mat"))
-
-g = d["gravity"]
-rho_w, rho_co2 = d["rhow"], d["rhoc"]           # brine; CO2 at reference p and T
+# co2lab's case: grid, rock, well position, open boundary, schedule and
+# constants. CO2's density and viscosity at the case's reference pressure and
+# 70 °C come from JutulDarcy's tables (co2lab's own differ by < 0.2 %).
+aq = sloping_aquifer(; nz = 5)
+g = Jutul.gravity_constant
+rho_w, rho_co2 = aq.rho_w, aq.co2_rho           # brine; CO2 at reference p and T
 
 # --------------------------------- 2. VE grid ---------------------------------
 
-# The 3D grid, as a Jutul mesh (MRST's cell and face order kept).
-mesh = ve_mesh_from_mrst(d["G3"])
+# The 3D grid, a Jutul mesh built from a corner-point grid section.
+mesh = aq.mesh
 
-# Group the 3D cells into vertical columns; each column becomes one VE cell.
-columns, _ = ve_columns(mesh)
+# Its 3D cells grouped into vertical columns; each column becomes one VE cell.
+columns = aq.columns
 
 # The VE domain: one coarse cell per column, thickness-averaged rock, gravity
 # taken along the caprock. `geo` has caprock depth z_top and height H per column.
-ve = ve_domain(mesh, columns; perm_x = vec(d["rock"]["perm"]),
-               poro = vec(d["rock"]["poro"]))
+ve = aq.ve
 geo = ve.geometry
 
 # ---------- 3. Fluid (sharp interface, constant densities) and rock -----------
 
 fluid = co2lab_ve_fluid(default_pvt = nothing, krmax = (1.0, 1.0),
                         co2_rho_ref = rho_co2, wat_rho_ref = rho_w,
-                        co2_mu_ref = d["muco2"], wat_mu_ref = d["muw"])
+                        co2_mu_ref = aq.co2_mu, wat_mu_ref = aq.mu_w)
 
 # Rock compressibility belongs to the model (co2lab puts it in the fluid).
-rock_c = (reference_pressure = d["p_ref"], compressibility = d["cf_rock"])
+rock_c = (reference_pressure = aq.p_ref, compressibility = aq.rock_compressibility)
 
 # ----------------------------- 4. Injection well ------------------------------
 
 # One VE well in co2lab's well column, open over the whole column height.
-well_column = Int(d["well"]["cells"])
-well = setup_ve_well(ve, well_column; name = :inj, radius = d["well"]["r"])
+well_column = aq.well_column
+well = setup_ve_well(ve, well_column; name = :inj, radius = aq.well_radius)
 
 # Rate given as volume at the CO2 reference density (co2lab's "surface" volume).
-inject = co2_injector_control(TotalRateTarget(d["injection_rate"]), fluid)
+inject = co2_injector_control(TotalRateTarget(aq.mass_rate / rho_co2), fluid)
 
 # ------------------------------ 5. Open boundary ------------------------------
 
-# co2lab opens only the updip end of the cross-section (x = L: the :right side).
-sides, _ = ve_boundary_sides(mesh, columns, ve.domain)
-open_sides = ve_select_sides(sides, columns; directions = (:right,))
+# co2lab opens only the updip end of the cross-section (x = L: the :right side,
+# as `ve_select_sides(sides, columns; directions = (:right,))` picks it).
+sides, open_sides = aq.sides, aq.open_sides
 
 # Hydrostatic brine pressure at the side's caprock edge; brine flows in if needed.
 bc = ve_boundary_conditions(ve, sides, open_sides; pressure = z -> rho_w * g * z)
@@ -71,8 +71,8 @@ f_inject = setup_reservoir_forces(model; control = Dict(:inj => inject), bc = bc
 shut = DisabledControl()
 f_shut = setup_reservoir_forces(model; control = Dict(:inj => shut), bc = bc)
 
-dt = vec(d["dT"])                                 # 31 injection + 12 migration steps
-injecting = vec(d["step_control"]) .== 1
+dt = aq.dt                                        # 31 injection + 12 migration steps
+injecting = aq.injecting
 forces = [i ? f_inject : f_shut for i in injecting]
 
 # Brine at hydrostatic pressure, no CO2 (pressure is at the caprock); the
