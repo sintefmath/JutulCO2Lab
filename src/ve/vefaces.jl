@@ -113,34 +113,42 @@ Correct the lateral `:direction` tags of a mesh built by GeoEnergyIO's
 faces an inactive one across two active pillar columns, GeoEnergyIO tags the
 boundary face with the column pair's direction (`:right`, `:upper`) also when
 the active cell is the right (upper) one (`insert_boundary_face!`,
-GeoEnergyIO 1.1.36). The axis (`i` or `j`) is right; the side is taken from
-the face centroid's offset from the cell centroid along the cell's logical
-axis on the map (from the tops of its four pillars in `COORD`). Returns
-`mesh` itself.
+GeoEnergyIO ≤ 1.1.36). The axis (`i` or `j`) is right; the side is the one
+whose two pillars (in `COORD`) the face's nodes lie on: topology, so also
+right for folded cells, where geometry is not. Faces with fewer than three
+distinct nodes (no area) keep their tag. Returns `mesh` itself.
 
 Modifies: `mesh` (its entity tags, group `:direction` on `BoundaryFaces()`).
 `grid` is only read.
 """
 function _fix_cpgrid_boundary_directions!(mesh, grid)
     dirs = _boundary_directions(mesh)
-    geo = tpfv_geometry(mesh)
     nx, ny = grid["cartDims"][1], grid["cartDims"][2]
     # pillar (a, b): x, y, z of its top, then of its bottom
     P = reshape(grid["COORD"], 6, nx + 1, ny + 1)
-    top(a, b) = SVector(P[1, a, b], P[2, a, b])
+    pillar(a, b) = (SVector(P[1, a, b], P[2, a, b], P[3, a, b]),
+                    SVector(P[4, a, b], P[5, a, b], P[6, a, b]))
     for (f, d) in enumerate(dirs)
         d > 4 && continue
-        c = mesh.boundary_faces.neighbors[f]
-        i, j = cell_ijk(mesh, c)
-        # the cell's logical i (d = 1, 2) or j (d = 3, 4) axis on the map
-        axis = d <= 2 ? top(i + 1, j) + top(i + 1, j + 1) - top(i, j) - top(i, j + 1) :
-                        top(i, j + 1) + top(i + 1, j + 1) - top(i, j) - top(i + 1, j)
-        offset = SVector(geo.boundary_centroids[1, f] - geo.cell_centroids[1, c],
-                         geo.boundary_centroids[2, f] - geo.cell_centroids[2, c])
-        positive = dot(offset, axis) > 0
-        dirs[f] = d <= 2 ? (positive ? 2 : 1) : (positive ? 4 : 3)
+        i, j = cell_ijk(mesh, mesh.boundary_faces.neighbors[f])
+        # the pillars of the low side (left/lower) and of the high side
+        low, high = d <= 2 ? (((i, j), (i, j + 1)), ((i + 1, j), (i + 1, j + 1))) :
+                             (((i, j), (i + 1, j)), ((i, j + 1), (i + 1, j + 1)))
+        nodes = mesh.boundary_faces.faces_to_nodes[f]
+        # fewer than three distinct nodes: no area, no side to tell; left as is
+        length(unique(mesh.node_points[n] for n in nodes)) < 3 && continue
+        off(side) = sum(n -> minimum(p -> _line_distance(mesh.node_points[n],
+                                                          pillar(p...)), side), nodes)
+        dirs[f] = (d <= 2 ? 1 : 3) + (off(high) < off(low))
     end
     return _set_boundary_directions!(mesh, dirs)
+end
+
+# Distance from point x to the line through a and b (a pillar)
+function _line_distance(x, (a, b))
+    t = b - a
+    v = x - a
+    return norm(v - (dot(v, t) / dot(t, t)) * t)
 end
 
 # -------------- Boundary directions from MRST and after trimming --------------
