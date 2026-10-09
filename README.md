@@ -114,6 +114,15 @@ cite them by `file:line`:
   for reference.
 - `JutulDarcy`: `../../JutulDarcy.jl`, the release 0.3.11 (`2c92d4d5`),
   unmodified.
+- `GeoEnergyIO` (ECLIPSE input and corner-point grids, used through
+  JutulDarcy): the registered release in `Manifest.toml` (1.1.34), not
+  dev-ed. Up to 1.1.36 it tags some boundary faces with the wrong side (those
+  facing an inactive cell of an active neighbouring column); JutulCO2Lab
+  corrects them where it builds such grids (`johansen_ve_domain`). The fix is
+  sintefmath/GeoEnergyIO.jl PR #66, from the researcher's fork
+  (github.com/Oddan/GeoEnergyIO.jl, branch `boundary-face-direction`, cloned
+  at `../../GeoEnergyIO.jl-fork`); the fork is only for that PR, nothing here
+  uses it.
 
 For a dev-ed package, `Manifest.toml` records only `path` and `version` — no
 commit — so it does **not** pin what actually ran. Every `OracleReport`
@@ -149,7 +158,9 @@ in it are environment problems, not VE problems.
      co2lab-jutul-merge-work/   this project
      Jutul.jl-fork/             Jutul, the fork's working branch
      JutulDarcy.jl/             JutulDarcy 0.3.11
-     mrst/, mrst-data/          only for the gates against MRST (step 5)
+     mrst-data/                 data sets for most examples (step 4)
+     mrst/                      only for the gates against MRST (step 6)
+     GeoEnergyIO.jl-fork/       not needed (only for GeoEnergyIO PR #66)
    ```
 
 2. Clone them:
@@ -174,16 +185,44 @@ in it are environment problems, not VE problems.
 
    `scripts/julia` pins Julia to the researcher's laptop's P-cores with
    `taskset`; elsewhere call `julia --threads=N` directly (or set
-   `JULIA_CORES`). Tests needing MRST reference dumps are skipped until step 5.
+   `JULIA_CORES`). Tests needing data sets (step 4) or MRST reference dumps
+   (step 6) are skipped until those are in place.
 
-4. Examples: `julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/<file>.jl`
-   (`JUTULCO2LAB_BACKEND=CairoMakie` writes figures to files).
+4. Data sets, in `<parent>/mrst-data/` (or a directory named by the
+   environment variable `CO2LAB_ATLAS_DATA`), laid out as MRST's data
+   directory:
 
-5. The gates against MRST (optional) need Octave (11.1 here; not MATLAB, whose
+   - `Johansen/`: `NPD5.grdecl`, `NPD5_Permeability.txt`,
+     `NPD5_Porosity.txt` (the sector model, read directly by
+     `johansen_ve_domain`) and `FULLFIELD_IMAXJMAX.GRDECL` with
+     `FULLFIELD_FAULTS_IMAXJMAX.INC` (the full-field trap analysis). From
+     MRST's Johansen data set: `mrst/core/examples/data/Johansen/` in an MRST
+     checkout, or
+     https://www.sintef.no/contentassets/124f261f170947a6bc51dd76aea66129/johansen.zip.
+   - `CO2Atlas/`, `CO2AtlasNorwegianSea/`, `CO2AtlasBarentsSea/`,
+     `IGEMS surfaces/`, `IGEMSsample/`: the CO2 Storage Atlas and IGEMS
+     surfaces, as MRST's dataset manager stores them (copy them from a
+     machine that has them).
+   - `Sleipner/`: the IEAGHG Sleipner benchmark (no longer downloadable; a
+     copy from the researcher).
+
+   A missing data set gives an error naming the directory (and, for
+   Johansen, the download address). Terms of use of the data sets are
+   unclear: copy them, do not publish them.
+
+5. Examples: `julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/<file>.jl`
+   (`JUTULCO2LAB_BACKEND=CairoMakie` writes figures to files). Without any
+   data sets: `sloping_aquifer.jl`, `residual_trapping.jl`, `dissolution.jl`
+   (co2lab's sloping aquifer, built by `sloping_aquifer`), `layered_fringe.jl`,
+   `hybrid_grid.jl`, `atlas/show_top_surface_grids.jl`,
+   `trapping/first_trapping_example.jl`. With `Johansen/`: `johansen_ve.jl`,
+   `trapping/traps_johansen.jl`. The other `atlas/`, `trapping/`,
+   `inventory/` and `demos/` examples need the Atlas, IGEMS or Sleipner data.
+
+6. The gates against MRST (optional) need Octave (11.1 here; not MATLAB, whose
    Atlas grids differ), MRST on `gigaccs-working-branch`
    (`git clone -b gigaccs-working-branch https://github.com/SINTEF-AppliedCompSci/MRST.git mrst`,
-   reference commit `50d892ad`) and `mrst-data/` (the CO2 Storage Atlas and
-   the Sleipner benchmark; copied, not downloadable). The reference dumps
+   reference commit `50d892ad`) and `mrst-data/` (step 4). The reference dumps
    (`analysis/reference-data/*.mat`) are not in git: the gate scripts
    regenerate missing ones through Octave, the `scripts/mrst_dump_*.m`
    scripts the rest.
