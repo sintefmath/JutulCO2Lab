@@ -112,16 +112,19 @@ roadmap decisions cite them by `file:line`:
   merged upstream, but only in the Jutul 0.5 line, which no JutulDarcy release
   accepts yet (2026-10-06). `../../Jutul.jl` (upstream) is kept at `36166ba6`
   for reference.
-- `JutulDarcy`: `../../JutulDarcy.jl`, the release 0.3.11 (`2c92d4d5`),
-  unmodified.
+- `JutulDarcy`: `../../JutulDarcy.jl`, upstream `main` at `ef1cfca5`
+  (2026-10-03), unmodified: the release 0.3.12 (`cc7c2eac`) plus #288
+  (validation by default, a corner-point fix for degenerate faces) and #289
+  (multisegment-well inertia). Moved from the release 0.3.11 (`2c92d4d5`) on
+  2026-10-09, after the Stage 5 and Stage 8 gates passed on it.
 - `GeoEnergyIO` (ECLIPSE input and corner-point grids): `../../GeoEnergyIO.jl-fork`,
   the researcher's fork (github.com/Oddan/GeoEnergyIO.jl) checked out on
-  branch `co2lab-jutul-merge` (`1495fd3`) = the release 1.1.34 (`31a2556`,
-  the version JutulDarcy 0.3.11 resolved to) plus one fix: releases up to
+  branch `co2lab-jutul-merge` (`6e6f708`) = the release 1.1.34 (`31a2556`,
+  the version the environment had resolved to) plus one fix: releases up to
   1.1.36 tag a boundary face facing an inactive cell of an active
   neighbouring column with the wrong side (`:right`/`:upper` for the cell's
-  left/lower side). The fix is upstream as sintefmath/GeoEnergyIO.jl PR #66
-  (branch `boundary-face-direction`, from upstream `main`).
+  left/lower side). The fix is sintefmath/GeoEnergyIO.jl PR #66, merged
+  upstream on 2026-10-09 (`6e36883`) but not yet in a release.
 
 For a dev-ed package, `Manifest.toml` records only `path` and `version` — no
 commit — so it does **not** pin what actually ran. Every `OracleReport`
@@ -156,7 +159,7 @@ in it are environment problems, not VE problems.
    <parent>/
      co2lab-jutul-merge-work/   this project
      Jutul.jl-fork/             Jutul, the fork's working branch
-     JutulDarcy.jl/             JutulDarcy 0.3.11
+     JutulDarcy.jl/             JutulDarcy, main at ef1cfca5 (0.3.12)
      GeoEnergyIO.jl-fork/       GeoEnergyIO, the fork's working branch
      mrst-data/                 data sets for most examples (step 4)
      mrst/                      only for the gates against MRST (step 6)
@@ -170,7 +173,7 @@ in it are environment problems, not VE problems.
    git clone -b co2lab-jutul-merge https://github.com/Oddan/Jutul.jl.git Jutul.jl-fork
    git clone -b co2lab-jutul-merge https://github.com/Oddan/GeoEnergyIO.jl.git GeoEnergyIO.jl-fork
    git clone https://github.com/sintefmath/JutulDarcy.jl.git JutulDarcy.jl
-   git -C JutulDarcy.jl checkout v0.3.11
+   git -C JutulDarcy.jl checkout ef1cfca5
    ```
 
 3. With Julia 1.12 (1.12.6 here), instantiate the package's and the examples'
@@ -229,7 +232,8 @@ in it are environment problems, not VE problems.
 
 Once a JutulDarcy release accepts Jutul 0.5 and Jutul 0.5.2 (with #360) is
 released, the Jutul fork can give way to registered versions; the GeoEnergyIO
-fork once a release with PR #66 is accepted by the JutulDarcy in use.
+fork once a GeoEnergyIO release with PR #66 (merged, not yet released) is
+accepted by the JutulDarcy in use.
 
 ## The oracle
 
