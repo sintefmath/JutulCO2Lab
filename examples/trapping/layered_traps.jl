@@ -55,7 +55,7 @@ perm, poro = fill(100 * 1e-3 * si_unit(:darcy), nc), fill(0.2, nc)
 # over part of the length, staggered up-dip: deep on the left, shallow on
 # the right. (layer below which they lie, columns)
 layers = [(70, 1:95), (45, 55:150), (20, 115:190)]
-N = get_neighborship(mesh)
+N = get_neighborship(mesh) # cell neighbors for each internal face
 function on_layer(f, (k, cols))
     a, b = ijk[N[1, f]], ijk[N[2, f]]
     return a[1] == b[1] && a[1] in cols && minmax(a[3], b[3]) == (k, k + 1)

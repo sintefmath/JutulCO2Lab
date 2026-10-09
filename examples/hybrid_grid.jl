@@ -14,7 +14,7 @@
 #
 # Fine cells must resolve the plume vertically: a fine cell taller than the
 # CO2 layer smears it, and its low CO2 relperm then holds the plume back
-# (design note §5). Here the cells are 0.5 m, the fringe about 1.7 m.
+# (design note §5). Here the cells are 0.25 m, the fringe about 1.7 m.
 #
 # Plotting backend: GLMakie (a window per figure) by default;
 # JUTULCO2LAB_BACKEND=CairoMakie writes the figures to files instead.
@@ -29,10 +29,11 @@ g = Jutul.gravity_constant
 
 # ------------------------ 1. The aquifer and its rock -------------------------
 
-# As layered_fringe.jl: a cross-section 3 km long, 10 m thick, 100 m wide,
-# 100 columns of 20 cells, the caprock rising 1 % with gentle undulations;
-# ten rock layers, permeability growing upwards from 30 mD to 1 D.
-nx, nz, L, H, W = 100, 20, 3000.0, 10.0, 100.0
+# As layered_fringe.jl, at twice its vertical resolution: a cross-section 3 km
+# long, 10 m thick, 100 m wide, 100 columns of 40 cells (0.25 m), the caprock
+# rising 1 % with gentle undulations; ten rock layers, permeability growing
+# upwards from 30 mD to 1 D.
+nx, nz, L, H, W = 100, 40, 3000.0, 10.0, 100.0
 top(x) = 1100.0 - 0.01 * x + 1.5 * sin(2π * x / 750)
 function aquifer_mesh()
     coord = Float64[]
@@ -97,7 +98,8 @@ function run(is_ve)
     else
         # Peaceman's index for each fine cell; a small wellbore volume (it
         # starts full of CO2)
-        perf = wb[end-3:end]
+        # (the lowest 2 m: nz/5 cells)
+        perf = wb[end-nz÷5+1:end]
         cell(b) = cols.cells[cols.pos[b]]
         WI = [JutulDarcy.compute_peaceman_index(JutulDarcy.cell_dims(mesh, cell(b)),
                                                 perm[cell(b)], 0.1) for b in perf]
@@ -170,3 +172,68 @@ for (row, (name, r)) in enumerate(runs)
 end
 Colorbar(fig[:, 3]; colorrange = (0, 0.8), label = "CO2 saturation")
 show_figure(fig, "hybrid_grid_plumes")
+
+# The same panels on the grid itself: each cell as its own quadrilateral (its
+# corners on the face y = 0), at its true depth. The layer-by-column panels
+# above draw every cell as an equal rectangle, so the caprock's undulations
+# show there as bumps in the saturation; here they are the grid's.
+function cell_outline(c)
+    bf = mesh.boundary_faces
+    nodes = Set(n for f in bf.cells_to_faces[c] for n in bf.faces_to_nodes[f])
+    pts = [Point2f(p[1], p[3]) for p in mesh.node_points[collect(nodes)] if p[2] == 0]
+    # corners in order around the cell's centre
+    m = sum(pts) / length(pts)
+    return Makie.Polygon(sort(pts; by = p -> atan(p[2] - m[2], p[1] - m[1])))
+end
+outlines = cell_outline.(1:nc)
+fig = Figure(size = (1200, 750))
+for (row, (name, r)) in enumerate(runs)
+    for (col, (k, xmax, when)) in enumerate(((24, 20dx, "2 years, near the well"),
+                                             (length(dt), L, "10 years")))
+        local ax = Axis(fig[row, col]; title = "$name — $when", xlabel = "x (m)",
+                        ylabel = "depth (m)", yreversed = true)
+        sG = ve_reconstruct(r.states[k], r.ve, r.columns, r.fluid).sG
+        shown = findall(c -> column(c) * dx <= xmax, 1:nc)
+        poly!(ax, outlines[shown]; color = sG[shown], colorrange = (0, 0.8))
+        edges = [first(fine_pillars) - 1, last(fine_pillars)] .* dx
+        name == "hybrid" && vlines!(ax, edges; color = :white, linestyle = :dash)
+    end
+end
+Colorbar(fig[:, 3]; colorrange = (0, 0.8), label = "CO2 saturation")
+show_figure(fig, "hybrid_grid_plumes_grid")
+
+# The hybrid grid itself: its blocks outlined (black: the faces between cells
+# of different blocks) on the cells' true geometry, the VE columns (blue) and
+# the fine cells around the injector (orange), each fine cell a block of its
+# own; near the well and over the whole aquifer
+hybrid = last(runs[2])
+# a face's two corners on the section y = 0 (none for faces lying in it)
+face_edge(nodes) = [Point2f(p[1], p[3]) for p in mesh.node_points[collect(nodes)]
+                    if p[2] == 0]
+block_lines = Point2f[]
+for f in 1:number_of_faces(mesh)
+    l, r = mesh.faces.neighbors[f]
+    hybrid.columns.partition[l] == hybrid.columns.partition[r] && continue
+    e = face_edge(mesh.faces.faces_to_nodes[f])
+    length(e) == 2 && append!(block_lines, e)
+end
+for f in eachindex(mesh.boundary_faces.neighbors)
+    e = face_edge(mesh.boundary_faces.faces_to_nodes[f])
+    length(e) == 2 && append!(block_lines, e)
+end
+is_fine = [!hybrid.columns.is_ve[hybrid.columns.partition[c]] for c in 1:nc]
+fig = Figure(size = (1200, 650))
+for (row, (xmax, title)) in enumerate(((20dx, "Hybrid grid near the well: VE columns " *
+                                        "(blue) and fine cells (orange)"),
+                                       (L, "The whole aquifer")))
+    local ax = Axis(fig[row, 1]; title, xlabel = "x (m)", ylabel = "depth (m)",
+                    yreversed = true)
+    shown = findall(c -> column(c) * dx <= xmax, 1:nc)
+    poly!(ax, outlines[shown]; color = [is_fine[c] ? :orange : :lightsteelblue
+                                        for c in shown])
+    keep = [k for k in 1:2:length(block_lines)
+            if max(block_lines[k][1], block_lines[k+1][1]) <= xmax + 1e-6]
+    linesegments!(ax, block_lines[[i for k in keep for i in (k, k + 1)]];
+                  color = :black, linewidth = 0.5)
+end
+show_figure(fig, "hybrid_grid_blocks")
