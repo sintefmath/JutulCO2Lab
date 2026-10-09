@@ -5,9 +5,12 @@
 #   0 sealed — all its fine faces sealed: no flow;
 #   1 fine–fine — the ordinary 3D flux;
 #   2 VE–VE, continuous — the two blocks' top cells share a face (the caprock
-#     continues): the ordinary whole-column VE flux;
+#     continues) and every cell of both touches the face (the columns face
+#     each other over their whole height): the ordinary whole-column VE flux;
 #   3 VE–VE, discontinuous — lateral, top cells not connected (a fault offset
-#     larger than the top cell, a pinch-out, stacked blocks): the virtual cell;
+#     larger than the top cell, a pinch-out, stacked blocks), or a block
+#     facing only part of the other (a short column above a layer beside a
+#     full one): the virtual cell, each side over its interval at the face;
 #   4 VE–VE, vertical — stacked blocks through a leaky layer: the virtual cell
 #     over the blocks' adjacent cells;
 #   5 VE–fine, lateral or vertical — the virtual cell over the fine cell's
@@ -59,11 +62,24 @@ function _face_categories(mesh, columns::VEColumns, coarse, fault_flux::Symbol)
         vl != vr && return _FACE_VE_FINE
         columns.column_ij[L] == columns.column_ij[R] && return _FACE_VE_VERTICAL
         fault_flux == :co2lab && single(L) && single(R) && return _FACE_VE
-        # the caprock continues if the blocks' top cells share a face
+        # the caprock continues if the blocks' top cells share a face, and the
+        # whole-column flux holds if they face each other over their heights
         tops = minmax(top(L), top(R))
-        continuous = any(ff -> minmax(mesh.faces.neighbors[ff]...) == tops, F)
+        continuous = any(ff -> minmax(mesh.faces.neighbors[ff]...) == tops, F) &&
+                     _faces_whole_columns(mesh, columns, F, L, R)
         return continuous ? _FACE_VE : _FACE_VE_DISCONTINUOUS
     end
+end
+
+# Whether the fine faces F touch every cell of blocks L and R: the two columns
+# face each other over their whole height. Otherwise part of one faces
+# nothing of the other, and the whole-column flux would spread a plume's
+# mobility over a height the face does not have (a 20 m column beside a
+# 100 m one: its plume flowing as through a fifth of its thickness).
+function _faces_whole_columns(mesh, columns, F, L, R)
+    touched = Set(c for ff in F for c in mesh.faces.neighbors[ff])
+    return all(in(touched), column_cells(columns, L)) &&
+           all(in(touched), column_cells(columns, R))
 end
 
 """

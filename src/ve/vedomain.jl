@@ -356,6 +356,7 @@ function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
     cs = ve_column_sides(mesh, columns)
     g = _boundary_geometry(mesh)
     bdir = _boundary_directions(mesh)
+    ijk = [cell_ijk(mesh, c) for c in 1:number_of_cells(mesh)]
     perm, cc = domain[:permeability], domain[:cell_centroids]
     out = (column = Int[], dir = Int[], depth = Float64[], mid = NTuple{2, Float64}[],
            area = Float64[], cen = NTuple{3, Float64}[], nrm = NTuple{3, Float64}[],
@@ -373,8 +374,9 @@ function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
         centroid = (cc[1, col], cc[2, col], cc[3, col])
         A, C, N, t = _side_aggregate(g, fs, perm[col], centroid)
         # a fine cell's side: its faces' centroid, the depth its flux uses
-        depth, mid = columns.is_ve[col] ? _side_top_edge(g, bdir, top, d, col) :
-                                          (C[3], (C[1], C[2]))
+        depth, mid = columns.is_ve[col] ?
+                     _side_top_edge(g, bdir, _top_face_nodes(mesh, ijk, bdir, top), top,
+                                    d, col) : (C[3], (C[1], C[2]))
 
         push!(out.column, col); push!(out.dir, d)
         push!(out.depth, depth); push!(out.mid, mid)
@@ -405,24 +407,20 @@ function _boundary_geometry(mesh::UnstructuredMesh)
 end
 
 """
-    _side_top_edge(g, bdir, top, d, col) -> (depth, midpoint)
+    _side_top_edge(g, bdir, top_nodes, top, d, col) -> (depth, midpoint)
 
 Caprock edge of column `col`'s side in direction `d`: the two nodes shared by
-the top cell's top face and its boundary faces on that side. Returns their
-mean depth and (x, y) midpoint.
+the top cell's top face (`top_nodes`: a boundary face, or for a column under
+another block the interior face to the cell above) and its boundary faces on
+that side. Returns their mean depth and (x, y) midpoint.
 """
-function _side_top_edge(g, bdir, top, d, col)
-    tops = [f for f in g.c2f[top] if bdir[f] == _TOP]
-    length(tops) == 1 ||
-        error("column $col: top cell $top has $(length(tops)) top boundary faces, " *
-              "expected 1")
-
+function _side_top_edge(g, bdir, top_nodes, top, d, col)
     side_nodes = Set{Int}()
     for f in g.c2f[top]
         bdir[f] == d && union!(side_nodes, g.nodes[f])
     end
 
-    shared = [n for n in g.nodes[tops[1]] if n in side_nodes]
+    shared = [n for n in top_nodes if n in side_nodes]
     length(shared) == 2 ||
         error("column $col, $(_DIRECTIONS[d]) side: top edge has " *
               "$(length(shared)) nodes, expected 2")

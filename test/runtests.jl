@@ -2741,6 +2741,26 @@ end
         @test fine.target_sheet == 0 && !hc.is_ve[fine.target] &&
               hc.cells[hc.pos[fine.target]] == findfirst(==((9, 3, 1)), ijk)
 
+        # a barrier across the whole width: the columns under it touch the
+        # outer boundary; their sides' edges lie at their tops (the barrier)
+        across = [f for f in axes(N, 2) if (a = ijk[N[1, f]]; b = ijk[N[2, f]];
+                  a[1:2] == b[1:2] && 4 <= a[1] <= 8 && minmax(a[3], b[3]) == (3, 4))]
+        fc, _ = ve_columns(m; sealed_faces = across, below_holes = :stack)
+        nc = number_of_cells(m)
+        fv = ve_domain(m, fc; perm_x = fill(1e-13, nc), poro = fill(0.2, nc))
+        fs, _ = ve_boundary_sides(m, fc, fv.domain)
+        lower = findall(.!JutulCO2Lab._first_blocks(fc))
+        # those in the outer rows (j = 1, 6) have sides on the boundary
+        outer = filter(b -> fc.column_ij[b][2] in (1, 6), lower)
+        @test length(lower) == 30 && length(outer) == 10 && all(in(fs.column), outer)
+        # each such side's edge 6 m (three cells) below the same side of the
+        # column above
+        edge(b, d) = only(fs.edge_depth[i] for i in eachindex(fs.column)
+                          if fs.column[i] == b && fs.direction[i] == d)
+        side_of(b) = fc.column_ij[b][2] == 1 ? 3 : 4
+        @test all(isapprox(edge(b, side_of(b)), edge(b - 1, side_of(b)) + 6.0;
+                           atol = 1e-9) for b in outer)
+
         # trap heights for the inventory: per sheet, mapped to the columns
         H = ve_column_geometry(m, cols).H
         zt = JutulCO2Lab._trap_heights(H, [s1, s2], [r1, trap_analysis(s2)])
