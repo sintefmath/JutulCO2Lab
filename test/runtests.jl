@@ -857,15 +857,16 @@ end
             # partial offset: still connected, so no sealed-fault sides
             @test !any(sides.across_fault)
 
-            # The fault's exposed strip above i = 3: upper part of the i = 2 columns'
-            # right side (cells k = 1, 2), tagged :right by Jutul, no-flow. (The strip
-            # below i = 2 on the i = 3 columns' left side is not represented as faces
-            # by GeoEnergyIO at all — MRST's grids have it; cell volumes are
-            # unaffected.)
+            # The fault's two exposed strips, no-flow: above i = 3, the upper part
+            # of the i = 2 columns' right side (cells k = 1, 2, tagged :right); below
+            # i = 2, the lower part of the i = 3 columns' left side (cells k = 2, 3,
+            # tagged :left; GeoEnergyIO 1.1.34 tagged them :right, fixed in the fork,
+            # sintefmath/GeoEnergyIO.jl #66)
             bdir = JutulCO2Lab._boundary_directions(mesh)
-            @test length(unassigned) == 4 && all(==(2), bdir[unassigned])
-            @test all(cell_ijk(mesh, mesh.boundary_faces.neighbors[f])[1] == 2
-                      for f in unassigned)
+            i_of(f) = cell_ijk(mesh, mesh.boundary_faces.neighbors[f])[1]
+            @test length(unassigned) == 8
+            @test sort([(i_of(f), bdir[f]) for f in unassigned]) ==
+                  sort([fill((2, 2), 4); fill((3, 1), 4)])
         end
 
         dir = JutulCO2Lab._logical_direction
