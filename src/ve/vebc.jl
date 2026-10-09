@@ -72,8 +72,8 @@ function ve_select_sides(sides::VEBoundarySides, columns::VEColumns;
     dirs = map(d -> _direction_index(d), collect(directions))
     inrange(x, r) = isnothing(r) || x in r
     keep(s) = sides.direction[s] in dirs &&
-              inrange(columns.pillar[sides.column[s]][1], i) &&
-              inrange(columns.pillar[sides.column[s]][2], j) &&
+              inrange(columns.column_ij[sides.column[s]][1], i) &&
+              inrange(columns.column_ij[sides.column[s]][2], j) &&
               (include_across_fault || !sides.across_fault[s])
 
     return filter(keep, collect(1:length(sides)))

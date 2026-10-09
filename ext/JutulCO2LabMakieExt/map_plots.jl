@@ -55,7 +55,7 @@ end
 
 function plot_ve_outline!(ax, surface; color = :black, linewidth = 2, label = nothing)
     x, y = surface.x, surface.y
-    pts = [Point2f(x[n], y[n]) for e in surface.outline for n in e]
+    pts = Point2f[Point2f(x[n], y[n]) for e in surface.outline for n in e]
     linesegments!(ax, pts; color = color, linewidth = linewidth, label = label)
     return ax
 end
@@ -66,7 +66,7 @@ end
 _polygons(s) = [Point2f.(s.x[p], s.y[p]) for p in s.polygons]
 
 # Segments (x1, y1, x2, y2) as point pairs for linesegments!
-_points(segments) = [Point2f(p...) for s in segments
+_points(segments) = Point2f[Point2f(p...) for s in segments
                      for p in ((s[1], s[2]), (s[3], s[4]))]
 
 # The background poly plot of a map axis, if any (for its colour bar)

@@ -58,7 +58,7 @@ println("\ncolumns: ", number_of_columns(columns), "; discarded cells: ", discar
 for c in 1:number_of_columns(columns)
     cells = column_cells(columns, c)
     @printf("  column %d: pillar %s, cells %s (top to bottom)\n", c,
-            columns.pillar[c], join(cells, ", "))
+            columns.column_ij[c], join(cells, ", "))
 end
 
 # The discarded cells are then removed from the mesh (ve_trim) before the
@@ -89,7 +89,7 @@ plot_ve_surface!(ax, surface; offset = -0.15)
 for c in 1:number_of_columns(columns)
     z = sum(surface.z[surface.polygons[c]]) / length(surface.polygons[c]) - 0.3
     text!(ax, Point3f(surface.xc[c], surface.yc[c], z);
-          text = "$c: $(columns.pillar[c])", align = (:center, :center))
+          text = "$c: $(columns.column_ij[c])", align = (:center, :center))
 end
 show_figure(fig, "tsg_top_surface")
 

@@ -17,26 +17,42 @@ const TRAPPING_CATEGORIES = (:dissolved, :structural_residual, :residual,
 
 # What the inventory needs per column besides the state: static pore volume,
 # height, rugosity (the grid's, if it has one), trap height (from the trap
-# analysis `res` on the trap surface `s`), the pressure dependence of pore
-# volume, the temperature (tabulated properties) and the column-specific
-# vertical model
+# analyses `res` on the trap surfaces `s`: one of each, or vectors, one per
+# sheet), the pressure dependence of pore volume, the temperature (tabulated
+# properties) and the column-specific vertical model
 function _inventory_columns(model, fluid::CO2LabVEFluid, s, res)
     rmodel = JutulDarcy.reservoir_model(model)
     domain = JutulDarcy.reservoir_domain(rmodel)
     H = domain[:column_height]
     dh = haskey(domain, :rugosity, Cells()) ? domain[:rugosity] : zeros(length(H))
-    length(s.zc) == length(H) ||
-        throw(ArgumentError("the trap surface has $(length(s.zc)) columns, the " *
-                            "model $(length(H))"))
-
-    # the height below the caprock that lies in a trap (co2lab's zt)
-    spill(r) = r == 0 ? 0.0 : res.trap_z[r]
-    zt = [min(max(spill(r) - z, 0.0), h) for (r, z, h) in zip(res.trap_regions, s.zc, H)]
+    zt = s isa AbstractVector ? _trap_heights(H, s, res) : _trap_heights(H, [s], [res])
     T = haskey(domain, :temperature, Cells()) ? domain[:temperature] :
         fill(Jutul.default_value(nothing, JutulDarcy.Temperature()), length(H))
     return (pv = JutulDarcy.pore_volume(domain), H = H, dh = dh, zt = zt, T = T,
             pv_mult = _pore_volume_multiplier(rmodel),
             vertical = _vertical_model(fluid.vertical, domain, fluid))
+end
+
+# Per column, the height below its top that lies in a trap (co2lab's zt):
+# from each surface's polygons (its `blocks`; without them, polygon i is
+# column i and the surface must cover every column) and their trap regions;
+# 0 for columns on no surface (fine cells, sheets not given)
+function _trap_heights(H, surfaces, results)
+    length(surfaces) == length(results) ||
+        throw(ArgumentError("one trap analysis per trap surface needed"))
+    zt = zeros(length(H))
+    for (s, res) in zip(surfaces, results)
+        blocks = hasproperty(s, :blocks) ? s.blocks : eachindex(s.zc)
+        (hasproperty(s, :blocks) ? maximum(blocks; init = 0) <= length(H) :
+                                   length(s.zc) == length(H)) ||
+            throw(ArgumentError("the trap surface does not fit the model's " *
+                                "$(length(H)) columns"))
+        spill(r) = r == 0 ? 0.0 : res.trap_z[r]
+        for (i, c) in enumerate(blocks)
+            zt[c] = min(max(spill(res.trap_regions[i]) - s.zc[i], 0.0), H[c])
+        end
+    end
+    return zt
 end
 
 # The pore volume's pressure dependence as a function of pressure: co2lab's
@@ -58,9 +74,12 @@ end
 Where the CO2 of a VE simulation state is, by trapping mechanism — co2lab's
 `massTrappingDistributionVE`. `state` is a reservoir
 state of a run of `model` ([`setup_co2lab_model`](@ref) with `fluid`); `s`
-and `res` are the trap surface ([`trap_surface`](@ref)) and trap analysis
-([`trap_analysis`](@ref)) of the model's columns. The subscale height is the
-grid's rugosity (`:rugosity` of the VE domain), zero if it has none.
+and `res` are a trap surface ([`trap_surface`](@ref)) and its trap analysis
+([`trap_analysis`](@ref)), or vectors of them, one per sheet
+([`ve_sheets`](@ref)) of a grid with several blocks per pillar. Columns on
+none of the surfaces (fine cells, sheets not given) have no structural
+trapping. The subscale height is the grid's rugosity (`:rugosity` of the VE
+domain), zero if it has none.
 
 Each column's immobile (residual) and mobile CO2 is split between the zones
 under the caprock (subscale relief, structural trap, below) by where it lies

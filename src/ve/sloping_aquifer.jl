@@ -118,7 +118,7 @@ function sloping_aquifer(; nz::Integer = 5, ny::Integer = 1, co2_rho = nothing,
     dirs = ny == 1 ? (:right,) : (:left, :right, :lower, :upper)
     open_sides = ve_select_sides(sides, columns; directions = dirs)
 
-    well = findfirst(==((cld(nx, 8), cld(2ny, 5))), columns.pillar)
+    well = findfirst(==((cld(nx, 8), cld(2ny, 5))), columns.column_ij)
     # co2lab's schedule: its cross-section injects twice as long
     year = si_unit(:year)
     inj, n_inj = ny == 1 ? (2year, 24) : (year, 12)

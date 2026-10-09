@@ -16,18 +16,26 @@
 # ---------------------------------- Surface -----------------------------------
 
 """
-    trap_surface(mesh, columns::VEColumns; faults = :sealing) -> NamedTuple
+    trap_surface(mesh, columns::VEColumns; faults = :sealing, sheet = :top)
+        -> NamedTuple
 
 The caprock of a VE domain for trap analysis: [`ve_top_surface`](@ref)'s
 polygons with co2lab's numbering and the quantities co2lab-spillpoint reads
 from its top-surface grid `Gt`.
 
+`sheet` picks the columns: `:top` (default) the first VE block of every
+pillar — the formation's top; on a grid with one block per pillar, every
+column, as co2lab's `Gt` — or a sheet number of [`ve_sheets`](@ref) (a
+contiguous surface of connected top faces, e.g. under an internal layer).
+The surface's other boundary edges are open: CO2 reaching them leaves it
+(upwards, to the sheet above: [`sheet_spill_targets`](@ref)).
+
 Each column's polygon has only the corners of its top face (at most four;
 nodes that faults add on the edges are left out, as co2lab's faces have
 none). Nodes at the same position are one node.
 
-Faults — a column side whose logical neighbour pillar holds a column, but
-whose top edge the neighbour does not share — are
+Faults — a column side whose logical neighbour pillar holds a column of the
+same surface, but whose top edge the neighbour does not share — are
 - `faults = :sealing` (default): closed boundaries. Their edges are marked
   in `sealed`; [`trap_analysis`](@ref) lets no CO2 spill across them.
 - `faults = :open`: stitched as co2lab's `topSurfaceGrid` stitches them (for
@@ -38,9 +46,12 @@ whose top edge the neighbour does not share — are
 A fault without throw leaves no gap in the grid and is not seen.
 
 Returns the NamedTuple `(x, y, z, polygons, corners, edges, edge_columns,
-sealed, zc, H, area, cx, cy, xc, yc, outline)`, all new — a superset of
-[`ve_top_surface`](@ref)'s result, so that the map plots and
-[`ve_contour_lines`](@ref) take it too:
+sealed, zc, H, area, cx, cy, xc, yc, outline, blocks)`, all new — a superset
+of [`ve_top_surface`](@ref)'s result, so that the map plots and
+[`ve_contour_lines`](@ref) take it too. Its "columns" are its polygons,
+numbered `1:length(blocks)`; `blocks[i]` is polygon `i`'s column of
+`columns` (`1:n` with one block per pillar), and every per-column quantity
+here and in [`trap_analysis`](@ref)'s result is per polygon:
 - `x`, `y`, `z`: node coordinates and caprock depths, nodes sorted by
   `(x, y, z)` as co2lab's `uniqueNodes` (stitched nodes moved);
 - `polygons[col]`: the column's top-face nodes;
@@ -59,13 +70,16 @@ sealed, zc, H, area, cx, cy, xc, yc, outline)`, all new — a superset of
 - `area`, `cx`, `cy`: the area and centroid of each column's polygon in map
   view (co2lab's `Gt.cells.volumes`, `Gt.cells.centroids`);
 - `xc`, `yc`: the mean of each polygon's nodes, as [`ve_top_surface`](@ref);
-- `outline`: boundary edges as node pairs, as [`ve_top_surface`](@ref).
+- `outline`: boundary edges as node pairs, as [`ve_top_surface`](@ref);
+- `blocks`: the column of `columns` of each polygon.
 `mesh` and `columns` are only read.
 """
-function trap_surface(mesh, columns::VEColumns; faults::Symbol = :sealing)
+function trap_surface(mesh, columns::VEColumns; faults::Symbol = :sealing,
+                      sheet = :top)
     faults in (:sealing, :open) ||
         throw(ArgumentError("faults must be :sealing or :open, got :$faults"))
-    s = ve_top_surface(mesh, columns)
+    blocks = _surface_blocks(mesh, columns, sheet)
+    s = ve_top_surface(mesh, columns; blocks)
     geo = ve_column_geometry(mesh, columns)
 
     # corners only (faults leave extra nodes on edges), and the edges on faults
@@ -78,7 +92,7 @@ function trap_surface(mesh, columns::VEColumns; faults::Symbol = :sealing)
     # open faults: joined as co2lab's topSurfaceGrid does; nothing left to seal
     if faults == :open
         x, y, z, polygons = _stitch_faults(x, y, z, polygons,
-                                           _column_connections(mesh, columns))
+                                           _column_connections(mesh, columns, blocks))
         empty!(fault_pairs)
     end
 
@@ -97,9 +111,9 @@ function trap_surface(mesh, columns::VEColumns; faults::Symbol = :sealing)
     yc = [sum(y[p]) / length(p) for p in polygons]
     return (x = x, y = y, z = z, polygons = polygons,
             corners = corners, edges = edges, edge_columns = edge_columns,
-            sealed = sealed, zc = geo.z_top, H = geo.H,
+            sealed = sealed, zc = geo.z_top[blocks], H = geo.H[blocks],
             area = area, cx = cx, cy = cy, xc = xc, yc = yc,
-            outline = _outline_edges(polygons))
+            outline = _outline_edges(polygons), blocks = blocks)
 end
 
 # The nodes used by the polygons, sorted by (x, y, z), equal positions merged
@@ -141,18 +155,20 @@ end
 
 # The edges of the corner polygons that lie on a fault, as pairs of surface
 # nodes of `s` (ve_top_surface): an edge on a side of its column whose logical
-# neighbour pillar holds a column; the side from the top cell's lateral faces
-# that contain the edge's raw pieces (`keep`: each polygon's corner positions)
+# neighbour pillar holds a column of the surface; the side from the top
+# cell's lateral faces that contain the edge's raw pieces (`keep`: each
+# polygon's corner positions)
 function _fault_edges(mesh, columns, s, keep)
     ijk = [cell_ijk(mesh, c) for c in 1:number_of_cells(mesh)]
     bdir = _boundary_directions(mesh)
-    pillars = Set(columns.pillar)
+    pillars = Set(columns.column_ij[s.blocks])
     out = Set{Tuple{Int, Int}}()
-    for (col, p) in enumerate(s.polygons)
+    for (i, p) in enumerate(s.polygons)
+        col = s.blocks[i]
         top = columns.cells[columns.pos[col]]
         sides = _lateral_face_nodes(mesh, ijk, bdir, top)
-        fault(d) = _logical_neighbour_pillar(columns.pillar[col], d) in pillars
-        k, n = keep[col], length(p)
+        fault(d) = _logical_neighbour_pillar(columns.column_ij[col], d) in pillars
+        k, n = keep[i], length(p)
         for (i, a) in enumerate(k)
             b = k[mod1(i + 1, length(k))]
             # the raw pieces from corner a to corner b, cyclically
@@ -191,9 +207,13 @@ end
 
 # ------------------------------- Fault stitching ------------------------------
 
-# Pairs (a < b) of columns connected by a face of the 3D grid
-function _column_connections(mesh, columns)
-    col = columns.partition
+# Pairs (a < b) of the surface's polygons whose columns (`blocks`) are
+# connected by a face of the 3D grid
+function _column_connections(mesh, columns, blocks)
+    # each cell's polygon (0: its column is not on the surface)
+    poly = zeros(Int, number_of_columns(columns))
+    poly[blocks] = eachindex(blocks)
+    col = [b == 0 ? 0 : poly[b] for b in columns.partition]
     pairs = Set{Tuple{Int, Int}}()
     for (c1, c2) in eachcol(get_neighborship(mesh))
         a, b = col[c1], col[c2]

@@ -662,7 +662,7 @@ end
                   length(sides)
             right = ve_select_sides(sides, cols; directions = (:right,), j = 1:20)
             @test all(sides.direction[right] .== 2)
-            @test all(cols.pillar[c][2] <= 20 for c in sides.column[right])
+            @test all(cols.column_ij[c][2] <= 20 for c in sides.column[right])
             @test_throws ArgumentError ve_select_sides(sides, cols; directions = (:top,))
         end
     end
@@ -742,7 +742,7 @@ end
             # the same columns; one side per outer edge of co2lab's Gt (GeoEnergyIO's
             # side directions corrected); co2lab's open boundary from its ranges
             mcols, _ = ve_columns(ve_mesh_from_mrst(G3))
-            @test jo.columns.pillar == mcols.pillar
+            @test jo.columns.column_ij == mcols.column_ij
             Nt = Int.(d["Gt"]["faces"]["neighbors"])
             @test length(jo.sides) == count((Nt[:, 1] .== 0) .| (Nt[:, 2] .== 0))
             sel(dir, i, j) = ve_select_sides(jo.sides, jo.columns; directions = (dir,),
@@ -810,7 +810,7 @@ end
 
             # fully offset faults: logical neighbour exists, no connection
             @test count(sides.across_fault) == 88
-            fault_i = Set(cols.pillar[c][1] for c in sides.column[sides.across_fault])
+            fault_i = Set(cols.column_ij[c][1] for c in sides.column[sides.across_fault])
             @test fault_i == Set([43, 44, 78, 79])
         end
 
@@ -914,7 +914,7 @@ end
 
         cols, disc = ve_columns(m; below_holes = :stack)
         @test pillar_ks(m, cols) == [[1], [3], [1], [3], [1, 2, 3]] && isempty(disc)
-        @test cols.pillar == [(1, 1), (1, 1), (2, 1), (2, 1), (3, 1)]
+        @test cols.column_ij == [(1, 1), (1, 1), (2, 1), (2, 1), (3, 1)]
 
         # column 5 (pillar 3) faces both stacked columns of pillar 2 on its left;
         # its left face at shale depth is exposed (no-flow), not an outer side
@@ -2686,6 +2686,66 @@ end
             @test all(isapprox.(JutulCO2Lab._utm_rezone(x33, y33, 33, 31),
                                 JutulCO2Lab._utm_forward(60.4, 5.3, 31); atol = 1e-3))
         end
+    end
+
+    @testset "sheets: trap analysis per internal layer" begin
+        # a sloping aquifer, 12 x 6 x 6, with a sealed barrier between layers 3
+        # and 4 under pillars 4-8 x 2-5 (the first trap's dome)
+        grid = sloping_aquifer_grid(; nx = 12, ny = 6, nz = 6, length = 1200.0,
+                                    width = 600.0, thickness = 12.0, slope = 0.01,
+                                    traps = ((0.5, 0.4, 6.0),))
+        m = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+        ijk = [cell_ijk(m, c) for c in 1:number_of_cells(m)]
+        patch(i, j) = 4 <= i <= 8 && 2 <= j <= 5
+        N = get_neighborship(m)
+        layer(f, k) = (a = ijk[N[1, f]]; b = ijk[N[2, f]];
+                       a[1:2] == b[1:2] && patch(a[1], a[2]) && minmax(a[3], b[3]) == k)
+        barrier = [f for f in axes(N, 2) if layer(f, (3, 4))]
+        plain, _ = ve_columns(m)
+        cols, _ = ve_columns(m; sealed_faces = barrier, below_holes = :stack)
+        sh = ve_sheets(m, cols)
+        @test sh.nsheets == 2 && sh.top == [true, false]
+        @test count(==(2), sh.sheet) == 20 && count(==(1), sh.sheet) == 72
+        @test ve_sheets(m, plain).nsheets == 1
+
+        # the top sheet: the plain grid's surface (only the column heights differ)
+        s0, s1 = trap_surface(m, plain), trap_surface(m, cols)
+        @test s0.blocks == 1:72 && s1.blocks == findall(==(1), sh.sheet)
+        @test all(getproperty(s0, k) == getproperty(s1, k)
+                  for k in (:x, :y, :z, :polygons, :edges, :edge_columns, :sealed, :zc))
+        r0, r1 = trap_analysis(s0), trap_analysis(s1)
+        @test r0.traps == r1.traps && r0.trap_z == r1.trap_z
+
+        # the sheet under the barrier: its own trap, every rim edge open, CO2
+        # leaving it rises into the neighbouring pillar's column (the top sheet)
+        s2 = trap_surface(m, cols; sheet = 2)
+        @test length(s2.blocks) == 20 && !any(s2.sealed)
+        @test all(cols.column_ij[b][1] in 4:8 for b in s2.blocks)
+        @test length(trap_analysis(s2).trap_z) == 1
+        t = sheet_spill_targets(m, cols, s2)
+        @test length(t) == 2 * (5 + 4) && all(x -> x.target_sheet == 1, t)
+        adjacent(a, b) = sum(abs, cols.column_ij[a] .- cols.column_ij[b]) == 1
+        @test all(x -> adjacent(x.block, x.target) && sh.sheet[x.block] == 2, t)
+        @test_throws ArgumentError trap_surface(m, cols; sheet = 3)
+
+        # the barrier as a fine layer (layers 3-4 fine) and a fine pillar beside
+        # the patch: the same lower sheet; CO2 over that rim edge stays fine
+        isve = [!(patch(x[1], x[2]) && x[3] in (3, 4)) && x[1:2] != (9, 3) for x in ijk]
+        hc, _ = ve_columns(m; is_ve = isve)
+        hs = ve_sheets(m, hc)
+        @test hs.nsheets == 2 && count(==(2), hs.sheet) == 20 &&
+              count(==(0), hs.sheet) == 46
+        ht = sheet_spill_targets(m, hc, trap_surface(m, hc; sheet = 2))
+        fine = only(filter(x -> hc.column_ij[x.block] == (8, 3) &&
+                                hc.column_ij[x.target] == (9, 3), ht))
+        @test fine.target_sheet == 0 && !hc.is_ve[fine.target] &&
+              hc.cells[hc.pos[fine.target]] == findfirst(==((9, 3, 1)), ijk)
+
+        # trap heights for the inventory: per sheet, mapped to the columns
+        H = ve_column_geometry(m, cols).H
+        zt = JutulCO2Lab._trap_heights(H, [s1, s2], [r1, trap_analysis(s2)])
+        @test any(>(0), zt[s2.blocks]) && any(>(0), zt[s1.blocks])
+        @test zt == JutulCO2Lab._trap_heights(H, [s2, s1], [trap_analysis(s2), r1])
     end
 
     @testset "trapping analysis vs co2lab-spillpoint (Stage 8)" begin

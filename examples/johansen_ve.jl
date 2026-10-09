@@ -73,7 +73,7 @@ bc = ve_boundary_conditions(ve, sides, open_sides; pressure = hydrostatic)
 # One injector far down-dip near the major sealing fault, in the column of
 # pillar (48, 48), 3.5 Mt of CO2 a year for 50 years; then 950 years of
 # migration in 10-year report steps.
-well_column = findfirst(==((48, 48)), columns.pillar)
+well_column = findfirst(==((48, 48)), columns.column_ij)
 well = setup_ve_well(ve, well_column; name = :inj)
 # (the rate as a volume at the fluid's reference CO2 density)
 inject = co2_injector_control(TotalRateTarget(3.5e9 / year / fluid.rho_ref[2]), fluid)
@@ -91,7 +91,7 @@ p0 = hydrostatic.(ve.geometry.z_top)
 state0 = setup_co2lab_state(model; pressure = p0, forces = f_inj)
 prm = setup_parameters(model)
 run = JutulCase(model, dt, forces; state0 = state0, parameters = prm)
-sim, cfg = setup_co2lab_simulator(run; info_level = -1)
+sim, cfg = setup_co2lab_simulator(run; info_level = 1)
 t = @elapsed result = simulate_reservoir(run; simulator = sim, config = cfg)
 @printf("1000 years simulated in %.0f s\n", t)
 

@@ -10,26 +10,33 @@
 # ------------------------------- The top surface -------------------------------
 
 """
-    ve_top_surface(mesh, columns::VEColumns) -> NamedTuple
+    ve_top_surface(mesh, columns::VEColumns; blocks = 1:number_of_columns(columns))
+        -> NamedTuple
 
-The caprock of a VE domain in map view: each column's top face (the top face
-of its top cell) as a polygon.
+The caprock of a VE domain in map view: the top face of each column in
+`blocks` (the top face of its top cell) as a polygon. With all columns of a
+grid with several blocks per pillar (stacked columns, hybrid grids) the
+polygons of a pillar overlap; [`trap_surface`](@ref) takes one sheet. A top
+cell must have one top face (corner-point grids: faults lie between pillars);
+an error is thrown otherwise.
 
-Returns the NamedTuple `(x, y, z, polygons, xc, yc, outline, mesh_nodes)`,
-all new: `x`, `y`, `z` the coordinates of the surface's nodes (`z` the caprock
-depth there); `polygons[col]` the node indices of column `col`'s top face, in
-the face's order (a collapsed pillar edge gives a triangle); `xc`, `yc` the
-mean of each polygon's nodes; `outline` the node pairs of the edges used by
-only one polygon (the domain's lateral boundary, holes included);
-`mesh_nodes` the node of `mesh` each surface node is. `mesh` and `columns`
-are only read.
+Returns the NamedTuple `(x, y, z, polygons, xc, yc, outline, mesh_nodes,
+blocks)`, all new: `x`, `y`, `z` the coordinates of the surface's nodes (`z`
+the caprock depth there); `polygons[i]` the node indices of the top face of
+column `blocks[i]`, in the face's order (a collapsed pillar edge gives a
+triangle); `xc`, `yc` the mean of each polygon's nodes; `outline` the node
+pairs of the edges used by only one polygon (the lateral boundary, holes
+included); `mesh_nodes` the node of `mesh` each surface node is; `blocks`
+(a `Vector{Int}`) the column of each polygon. `mesh` and `columns` are only
+read.
 """
-function ve_top_surface(mesh, columns::VEColumns)
+function ve_top_surface(mesh, columns::VEColumns;
+                        blocks = 1:number_of_columns(columns))
     bdir = _boundary_directions(mesh)
     ijk = [cell_ijk(mesh, c) for c in 1:number_of_cells(mesh)]
-    ncol = number_of_columns(columns)
+    blocks = collect(Int, blocks)
     faces = [_top_face_nodes(mesh, ijk, bdir, columns.cells[columns.pos[c]])
-             for c in 1:ncol]
+             for c in blocks]
 
     # number the nodes of the surface
     index = Dict{Int, Int}()
@@ -45,21 +52,21 @@ function ve_top_surface(mesh, columns::VEColumns)
     xc = [sum(x[p]) / length(p) for p in polygons]
     yc = [sum(y[p]) / length(p) for p in polygons]
     return (x = x, y = y, z = z, polygons = polygons, xc = xc, yc = yc,
-            outline = _outline_edges(polygons), mesh_nodes = nodes)
+            outline = _outline_edges(polygons), mesh_nodes = nodes, blocks = blocks)
 end
 
-# Nodes of cell c's top face (boundary face, or interior face if stacked)
+# Nodes of cell c's top face: a boundary face, or the interior face to the
+# cell above (a block below another block, or below fine cells); exactly one
 function _top_face_nodes(mesh, ijk, bdir, c)
-    for f in mesh.boundary_faces.cells_to_faces[c]
-        bdir[f] == _TOP && return collect(mesh.boundary_faces.faces_to_nodes[f])
-    end
-
-    # a stacked column's top face is an interior face
+    tops = [collect(mesh.boundary_faces.faces_to_nodes[f])
+            for f in mesh.boundary_faces.cells_to_faces[c] if bdir[f] == _TOP]
     for f in mesh.faces.cells_to_faces[c]
         d, _ = _interior_face_direction(mesh, ijk, c, f)
-        d == _TOP && return collect(mesh.faces.faces_to_nodes[f])
+        d == _TOP && push!(tops, collect(mesh.faces.faces_to_nodes[f]))
     end
-    error("cell $c: no top face")
+    length(tops) == 1 ||
+        error("cell $c ($(ijk[c])) has $(length(tops)) top faces, expected one")
+    return only(tops)
 end
 
 # Edges (node pairs, smaller first) that belong to exactly one polygon

@@ -35,7 +35,7 @@ function plot_traps!(ax, s, res; regions = true, trap_values = nothing,
 
     # rivers through the column centroids
     if rivers
-        pts = [Point2f(s.cx[c], s.cy[c]) for rt in res.rivers for r in rt
+        pts = Point2f[Point2f(s.cx[c], s.cy[c]) for rt in res.rivers for r in rt
                for (a, b) in zip(r[1:end-1], r[2:end]) for c in (a, b)]
         linesegments!(ax, pts; color = :black, linewidth = 1)
     end
@@ -48,7 +48,8 @@ function plot_traps!(ax, s, res; regions = true, trap_values = nothing,
     outline && plot_ve_outline!(ax, s)
     # sealing faults over the outline
     if faults && hasproperty(s, :sealed) && any(s.sealed)
-        pts = [Point2f(s.x[n], s.y[n]) for k in findall(s.sealed) for n in s.edges[:, k]]
+        pts = Point2f[Point2f(s.x[n], s.y[n]) for k in findall(s.sealed)
+                      for n in s.edges[:, k]]
         linesegments!(ax, pts; color = :red3, linewidth = 3)
     end
     return ax

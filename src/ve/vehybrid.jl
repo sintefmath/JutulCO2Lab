@@ -46,9 +46,10 @@ function _face_categories(mesh, columns::VEColumns, coarse, fault_flux::Symbol)
     # VE blocks per pillar: co2lab's smooth flux only where a pillar has one
     nve = Dict{Tuple{Int, Int}, Int}()
     for b in eachindex(columns.is_ve)
-        columns.is_ve[b] && (nve[columns.pillar[b]] = get(nve, columns.pillar[b], 0) + 1)
+        ij = columns.column_ij[b]
+        columns.is_ve[b] && (nve[ij] = get(nve, ij, 0) + 1)
     end
-    single(b) = nve[columns.pillar[b]] == 1
+    single(b) = nve[columns.column_ij[b]] == 1
     map(1:number_of_faces(coarse)) do f
         L, R = coarse.face_neighbors[f]
         F = coarse.coarse_faces_to_fine[f]
@@ -56,7 +57,7 @@ function _face_categories(mesh, columns::VEColumns, coarse, fault_flux::Symbol)
         vl, vr = columns.is_ve[L], columns.is_ve[R]
         !vl && !vr && return _FACE_FINE
         vl != vr && return _FACE_VE_FINE
-        columns.pillar[L] == columns.pillar[R] && return _FACE_VE_VERTICAL
+        columns.column_ij[L] == columns.column_ij[R] && return _FACE_VE_VERTICAL
         fault_flux == :co2lab && single(L) && single(R) && return _FACE_VE
         # the caprock continues if the blocks' top cells share a face
         tops = minmax(top(L), top(R))

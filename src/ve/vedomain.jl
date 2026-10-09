@@ -242,8 +242,8 @@ geothermal_gradient(; T_ref, z_ref = 0.0, gradient) =
 # Number of columns in each column's pillar.
 function _pillar_columns(columns::VEColumns)
     n = Dict{Tuple{Int, Int}, Int}()
-    foreach(p -> n[p] = get(n, p, 0) + 1, columns.pillar)
-    return [n[p] for p in columns.pillar]
+    foreach(p -> n[p] = get(n, p, 0) + 1, columns.column_ij)
+    return [n[p] for p in columns.column_ij]
 end
 
 """
@@ -362,7 +362,7 @@ function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
            T = Float64[], faces = Vector{Int}[], fault = Bool[])
 
     # pillars that hold a column (for the fault check below)
-    occupied = Set(columns.pillar)
+    occupied = Set(columns.column_ij)
 
     for s in 1:length(cs)
         # outer sides only: no column connected beyond
@@ -382,7 +382,7 @@ function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
         push!(out.T, t); push!(out.faces, fs)
 
         # a column exists across this side, but nothing connects to it: sealed fault
-        across = _logical_neighbour_pillar(columns.pillar[col], d)
+        across = _logical_neighbour_pillar(columns.column_ij[col], d)
         push!(out.fault, across in occupied)
     end
 

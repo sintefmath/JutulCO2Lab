@@ -127,14 +127,30 @@ end
 # (co2lab's Gt.cells.centroids) to the side
 function _injection_bc(a, ve, sides, types, p_of_z, L, dissolved)
     ix = findall(!=(:closed), types)
-    s = trap_surface(a.mesh, a.columns)
+    cx, cy = _top_face_centroids(a.mesh, a.columns)
     trans = map(ix) do k
         c, (ex, ey) = sides.column[k], sides.edge_midpoint[k]
-        d = hypot(s.cx[c] - ex, s.cy[c] - ey)
+        d = hypot(cx[c] - ex, cy[c] - ey)
         sides.half_trans[k] * (types[k] == :semi_open ? d / (d + L) : 1.0)
     end
     return ve_boundary_conditions(ve, sides, ix; pressure = p_of_z, trans,
                                   dissolved)
+end
+
+# Map-view centroid of each column's top face: the trap surface's (co2lab's
+# Gt.cells.centroids) for the formation's top, the raw top face's for columns
+# below it (stacked or hybrid grids)
+function _top_face_centroids(mesh, columns)
+    n = number_of_columns(columns)
+    cx, cy = fill(NaN, n), fill(NaN, n)
+    s = trap_surface(mesh, columns)
+    cx[s.blocks], cy[s.blocks] = s.cx, s.cy
+    rest = setdiff(1:n, s.blocks)
+    isempty(rest) && return (cx, cy)
+    t = ve_top_surface(mesh, columns; blocks = rest)
+    _, x, y = _polygon_geometry(t.x, t.y, t.polygons)
+    cx[rest], cy[rest] = x, y
+    return (cx, cy)
 end
 
 """

@@ -271,13 +271,13 @@ function _draw!(v)
     v.plots[:vcols] = _surface_triangles(s, 0.0)[3]
 
     δ = _lift(s)
-    pts = [Point3f(s.cx[k], s.cy[k], s.zc[k] - δ) for rt in res.rivers for r in rt
+    pts = Point3f[Point3f(s.cx[k], s.cy[k], s.zc[k] - δ) for rt in res.rivers for r in rt
            for (a, b) in zip(r[1:end-1], r[2:end]) for k in (a, b)]
     isempty(pts) || linesegments!(v.ax, pts; color = :black, linewidth = 1,
                                   depth_shift = -1f-4)
     plot_ve_outline!(v.ax, s)
     if hasproperty(s, :sealed) && any(s.sealed)
-        pts = [Point3f(s.x[n], s.y[n], s.z[n] - δ) for k in findall(s.sealed)
+        pts = Point3f[Point3f(s.x[n], s.y[n], s.z[n] - δ) for k in findall(s.sealed)
                for n in s.edges[:, k]]
         linesegments!(v.ax, pts; color = :red3, linewidth = 3, depth_shift = -1f-4)
     end
@@ -296,8 +296,8 @@ function _contour_plot!(ax, s)
     zmin, zmax = extrema(s.z)
     levels = range(zmin, zmax; length = 12)[2:end-1]
     lines = JutulCO2Lab.ve_contour_lines(s, s.z, levels)
-    pts = [Point3f(g[i], g[i+1], level - _lift(s)) for (level, segs) in zip(levels, lines)
-           for g in segs for i in (1, 3)]
+    pts = Point3f[Point3f(g[i], g[i+1], level - _lift(s))
+                  for (level, segs) in zip(levels, lines) for g in segs for i in (1, 3)]
     return linesegments!(ax, pts; color = :black, linewidth = 0.5, depth_shift = -1f-4)
 end
 
@@ -506,7 +506,7 @@ function _pie!(v, values, names)
                                            zip([0.0; ends[1:end-1]], ends)])
     # the title at the top, the names beside the pie
     Makie.update!(v.charts.title; arg1 = Point2f(x0 + 0.5w, y0 + h))
-    at = [Point2f(x0 + 0.72w, c[2] + 18 - 18k) for k in 0:2]
+    at = Point2f[Point2f(x0 + 0.72w, c[2] + 18 - 18k) for k in 0:2]
     Makie.update!(v.charts.names; arg1 = at, text = names)
 end
 
@@ -528,10 +528,10 @@ function _bars!(v, values, colours)
                       (bx, by)]
     Makie.update!(v.charts.frame; arg1 = corners)
     decades = round.(Int, range(0, top; length = 3))
-    marks = [Point2f(bx - 4, by + bh * d / top) for d in decades]
+    marks = Point2f[Point2f(bx - 4, by + bh * d / top) for d in decades]
     Makie.update!(v.charts.ticks; arg1 = marks,
                   text = [d == 0 ? "1" : "1e$d" for d in decades])
-    Makie.update!(v.charts.labels; arg1 = [Point2f(x0 + 12, by + bh / 2),
+    Makie.update!(v.charts.labels; arg1 = Point2f[Point2f(x0 + 12, by + bh / 2),
                                            Point2f(bx + bw / 2, by - 4)])
 end
 

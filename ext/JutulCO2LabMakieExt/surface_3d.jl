@@ -29,7 +29,7 @@ function plot_ve_surface!(ax, surface; color = (:steelblue, 0.6), offset = 0.0,
     _surface_mesh!(ax, surface; color, offset, colormap, shading, smooth)
     if strokewidth > 0
         x, y, z = surface.x, surface.y, surface.z .+ offset
-        edges = [Point3f(x[n], y[n], z[n]) for p in surface.polygons
+        edges = Point3f[Point3f(x[n], y[n], z[n]) for p in surface.polygons
                  for (k, a) in enumerate(p) for n in (a, p[mod1(k + 1, length(p))])]
         linesegments!(ax, edges; color = strokecolor, linewidth = strokewidth,
                       transparency = _translucent(strokecolor))
@@ -121,7 +121,7 @@ _lift(surface) = 2e-3 * max(-(reverse(extrema(surface.z))...), 1.0)
 function plot_ve_outline!(ax::Axis3, surface; color = :black, linewidth = 2,
                           label = nothing)
     x, y, z = surface.x, surface.y, surface.z .- _lift(surface)
-    pts = [Point3f(x[n], y[n], z[n]) for e in surface.outline for n in e]
+    pts = Point3f[Point3f(x[n], y[n], z[n]) for e in surface.outline for n in e]
     linesegments!(ax, pts; color = color, linewidth = linewidth, label = label,
                   depth_shift = -1f-4)
     return ax
@@ -143,8 +143,9 @@ function plot_ve_map!(ax::Axis3, surface; background = nothing, colormap = :viri
         zmin, zmax = extrema(surface.z)
         levels = range(zmin, zmax; length = depth_contours + 2)[2:end-1]
         lines = JutulCO2Lab.ve_contour_lines(surface, surface.z, levels)
-        pts = [Point3f(s[i], s[i+1], level - δ) for (level, segs) in zip(levels, lines)
-               for s in segs for i in (1, 3)]
+        pts = Point3f[Point3f(s[i], s[i+1], level - δ)
+                      for (level, segs) in zip(levels, lines)
+                      for s in segs for i in (1, 3)]
         linesegments!(ax, pts; color = :black, linewidth = 0.5, depth_shift = -1f-4)
     end
 
@@ -157,7 +158,7 @@ function plot_ve_map!(ax::Axis3, surface; background = nothing, colormap = :viri
     # wells as vertical lines above their columns (from the polygon's mean depth)
     if !isempty(wells)
         ztop(c) = (q = unique(surface.polygons[c]); sum(surface.z[q]) / length(q))
-        pts = [Point3f(surface.xc[c], surface.yc[c], ztop(c) - t)
+        pts = Point3f[Point3f(surface.xc[c], surface.yc[c], ztop(c) - t)
                for c in wells for t in (0.0, 50δ)]
         linesegments!(ax, pts; color = :black, linewidth = 3)
     end
@@ -176,8 +177,10 @@ function plot_traps!(ax::Axis3, s, res; regions = true, trap_values = nothing,
 
     # rivers through the column centroids, at the caprock
     if rivers
-        pts = [Point3f(s.cx[c], s.cy[c], s.zc[c] - δ) for rt in res.rivers for r in rt
-               for (a, b) in zip(r[1:end-1], r[2:end]) for c in (a, b)]
+        # typed: a surface whose traps have no rivers gives an empty list
+        pts = Point3f[Point3f(s.cx[c], s.cy[c], s.zc[c] - δ) for rt in res.rivers
+                      for r in rt for (a, b) in zip(r[1:end-1], r[2:end])
+                      for c in (a, b)]
         linesegments!(ax, pts; color = :black, linewidth = 1, depth_shift = -1f-4)
     end
     if labels
@@ -189,7 +192,7 @@ function plot_traps!(ax::Axis3, s, res; regions = true, trap_values = nothing,
     end
     outline && plot_ve_outline!(ax, s)
     if faults && hasproperty(s, :sealed) && any(s.sealed)
-        pts = [Point3f(s.x[n], s.y[n], s.z[n] - δ) for k in findall(s.sealed)
+        pts = Point3f[Point3f(s.x[n], s.y[n], s.z[n] - δ) for k in findall(s.sealed)
                for n in s.edges[:, k]]
         linesegments!(ax, pts; color = :red3, linewidth = 3, depth_shift = -1f-4)
     end

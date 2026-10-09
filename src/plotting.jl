@@ -226,8 +226,10 @@ A 3D axis for a VE top surface (e.g. [`trap_surface`](@ref),
 downwards, the surface's extent at equal lateral scale and its depth range
 `exaggeration` times enlarged, seen from `view = (az, el)` in degrees as
 MATLAB's `view` (so co2lab's views carry over). Rotatable with the mouse in
-GLMakie. Modifies: the figure of `pos` (the axis added). Returns the new
-`Axis3`. `surface` is only read.
+GLMakie. To set its limits, give the depth bounds deepest first
+(`limits!(ax, x1, x2, y1, y2, z_deep, z_shallow)`): Makie's `limits!` with
+the shallow bound first turns the depth axis upwards. Modifies: the figure of
+`pos` (the axis added). Returns the new `Axis3`. `surface` is only read.
 """
 function ve_axis3 end
 

@@ -218,7 +218,7 @@ in it are environment problems, not VE problems.
    data sets: `sloping_aquifer.jl`, `residual_trapping.jl`, `dissolution.jl`
    (co2lab's sloping aquifer, built by `sloping_aquifer`), `layered_fringe.jl`,
    `hybrid_grid.jl`, `atlas/show_top_surface_grids.jl`,
-   `trapping/first_trapping_example.jl`. With `Johansen/`: `johansen_ve.jl`,
+   `trapping/first_trapping_example.jl`, `trapping/sheets.jl`. With `Johansen/`: `johansen_ve.jl`,
    `trapping/traps_johansen.jl`. The other `atlas/`, `trapping/`,
    `inventory/` and `demos/` examples need the Atlas, IGEMS or Sleipner data.
 

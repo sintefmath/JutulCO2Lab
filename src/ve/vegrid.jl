@@ -28,7 +28,8 @@ cell.
 - `cells`: fine cells of all columns, concatenated, each column top→bottom
 - `pos`: column `c` is `cells[pos[c]:pos[c+1]-1]`
 - `partition`: fine cell → column, as `CoarseMesh(mesh, partition)` expects
-- `pillar`: logical `(i, j)` of each column (not unique when stacked)
+- `column_ij`: per column, the logical `(i, j)` of its pillar (one entry per
+  column, so a pillar holding several columns appears several times)
 - `is_ve`: per column, `true` for a VE block, `false` for a fine 3D cell
 - `sealed`, `leaky`: the interior faces of the mesh given as sealed (no
   flow) and as leaky (cut into blocks, flow kept), sorted
@@ -38,13 +39,13 @@ within a pillar — with one column per pillar the order MRST gives the cells
 of its top-surface grid.
 """
 struct VEColumns
-    cells::Vector{Int}               # fine cells, column by column, top first
-    pos::Vector{Int}                 # column c: cells[pos[c]:pos[c+1]-1]
-    partition::Vector{Int}           # fine cell → column
-    pillar::Vector{Tuple{Int, Int}}  # logical (i, j) per column
-    is_ve::Vector{Bool}              # per column: VE block (false: one fine cell)
-    sealed::Vector{Int}              # sealed interior faces (no flow)
-    leaky::Vector{Int}               # leaky interior faces (cut, flow kept)
+    cells::Vector{Int}                  # fine cells, column by column, top first
+    pos::Vector{Int}                    # column c: cells[pos[c]:pos[c+1]-1]
+    partition::Vector{Int}              # fine cell → column
+    column_ij::Vector{Tuple{Int, Int}}  # per column: its pillar's logical (i, j)
+    is_ve::Vector{Bool}                 # per column: VE block (false: one fine cell)
+    sealed::Vector{Int}                 # sealed interior faces (no flow)
+    leaky::Vector{Int}                  # leaky interior faces (cut, flow kept)
 end
 
 """

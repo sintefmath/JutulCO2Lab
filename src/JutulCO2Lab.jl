@@ -110,6 +110,7 @@ export johansen_data_directory, johansen_mesh, johansen_well_point
 export johansen_grid_section, johansen_ve_domain
 
 include("trapping/trap_surface.jl")
+include("trapping/sheets.jl")
 include("trapping/cell_traps.jl")
 include("trapping/node_traps.jl")
 include("trapping/node_to_cells.jl")
@@ -118,6 +119,7 @@ include("trapping/trap_quantities.jl")
 include("trapping/surfaces.jl")
 include("trapping/capacity.jl")
 export trap_surface, trap_analysis, trap_volumes, downstream_traps
+export ve_sheets, sheet_spill_targets
 export maximize_trapping, optimal_injection_point, flatten_traps
 export read_irap_surface, igems_surface_path, igems_mesh, surface_mesh
 export trapping_capacity, reachable_capacity
