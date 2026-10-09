@@ -105,52 +105,6 @@ function _set_boundary_directions!(mesh, dirs)
     return mesh
 end
 
-"""
-    _fix_cpgrid_boundary_directions!(mesh, grid) -> mesh
-
-Correct the lateral `:direction` tags of a mesh built by GeoEnergyIO's
-`mesh_from_grid_section` from the grid section `grid`. Where an active cell
-faces an inactive one across two active pillar columns, GeoEnergyIO tags the
-boundary face with the column pair's direction (`:right`, `:upper`) also when
-the active cell is the right (upper) one (`insert_boundary_face!`,
-GeoEnergyIO ≤ 1.1.36). The axis (`i` or `j`) is right; the side is the one
-whose two pillars (in `COORD`) the face's nodes lie on: topology, so also
-right for folded cells, where geometry is not. Faces with fewer than three
-distinct nodes (no area) keep their tag. Returns `mesh` itself.
-
-Modifies: `mesh` (its entity tags, group `:direction` on `BoundaryFaces()`).
-`grid` is only read.
-"""
-function _fix_cpgrid_boundary_directions!(mesh, grid)
-    dirs = _boundary_directions(mesh)
-    nx, ny = grid["cartDims"][1], grid["cartDims"][2]
-    # pillar (a, b): x, y, z of its top, then of its bottom
-    P = reshape(grid["COORD"], 6, nx + 1, ny + 1)
-    pillar(a, b) = (SVector(P[1, a, b], P[2, a, b], P[3, a, b]),
-                    SVector(P[4, a, b], P[5, a, b], P[6, a, b]))
-    for (f, d) in enumerate(dirs)
-        d > 4 && continue
-        i, j = cell_ijk(mesh, mesh.boundary_faces.neighbors[f])
-        # the pillars of the low side (left/lower) and of the high side
-        low, high = d <= 2 ? (((i, j), (i, j + 1)), ((i + 1, j), (i + 1, j + 1))) :
-                             (((i, j), (i + 1, j)), ((i, j + 1), (i + 1, j + 1)))
-        nodes = mesh.boundary_faces.faces_to_nodes[f]
-        # fewer than three distinct nodes: no area, no side to tell; left as is
-        length(unique(mesh.node_points[n] for n in nodes)) < 3 && continue
-        off(side) = sum(n -> minimum(p -> _line_distance(mesh.node_points[n],
-                                                          pillar(p...)), side), nodes)
-        dirs[f] = (d <= 2 ? 1 : 3) + (off(high) < off(low))
-    end
-    return _set_boundary_directions!(mesh, dirs)
-end
-
-# Distance from point x to the line through a and b (a pillar)
-function _line_distance(x, (a, b))
-    t = b - a
-    v = x - a
-    return norm(v - (dot(v, t) / dot(t, t)) * t)
-end
-
 # -------------- Boundary directions from MRST and after trimming --------------
 
 """

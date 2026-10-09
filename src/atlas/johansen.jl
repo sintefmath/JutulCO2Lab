@@ -186,8 +186,6 @@ function johansen_ve_domain(; min_perm::Real = 0.11, kwargs...)
     # the largest connected piece only, as co2lab's G(1)
     grid["ACTNUM"] = _largest_piece(grid)
     mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
-    # GeoEnergyIO mislabels the sides facing inactive cells of active columns
-    _fix_cpgrid_boundary_directions!(mesh, grid)
     # cells below holes dropped, then the columns of the trimmed mesh
     columns, discarded = ve_columns(mesh)
     mesh = ve_trim(mesh, discarded)

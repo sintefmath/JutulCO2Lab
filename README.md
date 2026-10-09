@@ -101,9 +101,9 @@ decisions ("Deliberate deviations from co2lab").
 
 ## Environment
 
-`Jutul` and `JutulDarcy` are `dev`-ed from sibling checkouts, not from the
-registry — the port tracks those working trees, and several roadmap decisions
-cite them by `file:line`:
+`Jutul`, `JutulDarcy` and `GeoEnergyIO` are `dev`-ed from sibling checkouts,
+not from the registry — the port tracks those working trees, and several
+roadmap decisions cite them by `file:line`:
 
 - `Jutul`: `../../Jutul.jl-fork`, the researcher's fork (github.com/Oddan/Jutul.jl)
   checked out on branch `co2lab-jutul-merge` (`aa88f180`) = the pinned upstream
@@ -114,15 +114,14 @@ cite them by `file:line`:
   for reference.
 - `JutulDarcy`: `../../JutulDarcy.jl`, the release 0.3.11 (`2c92d4d5`),
   unmodified.
-- `GeoEnergyIO` (ECLIPSE input and corner-point grids, used through
-  JutulDarcy): the registered release in `Manifest.toml` (1.1.34), not
-  dev-ed. Up to 1.1.36 it tags some boundary faces with the wrong side (those
-  facing an inactive cell of an active neighbouring column); JutulCO2Lab
-  corrects them where it builds such grids (`johansen_ve_domain`). The fix is
-  sintefmath/GeoEnergyIO.jl PR #66, from the researcher's fork
-  (github.com/Oddan/GeoEnergyIO.jl, branch `boundary-face-direction`, cloned
-  at `../../GeoEnergyIO.jl-fork`); the fork is only for that PR, nothing here
-  uses it.
+- `GeoEnergyIO` (ECLIPSE input and corner-point grids): `../../GeoEnergyIO.jl-fork`,
+  the researcher's fork (github.com/Oddan/GeoEnergyIO.jl) checked out on
+  branch `co2lab-jutul-merge` (`1495fd3`) = the release 1.1.34 (`31a2556`,
+  the version JutulDarcy 0.3.11 resolved to) plus one fix: releases up to
+  1.1.36 tag a boundary face facing an inactive cell of an active
+  neighbouring column with the wrong side (`:right`/`:upper` for the cell's
+  left/lower side). The fix is upstream as sintefmath/GeoEnergyIO.jl PR #66
+  (branch `boundary-face-direction`, from upstream `main`).
 
 For a dev-ed package, `Manifest.toml` records only `path` and `version` — no
 commit — so it does **not** pin what actually ran. Every `OracleReport`
@@ -158,9 +157,9 @@ in it are environment problems, not VE problems.
      co2lab-jutul-merge-work/   this project
      Jutul.jl-fork/             Jutul, the fork's working branch
      JutulDarcy.jl/             JutulDarcy 0.3.11
+     GeoEnergyIO.jl-fork/       GeoEnergyIO, the fork's working branch
      mrst-data/                 data sets for most examples (step 4)
      mrst/                      only for the gates against MRST (step 6)
-     GeoEnergyIO.jl-fork/       not needed (only for GeoEnergyIO PR #66)
    ```
 
 2. Clone them:
@@ -169,6 +168,7 @@ in it are environment problems, not VE problems.
    cd <parent>
    git clone https://github.com/Oddan/co2lab-jutul-merge-work.git   # private
    git clone -b co2lab-jutul-merge https://github.com/Oddan/Jutul.jl.git Jutul.jl-fork
+   git clone -b co2lab-jutul-merge https://github.com/Oddan/GeoEnergyIO.jl.git GeoEnergyIO.jl-fork
    git clone https://github.com/sintefmath/JutulDarcy.jl.git JutulDarcy.jl
    git -C JutulDarcy.jl checkout v0.3.11
    ```
@@ -228,7 +228,8 @@ in it are environment problems, not VE problems.
    scripts the rest.
 
 Once a JutulDarcy release accepts Jutul 0.5 and Jutul 0.5.2 (with #360) is
-released, the fork can give way to registered versions.
+released, the Jutul fork can give way to registered versions; the GeoEnergyIO
+fork once a release with PR #66 is accepted by the JutulDarcy in use.
 
 ## The oracle
 
@@ -355,8 +356,9 @@ src/precompile.jl    precompiled workload: the trap analysis on a small syntheti
                      caprock (no data files)
 
 examples/            readable walkthroughs, with their own environment
-                     (examples/Project.toml: JutulCO2Lab, the Jutul fork,
-                     GLMakie, CairoMakie), run from the project root with
+                     (examples/Project.toml: JutulCO2Lab, the Jutul and
+                     GeoEnergyIO forks, GLMakie, CairoMakie), run from the
+                     project root with
                      scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/...
   atlas/             CO2 Storage Atlas scripts; JUTULCO2LAB_BACKEND=CairoMakie
                      writes figures to ./figures instead of opening windows
