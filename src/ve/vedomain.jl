@@ -135,58 +135,75 @@ end
               ntg = nothing, rugosity = 0.0, temperature = nothing,
               fault_flux = :virtual) -> NamedTuple
 
-Build the VE reservoir domain: a `CoarseMesh` over `mesh`, one block per
-column, with thickness-averaged rock and the gravity term taken from the
-caprock. `rugosity` is the caprock rugosity `dh` (m) — co2lab's makeVEFluid
-option, a property of the grid here — as a scalar or one value per column;
-the relperm loses an accretion layer `min(dh, H)` under the caprock.
-`temperature` (K) is the formation's at the caprock, for tabulated fluid
-properties (co2lab's `reservoirT`): a scalar, one value per column, or a
-function of depth evaluated at each column's caprock (e.g.
-[`geothermal_gradient`](@ref)); `nothing` leaves it to the model (30 °C).
+Build the VE reservoir domain: a `CoarseMesh` over `mesh` with one block per
+column of `columns`, carrying the column-averaged rock and the data the VE
+model needs. Its `domain` is what [`setup_co2lab_model`](@ref) takes.
 
-Stacked columns (`ve_columns(...; below_holes = :stack)`) and hybrid grids
-(fine 3D cells, leaky faces; roadmap Stage 12) are built fully: every coarse
-face gets a category (`vehybrid.jl`: sealed, fine–fine, VE–VE continuous,
-VE–VE discontinuous, VE–VE vertical, VE–fine) with, for the transitions,
-the depth intervals and common depth of the virtual cells, and its
-transmissibility by category (sealed faces 0, continuous VE–VE faces the
-coarse mesh's, the others summed from the fine grid's with `perm_z` for
-vertical faces, default `perm_x`); a warning is given if the blocks fall
-apart into unconnected pieces. Fine cells take their own centroid as gravity
-datum, VE blocks their caprock. `fault_flux`: `:virtual` (default) makes
-faces whose blocks' top cells do not connect discontinuous, with the
-virtual-cell flux (`transition_flux.jl`; researcher, 2026-10-05); `:co2lab`
-treats every lateral VE–VE face between pillars with one VE block each as
-continuous, co2lab's smooth flux across faults (for comparisons with co2lab).
+`columns` may hold stacked columns (`ve_columns(...; below_holes = :stack)`)
+and fine 3D cells (hybrid grids); both are handled in full.
 
-Returns the NamedTuple `(domain, coarse, geometry, rock)`, all new:
-- `domain`: the `DataDomain` on the `CoarseMesh` (from `reservoir_domain`),
-  with the averaged `:permeability`, `:porosity` (and `:net_to_gross`),
-  `:column_height`, `:rugosity` (and `:temperature`) per column, `:is_ve`
-  (`columns.is_ve`), `:reference_depth` (the gravity datum: a VE block's
-  caprock, a fine cell's centroid) and `:pillar_columns` (number of columns
-  in the column's pillar; 1 unless stacked), and on `Faces()` `:gdz` from the reference
-  depths, `:face_category` (0–5), `:face_intervals` (4 × faces, `NaN` but
-  for transitions) and `:face_depth`; `:transmissibilities` only if some face
-  is not continuous VE–VE;
-- `coarse`: that `CoarseMesh` — the same object `domain` wraps;
-- `geometry`: [`ve_column_geometry`](@ref)'s result;
-- `rock`: [`ve_average_rock`](@ref)'s result.
-`mesh` and `columns` are only read.
+# Arguments
 
-Deliberately **not** done, and why:
+- `mesh`, `columns`: the 3D mesh and its column partition
+  ([`ve_columns`](@ref)).
+- `perm_x`, `poro`: lateral permeability (m²) and porosity per fine cell,
+  averaged over each column by thickness.
+- `perm_y`: only checked; VE uses `perm_x` (a warning if they differ).
+- `perm_z`: vertical permeability per fine cell, for vertical faces between
+  blocks (stacked blocks, fine cells); default `perm_x`.
+- `ntg`: net-to-gross per fine cell, averaged like porosity.
+- `rugosity`: the caprock's rugosity `dh` (m), a number or one per column;
+  the relperm loses an accretion layer `min(dh, H)` under the caprock
+  (co2lab's `makeVEFluid` option).
+- `temperature`: the formation's temperature (K) at each column's caprock,
+  for tabulated fluid properties: a number, one per column, or a function of
+  depth (e.g. [`geothermal_gradient`](@ref)). Default: the model's, 30 °C.
+- `fault_flux`: the flux across a face where two columns' caprocks do not
+  meet (a fault): `:virtual` compares the two sides at a common depth;
+  `:co2lab` joins them as one continuous caprock, as co2lab does, between
+  pillars with one block each (for comparisons with co2lab).
 
-- Permeability is **not** multiplied by the column height. On a `CoarseMesh`
-  the height is already in the geometry (face area ≈ edge length × H), so
-  Jutul's default transmissibility reproduces MRST's `perm·H` one; scaling
-  permeability too would double-count.
-- Cell centroids are **left mid-column**. Transmissibilities are computed from
-  them; moving their depth to the caprock would change every transmissibility.
-  The caprock datum enters through `:gdz` instead, which takes precedence over
-  the centroid-based default (`JutulDarcy/src/multiphase.jl:303-308`). Anything
-  else that reads centroid depths must be overridden where it is used — see
-  roadmap Stage 1 item 7.
+# Returns
+
+The NamedTuple `(domain, coarse, geometry, rock)`, all new (`mesh` and
+`columns` are only read):
+
+- `domain`: the `DataDomain` on the `CoarseMesh`, with
+  - per block: the averaged `:permeability`, `:porosity` and `:net_to_gross`
+    (if given); `:column_height`, `:rugosity`, `:temperature` (if given);
+    `:is_ve`; `:reference_depth`, the depth of the block's pressure (a VE
+    block's caprock, a fine cell's centroid); `:pillar_columns`, the number
+    of blocks in its pillar;
+  - per face: `:gdz`, the gravity term from the reference depths;
+    `:face_category`, `:face_intervals`, `:face_depth` (below);
+    `:transmissibilities` if some face is not a continuous VE–VE face.
+- `coarse`: the `CoarseMesh` that `domain` wraps.
+- `geometry`: caprock depth, height and extent per column
+  ([`ve_column_geometry`](@ref)).
+- `rock`: the averaged rock ([`ve_average_rock`](@ref)).
+
+# Faces
+
+Each face has a category: 0 sealed, 1 fine–fine, 2 continuous VE–VE, and
+the transitions 3 discontinuous VE–VE (the columns overlap over part of
+their heights: stacked columns, faults), 4 vertical VE–VE (through a leaky
+layer), 5 VE–fine. A transition face carries each side's depth interval
+(`:face_intervals`) and a common depth (`:face_depth`) for its flux; other
+faces have `NaN` there.
+
+Transmissibilities: 0 across sealed faces, the coarse mesh's for continuous
+VE–VE faces, otherwise the sum over the fine faces. A warning is given if
+the blocks fall apart into unconnected pieces.
+
+# Notes
+
+- Permeability is not multiplied by the column height: the coarse mesh's
+  face areas already contain it, so Jutul's transmissibility equals MRST's
+  `perm·H` one.
+- Block centroids stay mid-column, as the transmissibilities are computed
+  from them. The caprock enters through `:gdz` and `:reference_depth`;
+  anything needing a block's pressure depth must use `:reference_depth`,
+  not the centroid.
 """
 function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing,
                    perm_z = nothing, poro, ntg = nothing, rugosity = 0.0,
