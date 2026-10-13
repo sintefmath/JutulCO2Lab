@@ -2381,6 +2381,40 @@ end
         @test J._fine_pc_saturation(FixedResidual(), 0.1, 0.5, rw, rg) == 0.1
     end
 
+    @testset "Newton updates stopped at relperm kinks in fine cells" begin
+        J = JutulCO2Lab
+        mesh = _cp_mesh(3, 4, (i, k) -> 1000.0 + 1.0 * (k - 1))
+        nc = number_of_cells(mesh)
+        perm, poro = fill(1e-13, nc), fill(0.2, nc)
+        # a critical saturation of 0.15 (= r_g, one kink), or of 0.1 (two)
+        crit(sc) = s -> s <= sc ? 0.0 : (s - sc) / (0.8 - sc)
+        ff(sc) = FineScaleFluid(; rock_types = [RockCurves(;
+                                    invPc3D = p -> max(0.85 - p / 1e5, 0.2),
+                                    kr3D = crit(sc))],
+                                residual = (0.2, 0.15), hysteresis = FixedResidual(),
+                                default_pvt = nothing)
+        @test J._saturation_kinks(ff(0.15)) ≈ [[0.15]]
+        @test J._saturation_kinks(ff(0.1)) ≈ [[0.1, 0.15]]
+        @test J._crossed_kink([0.1, 0.15], 0.05, 0.2) == 0.1
+        @test J._crossed_kink([0.1, 0.15], 0.2, 0.05) == 0.15
+        @test isnothing(J._crossed_kink([0.15], 0.15, 0.3))
+
+        # fine cells get the safeguard, an all-VE domain keeps the plain unknown
+        sG(cols) = (fl = co2lab_ve_fluid(ff(0.1), mesh, cols; poro, perm_x = perm);
+                    ve = ve_domain(mesh, cols; perm_x = perm, poro);
+                    setup_co2lab_model(ve.domain; fluid = fl)[:Reservoir])
+        fine = sG(first(ve_columns(mesh; is_ve = fill(false, nc))))
+        @test sG(first(ve_columns(mesh))).primary_variables[:sG] isa J.GasSaturation
+        v = fine.primary_variables[:sG]
+        @test v isa J.FineGasSaturation && all(==(1), v.rock_type)
+
+        # an update across a kink stops at the nearest one; others as Jutul's
+        st = Dict{Symbol, Any}(:sG => [0.05; 0.12; 0.3; 0.2; fill(0.5, nc - 4)])
+        dx = [0.15; 0.1; -0.05; -0.18; zeros(nc - 4)]
+        Jutul.update_primary_variable!(st, v, :sG, fine, dx, 1.0)
+        @test st[:sG][1:4] ≈ [0.1, 0.15, 0.25, 0.15] && all(==(0.5), st[:sG][5:end])
+    end
+
     @testset "endpoint-scaling hysteresis in fine 3D cells (Stage 6)" begin
         J = JutulCO2Lab
         rw, rg = 0.2, 0.25

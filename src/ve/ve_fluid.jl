@@ -643,8 +643,9 @@ model `m` (built from `fluid` unless given).
 
 Modifies: `model.parameters` (adds `:ColumnHeight`, `:Rugosity`),
 `model.secondary_variables` (`:PlumeHeights`, `:RelativePermeabilities`,
-`:CapillaryPressure`), `model.output_variables` (adds `:PlumeHeights`,
-`:CapillaryPressure`). `fluid` and `m` are only read.
+`:CapillaryPressure`), `model.primary_variables` (with fine cells `:sG`
+becomes a [`FineGasSaturation`](@ref)), `model.output_variables` (adds
+`:PlumeHeights`, `:CapillaryPressure`). `fluid` and `m` are only read.
 """
 function _set_ve_fluid!(model, fluid::CO2LabVEFluid,
                        m = _vertical_model(fluid.vertical, model.data_domain, fluid))
@@ -666,6 +667,13 @@ function _set_ve_fluid!(model, fluid::CO2LabVEFluid,
     S[:PlumeHeights] = PlumeHeights(m, rw, rg; is_ve)
     S[:RelativePermeabilities] = VERelPerm(m, fluid.krw, fluid.krg, rw, rg; is_ve, fine)
     S[:CapillaryPressure] = VECapillaryPressure(; is_ve, fine)
+
+    # fine cells: Newton's CO2 saturation update stopped at the curves' kinks
+    P = model.primary_variables
+    if !isnothing(fine) && get(P, :sG, nothing) isa GasSaturation
+        P[:sG] = FineGasSaturation(_saturation_kinks(_fine_spec(fluid).fluid),
+                                   fine.rock_type)
+    end
 
     push!(model.output_variables, :PlumeHeights, :CapillaryPressure)
     unique!(model.output_variables)

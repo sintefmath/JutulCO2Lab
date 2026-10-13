@@ -100,6 +100,59 @@ Jutul.minimum_value(::GasSaturation) = 0.0
 Jutul.maximum_value(::GasSaturation) = 1.0
 Jutul.absolute_increment_limit(::GasSaturation) = 0.2
 
+"""
+    FineGasSaturation(kinks, rock_type)
+
+The CO2 saturation unknown of a domain with fine 3D cells: as
+`GasSaturation`, but a fine cell's Newton update stops at a saturation where
+its curves kink (`kinks[t]` for rock type `t = rock_type[i]`; 0 for VE
+blocks, which are not touched) when it would jump across it: at a relperm
+kink plain Newton cycles, one side seeing no CO2 outflow and the other its
+full slope (Wang and Tchelepi 2013, trust-region Newton; roadmap "3D
+convergence with FixedResidual in fine cells"). The next iteration continues
+from the kink, so the converged solution is unchanged.
+"""
+struct FineGasSaturation <: Jutul.ScalarVariable
+    kinks::Vector{Vector{Float64}}  # per rock type: saturations where curves kink
+    rock_type::Vector{Int}          # per cell: fine cell's rock type, 0 for VE
+end
+Jutul.minimum_value(::FineGasSaturation) = 0.0
+Jutul.maximum_value(::FineGasSaturation) = 1.0
+Jutul.absolute_increment_limit(::FineGasSaturation) = 0.2
+
+"""
+Jutul hook: Jutul's update (limits and bounds), then each fine cell's new
+saturation stopped at the first kink between its old and new value.
+
+Modifies: `state[state_symbol]`.
+"""
+function Jutul.update_primary_variable!(state, v::FineGasSaturation, state_symbol,
+                                        model, dx, w)
+    s = state[state_symbol]
+    old = Jutul.value.(s)
+    invoke(Jutul.update_primary_variable!,
+           Tuple{Any, Jutul.JutulVariables, Any, Any, Any, Any},
+           state, v, state_symbol, model, dx, w)
+    for i in eachindex(s)
+        t = v.rock_type[i]
+        t == 0 && continue
+        k = _crossed_kink(v.kinks[t], old[i], Jutul.value(s[i]))
+        isnothing(k) || (s[i] = replace_value(s[i], k))
+    end
+    return s
+end
+
+# The kink of `kinks` strictly between `a` and `b` nearest to `a`, or nothing
+function _crossed_kink(kinks, a, b)
+    lo, hi = minmax(a, b)
+    best = nothing
+    for k in kinks
+        lo < k < hi || continue
+        (isnothing(best) || abs(k - a) < abs(best - a)) && (best = k)
+    end
+    return best
+end
+
 struct DissolvedGasRatio <: Jutul.ScalarVariable end
 Jutul.minimum_value(::DissolvedGasRatio) = 0.0
 

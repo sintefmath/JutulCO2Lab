@@ -117,6 +117,36 @@ function _sharp_endpoints(rc, rw, rg)
     return only(ends)
 end
 
+"""
+    _saturation_kinks(fluid::FineScaleFluid) -> Vector{Vector{Float64}}
+
+Per rock type, the CO2 saturations where a fine cell's functions kink, for
+[`FineGasSaturation`](@ref): the critical saturation (the largest at which the
+CO2 relperm is still zero, if above 0; by bisection) and the residual CO2
+`r_g` (if above 0), where the hysteresis laws switch. Returns new sorted
+vectors; `fluid` is only read.
+"""
+function _saturation_kinks(fluid::FineScaleFluid)
+    rw, rg = fluid.residual
+    return map(fluid.rock_types) do r
+        kr = _co2_curve(r.kr3D)
+        ks = Float64[]
+        # the critical saturation: kr zero below, positive above
+        if kr(1e-12) == 0 && kr(1 - rw) > 0
+            lo, hi = 0.0, 1 - rw
+            for _ in 1:60
+                mid = (lo + hi) / 2
+                kr(mid) > 0 ? (hi = mid) : (lo = mid)
+            end
+            lo > 0 && push!(ks, lo)
+        end
+        rg > 0 && push!(ks, rg)
+        # one kink where the two coincide (to round-off)
+        sort!(ks)
+        ks[[i == 1 || ks[i] - ks[i-1] > 1e-12 for i in eachindex(ks)]]
+    end
+end
+
 # The curves as functions
 _co2_curve(kr3D::Number) = s -> max(s, 0.0)^kr3D
 _co2_curve(kr3D) = kr3D
