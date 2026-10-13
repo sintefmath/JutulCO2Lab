@@ -442,7 +442,7 @@ function _fixed_height(m::LayeredFringeModel, i, S, h_max, drho)
     F0 = F(0.0)
     if v <= F0
         F0 > 0 || return z0
-        return _plateau_end(F, F0, hm) * S * V / co2(zero(hm))
+        return _scaled_ratio(_plateau_end(F, F0, hm), S * V, co2(zero(hm)))
     end
     h = _monotone_root(F, v, 0.0, hm)
     # the slope by central differences within [0, h_max]
@@ -451,6 +451,15 @@ function _fixed_height(m::LayeredFringeModel, i, S, h_max, drho)
     dF = (F(b) - F(a)) / (b - a)
     dF > 0 || return z0 + h
     return h - (co2(h) - S * V) / dF
+end
+
+# k·x/y for plain k and x, y > 0 with derivatives, without the quotient
+# rule's y²: x and y of a round-off trace of CO2 (subnormal, ~1e-316) would
+# square to 0 and make the derivatives NaN, though k/y and x/y are moderate
+function _scaled_ratio(k, x, y)
+    yv = Jutul.value(y)
+    ky, r = k / yv, Jutul.value(x) / yv
+    return ky * x - ky * r * (y - yv)
 end
 
 # The largest height at which the column's CO2 F (nondecreasing) is still F0,

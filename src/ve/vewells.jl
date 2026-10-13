@@ -100,19 +100,47 @@ at the column's caprock depth (a fine cell's centroid), the well node at the dat
 function setup_ve_well(ve, col::Integer; name::Symbol, datum::Symbol = :caprock,
                        WI = nothing, radius = 0.1, skin = 0.0,
                        inner_product::Symbol = :ip_simple, kwarg...)
-    g = ve.geometry
     WI = something(WI, ve_well_index(ve, col; radius, skin, inner_product))
-    z0 = ve.domain[:reference_depth][col]
-    z_ref = _well_datum_depth(g, col, datum; z0)
+    return setup_ve_well(ve, [col]; name, datum, WI = [WI], radius, skin, kwarg...)
+end
 
-    # perforation at the depth of the block's pressure unknown: a VE
+"""
+    setup_ve_well(ve, cols::AbstractVector; name, datum = :caprock, WI = nothing,
+                  radius = 0.1, skin = 0.0, inner_product = :ip_simple, kwarg...)
+        -> DataDomain
+
+A VE well perforating several blocks `cols` (e.g. the stacked columns of one
+pillar, `ve_columns(...; below_holes = :stack)`): a JutulDarcy simple well
+with one perforation per block, each at the depth of that block's pressure
+unknown (a VE column's caprock, a fine cell's centroid). `WI` is one index
+per block (default [`ve_well_index`](@ref) of each); `datum = :caprock` puts
+the well's pressure datum at the shallowest perforation, `:bottom` at the
+bottom of the deepest block. The well model adds the wellbore's hydrostatic
+term between the datum and each deeper perforation. Other arguments as for
+one column. Returns a new well `DataDomain`; `ve` is only read.
+"""
+function setup_ve_well(ve, cols::AbstractVector{<:Integer}; name::Symbol,
+                       datum::Symbol = :caprock, WI = nothing, radius = 0.1,
+                       skin = 0.0, inner_product::Symbol = :ip_simple, kwarg...)
+    cols = collect(Int, cols)
+    WI = something(WI, [ve_well_index(ve, c; radius, skin, inner_product)
+                        for c in cols])
+    length(WI) == length(cols) || throw(ArgumentError("one WI per block"))
+    z0 = ve.domain[:reference_depth][cols]
+
+    # datum: the shallowest perforation, or the bottom of the deepest block
+    g = ve.geometry
+    deep = cols[argmax(g.z_top[cols] .+ g.H[cols])]
+    z_ref = datum == :caprock ? minimum(z0) : _well_datum_depth(g, deep, datum)
+
+    # perforations at the depth of each block's pressure unknown: a VE
     # column's caprock, a fine cell's centroid
     centers = copy(ve.domain[:cell_centroids])
-    centers[3, col] = z0
+    centers[3, cols] = z0
 
-    return setup_well(ve.domain, [col]; name = name, WI = WI, radius = radius,
-                      skin = skin, cell_centers = centers, reference_depth = z_ref,
-                      kwarg...)
+    return setup_well(ve.domain, cols; name = name, WI = collect(Float64, WI),
+                      radius = radius, skin = skin, cell_centers = centers,
+                      reference_depth = z_ref, kwarg...)
 end
 
 # depth of a VE well's pressure datum in column `col` (z0: the column's

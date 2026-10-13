@@ -669,7 +669,7 @@ end
 
     @testset "sloping aquifer built in Julia vs MRST" begin
         # co2lab's ramp-up: 7 halvings, then whole steps (MRST's rampupTimesteps)
-        dts = JutulCO2Lab._rampup_timesteps(24.0, 1.0, 7)
+        dts = rampup_timesteps(24.0, 1.0, 7)
         @test dts == [1 / 128; 1 ./ 2.0 .^ (7:-1:1); fill(1.0, 23)]
         f = joinpath(refdir, "sloping_aquifer.mat")
         if !isfile(f)
@@ -936,6 +936,16 @@ end
         # stacked blocks: their faces take the transition flux (Stage 12)
         law = setup_co2lab_model(ve.domain)[:Reservoir].equations[:mass_conservation]
         @test Jutul.flux_type(law) isa JutulCO2Lab.VEFlux
+
+        # a well over pillar 1's two stacked columns: one perforation at each
+        # caprock, each with its column's index; the wellbore's hydrostatic
+        # term from the datum (the upper caprock, or the lower column's bottom)
+        g = Jutul.gravity_constant
+        gdz(datum) = setup_parameters(setup_co2lab_model(ve.domain; wells = [
+            setup_ve_well(ve, [1, 2]; name = :inj, datum)]))[:inj]
+        @test gdz(:caprock)[:WellIndices] ≈ ve_well_index.(Ref(ve), [1, 2])
+        @test gdz(:caprock)[:PerforationGravityDifference] ≈ [0.0, 20g]
+        @test gdz(:bottom)[:PerforationGravityDifference] ≈ [-30g, -10g]
 
         # layers that never communicate: warning
         cut = _cp_mesh(2, 3, layered; actnum = reshape([true, true, false, false,
@@ -2272,6 +2282,18 @@ end
         pvh(a, b) = J._integral(mt.cells, 2, mt.cells.V, b) -
                     J._integral(mt.cells, 2, mt.cells.V, a)
         @test I.co2 ≈ I.free + rg * pvh(h, hm) rtol = 1e-10
+
+        # below the trapped CO2 (S < the CO2 at h = 0): the derivative in S as
+        # finite differences (the one in S_max omits the plateau end's, a
+        # plain value: tiny here), and finite for a round-off trace of CO2
+        # (subnormal S, S_max: the quotient rule's square underflowed to NaN)
+        D = Jutul.ForwardDiff.Dual
+        hS(S, Sm) = J._column_heights(mt, 2, S, Sm, H, drho, rw, rg)[1]
+        ad = hS(D(0.05, 1.0, 0.0), D(0.3, 0.0, 1.0))
+        fd(f, x, e) = (f(x + e) - f(x - e)) / 2e
+        @test ad.partials[1] ≈ fd(S -> hS(S, 0.3), 0.05, 1e-6) rtol = 1e-5
+        tiny = hS(D(5e-320, 1.0, 0.0), D(6e-320, 0.0, 1.0))
+        @test all(isfinite, tiny.partials) && tiny.value < 1e-300
 
         # the trapping inventory's split: immobile the residual min(r_g, s_max)
         # (what stays when the mobile CO2 has gone), mobile the rest; the

@@ -122,7 +122,7 @@ function sloping_aquifer(; nz::Integer = 5, ny::Integer = 1, co2_rho = nothing,
     # co2lab's schedule: its cross-section injects twice as long
     year = si_unit(:year)
     inj, n_inj = ny == 1 ? (2year, 24) : (year, 12)
-    dt_inj = _rampup_timesteps(inj, inj / n_inj, 7)
+    dt_inj = rampup_timesteps(inj, inj / n_inj, 7)
     dt = [dt_inj; fill(2year / 12, 12)]
     injecting = [k <= length(dt_inj) for k in eachindex(dt)]
     return (mesh = mesh, columns = columns, ve = ve, grid = grid, sides = sides,
@@ -132,9 +132,16 @@ function sloping_aquifer(; nz::Integer = 5, ny::Integer = 1, co2_rho = nothing,
             mass_rate = 20e6 / year, dt = dt, injecting = injecting)
 end
 
-# MRST's rampupTimesteps(time, dt, n): n + 1 steps doubling from dt/2ⁿ, then
-# steps of dt, a final remainder merged into the last if tiny
-function _rampup_timesteps(time, dt, n)
+"""
+    rampup_timesteps(time, dt, n) -> Vector{Float64}
+
+MRST's `rampupTimesteps(time, dt, n)`: time steps covering `time`, starting
+with `n + 1` steps doubling from `dt/2ⁿ` (cut short if `time` is reached
+first), then steps of `dt`, and a final shorter step for the remainder (merged
+into the last step if below `1e-6 dt`). Returns a new vector of step lengths
+(the unit of `time` and `dt`); empty for `time = 0`.
+"""
+function rampup_timesteps(time, dt, n)
     time == 0 && return Float64[]
     init = [dt / 2^k for k in [n; n:-1:1]]
     any(>(time), cumsum(init)) && (init = init[cumsum(init) .< time])

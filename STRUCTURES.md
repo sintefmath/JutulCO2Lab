@@ -105,7 +105,7 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
-| 28 | *VE well* (JutulDarcy well `DataDomain`) | `vewells.jl` | simple well in one column: co2lab's well index, perforation at the caprock, node at the chosen datum | 4 (`setup_ve_well`, `ve_well_index`) |
+| 28 | *VE well* (JutulDarcy well `DataDomain`) | `vewells.jl` | simple well in one column (co2lab's) or several blocks (one perforation each, e.g. a pillar's stacked columns): co2lab's well index, perforation at each caprock, node at the chosen datum | 4 (`setup_ve_well`, `ve_well_index`) |
 | 29 | *CO2 injector control* (JutulDarcy `InjectorControl`) | `vewells.jl` | CO2 injection with the reference density and a CO2 wellbore column; also fills the wellbore at the start (`setup_co2lab_state(...; forces)`) | 8 (`co2_injector_control`) |
 | 30 | *reconstructed 3D state* (NamedTuple) | `vereconstruct.jl` | `(pressure, sG, sGmax, rs)` per 3D cell; `rs` `nothing` without dissolution | a reservoir state of 27, 4, `VEColumns`, 8 (`ve_reconstruct`) |
 | 31 | *boundary mass fluxes* (Matrix) | `vebc.jl` | 3 × number of conditions, kg/s out: brine, CO2 (free and dissolved), the dissolved part | 7, a reservoir state (`ve_boundary_mass_fluxes`) |

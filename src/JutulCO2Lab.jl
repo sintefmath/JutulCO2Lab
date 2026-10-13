@@ -86,7 +86,7 @@ export ve_reconstruct
 include("ve/injection_case.jl")
 include("ve/sloping_aquifer.jl")
 export setup_injection_case, simulate_injection_case, ve_boundary_loops
-export sloping_aquifer_grid, sloping_aquifer
+export sloping_aquifer_grid, sloping_aquifer, rampup_timesteps
 
 include("ve/ve_top_surface.jl")
 export ve_top_surface, ve_contour_lines
