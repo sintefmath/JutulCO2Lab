@@ -57,8 +57,9 @@ homogeneous column.
 - Heights as co2lab's `upscaledSat2height` (homogeneous case); residual CO2
   lies between `h` and `h_max`.
 - Relperm as co2lab's `addVERelpermSharpInterface`: endpoints `krw`, `krg`,
-  and no CO2 flow in the accretion layer `min(dh, H)` under the caprock, with
-  `dh` the rugosity per column ([`ve_domain`](@ref)).
+  and no CO2 flow in the accretion layer `min(dh, H)` under the caprock (CO2
+  entering it is trapped; the plume flows below), with `dh` the rugosity per
+  column ([`ve_domain`](@ref)).
 """
 struct SharpInterface <: VerticalModel end
 
@@ -461,7 +462,7 @@ end
 """
 Caprock rugosity `dh` per VE column (m), read from `domain[:rugosity]`
 ([`ve_domain`](@ref)); zero if the domain has none.  The relperm loses the
-accretion layer `min(dh, H)` under the caprock.
+accretion layer `min(dh, H)` under the caprock: CO2 entering it is trapped.
 """
 struct Rugosity <: Jutul.ScalarVariable end
 
