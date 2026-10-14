@@ -106,11 +106,13 @@ not from the registry — the port tracks those working trees, and several
 roadmap decisions cite them by `file:line`:
 
 - `Jutul`: `../../Jutul.jl-fork`, the researcher's fork (github.com/Oddan/Jutul.jl)
-  checked out on branch `co2lab-jutul-merge` (`aa88f180`) = the pinned upstream
+  checked out on branch `co2lab-jutul-merge` (`bb989267`) = the pinned upstream
   commit `36166ba6` (Jutul 0.4.31) plus the Jutul fixes this project needs: the
-  cross-term row stride (#358) and signed tetrahedron volumes (#360). Both are
-  merged upstream, but only in the Jutul 0.5 line, which no JutulDarcy release
-  accepts yet (2026-10-06). `../../Jutul.jl` (upstream) is kept at `36166ba6`
+  cross-term row stride (#358) and signed tetrahedron volumes (#360), both
+  merged upstream but only in the Jutul 0.5 line, which no JutulDarcy release
+  accepts yet (2026-10-06); and `CoarseMesh` in linear time (#380, open,
+  2026-10-14: the constructor scanned the partition once per block, which
+  stalls on fine partitions of millions of cells). `../../Jutul.jl` (upstream) is kept at `36166ba6`
   for reference.
 - `JutulDarcy`: `../../JutulDarcy.jl`, upstream `main` at `ef1cfca5`
   (2026-10-03), unmodified: the release 0.3.12 (`cc7c2eac`) plus #288
@@ -231,8 +233,8 @@ in it are environment problems, not VE problems.
    regenerate missing ones through Octave, the `scripts/mrst_dump_*.m`
    scripts the rest.
 
-Once a JutulDarcy release accepts Jutul 0.5 and Jutul 0.5.2 (with #360) is
-released, the Jutul fork can give way to registered versions; the GeoEnergyIO
+Once a JutulDarcy release accepts Jutul 0.5 and a Jutul release with #360
+(and #380) is out, the Jutul fork can give way to registered versions; the GeoEnergyIO
 fork once a GeoEnergyIO release with PR #66 (merged, not yet released) is
 accepted by the JutulDarcy in use.
 
