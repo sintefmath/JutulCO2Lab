@@ -1,6 +1,8 @@
 # CO2 Storage Atlas data in map view: raw maps (co2lab's contourAtlas), the
-# coastline and the shelf's wells.
+# coastline and the shelf's wells. Public functions are documented in
+# src/plotting.jl.
 
+# A new figure with one map axis
 function plot_atlas_map(map; title = "$(map.name) $(map.variant)", kwarg...)
     fig, ax = _map_figure(title)
     plot_atlas_map!(ax, map; kwarg...)
@@ -10,6 +12,7 @@ function plot_atlas_map(map; title = "$(map.name) $(map.variant)", kwarg...)
     return fig
 end
 
+# A heatmap or contour lines (2D axis)
 function plot_atlas_map!(ax, map; style = :heatmap, levels = 10, colormap = :viridis)
     x, y = JutulCO2Lab._map_positions(map.meta)
     if style == :heatmap
@@ -40,6 +43,7 @@ function plot_atlas_map!(ax::Axis3, map; colormap = :viridis, kwarg...)
     return ax
 end
 
+# Coastline and wells for orientation
 function plot_atlas_context!(ax; coastline = true, wells = true)
     if coastline
         for l in atlas_coastline()

@@ -1,7 +1,7 @@
-# co2lab's sloping aquifer (co2lab-ve/examples/helpers/sloping_aquifer.m with
-# its test grid, make_testgrid.m): a tilted, slightly funnel-shaped aquifer
-# with two Gaussian traps under its caprock, CO2 injected near the downdip
-# end, the updip end open. Built here directly, without MRST.
+# co2lab's sloping aquifer (its `sloping_aquifer` example and `make_testgrid`
+# test grid): a tilted, slightly funnel-shaped aquifer with two Gaussian traps
+# under its caprock, CO2 injected near the downdip end, the updip end open.
+# Built here directly, without MRST.
 
 # ---------------------------------- The grid ----------------------------------
 
@@ -12,17 +12,25 @@
                          traps = ((0.5, 0.3, 20.0), (0.75, 0.2, 10.0)))
         -> Dict{String, Any}
 
-co2lab's `make_testgrid` (without its noise and ripples) as a GeoEnergyIO
-grid section: a Cartesian grid of `nx × ny × nz` cells, `length × width ×
-thickness` m, whose node depths are shifted by the caprock surface `depth −
-slope·x − bend·(y/W)(1 − y/W) − Σ traps`. Each trap `(xpos, w, height)` is a
-Gaussian bump `height·exp(−d²/(w·W)²)`, centred at `x = xpos·L` on the
-middle line, `d` the distance to it (along x only when `ny == 1`, co2lab's
-cross-section). Node positions are computed as MRST's `linspace`, so they
-match co2lab's grid exactly.
+The sloping aquifer's grid: co2lab's `make_testgrid` (without its noise and
+ripples) as a GeoEnergyIO grid section. Node positions follow MRST's
+`linspace`, so they match co2lab's grid exactly.
 
-Returns a new `Dict` with `"cartDims"`, `"COORD"`, `"ZCORN"` and `"ACTNUM"`
-(all active).
+# Arguments
+
+- `nx`, `ny`, `nz`: cells along x, y and down; `ny = 1` is co2lab's
+  cross-section.
+- `length`, `width`, `thickness`: the box's size `L × W × H` (m).
+- `depth`, `slope`, `bend`: the caprock surface before the traps,
+  `depth − slope·x − bend·(y/W)(1 − y/W)` (m).
+- `traps`: tuples `(xpos, w, height)`, each subtracting a Gaussian bump
+  `height·exp(−d²/(w·W)²)` (m) centred at `x = xpos·L` on the middle line,
+  `d` the distance to it (along x only when `ny == 1`).
+
+# Returns
+
+A new `Dict` with `"cartDims"`, `"COORD"`, `"ZCORN"` and `"ACTNUM"` (all
+active).
 """
 function sloping_aquifer_grid(; nx::Integer = 100, ny::Integer = 1, nz::Integer = 5,
                               length = 2000.0, width = 600.0, thickness = 20.0,
@@ -64,33 +72,43 @@ _mrst_linspace(a, b, n) = [k == n - 1 ? b : a + k * ((b - a) / (n - 1)) for k in
     sloping_aquifer(; nz = 5, ny = 1, co2_rho = nothing, co2_mu = nothing,
                     kwargs...) -> NamedTuple
 
-co2lab's sloping-aquifer case (`sloping_aquifer.m` with its defaults; `ny =
-1` its cross-section, `'cross_sectional', true`), set up for JutulCO2Lab:
-the grid of [`sloping_aquifer_grid`](@ref) (`kwargs` passed on) meshed by
-GeoEnergyIO, its VE columns and [`ve_domain`](@ref) with co2lab's rock
-(400 mD, porosity 0.2), and the case's data:
+co2lab's sloping-aquifer case with its defaults, set up for JutulCO2Lab: the
+mesh, its VE columns and domain, and the case's data, ready for a model and a
+schedule.
 
-- brine 1050 kg/m³ and 0.8 mPa·s, the temperature 70 °C, the reference
-  pressure `p_ref` (the mean hydrostatic pressure `1050·g·z` over the 3D
-  cells) and rock compressibility 4.35e-5 /bar;
-- CO2's density and viscosity at `p_ref` and 70 °C: by default from
-  JutulDarcy's tables ([`jutuldarcy_property_tables`](@ref)); co2lab takes
-  them from its own (`CO2props`), which `co2_rho` and `co2_mu` can give;
-- the injector in pillar `(⌈nx/8⌉, ⌈2ny/5⌉)` (radius 0.1 m), 20 kt CO2 a
-  year (`mass_rate`, kg/s);
-- the open boundary: the updip end `x = L` (cross-section), or every
-  lateral side; at hydrostatic brine pressure `1050·g·z`;
-- the schedule: injection for 2 years in 24 steps (1 year in 12 for `ny >
-  1`) after co2lab's ramp-up (`rampupTimesteps`, 7 halvings), then 2 years of
-  migration in 12 steps.
+# Arguments
 
-Returns a new NamedTuple `(mesh, columns, ve, grid, sides, open_sides,
-well_column, well_radius, rho_w, mu_w, co2_rho, co2_mu, temperature, p_ref,
-rock_compressibility, mass_rate, dt, injecting)`: the mesh, `VEColumns`,
-[`ve_domain`](@ref)'s result, the grid section, the boundary sides
-([`ve_boundary_sides`](@ref)) and the indices of the open ones, the well's
-column and radius (m), the constants (SI units; `rock_compressibility` 1/Pa
-about `p_ref`), the report steps (s) and whether each injects.
+- `nz`, `ny`: cells down and across; `ny = 1` is co2lab's cross-section
+  (`'cross_sectional', true`).
+- `co2_rho`, `co2_mu`: CO2's density (kg/m³) and viscosity (Pa·s) at `p_ref`
+  and 70 °C; default from JutulDarcy's tables
+  ([`jutuldarcy_property_tables`](@ref)). co2lab takes them from its own
+  `CO2props`; pass those for comparisons.
+- `kwargs...`: passed to [`sloping_aquifer_grid`](@ref).
+
+# Returns
+
+A new NamedTuple (SI units):
+
+- `mesh`, `columns`, `ve`, `grid`: the GeoEnergyIO mesh, its `VEColumns`,
+  [`ve_domain`](@ref)'s result (co2lab's rock: 400 mD, porosity 0.2) and the
+  grid section;
+- `sides`, `open_sides`: the boundary sides ([`ve_boundary_sides`](@ref)) and
+  the indices of the open ones: the updip end `x = L` for the cross-section,
+  every lateral side otherwise; held at hydrostatic pressure `1050·g·z`;
+- `well_column`, `well_radius`: the injector's column, in pillar
+  `(⌈nx/8⌉, ⌈2ny/5⌉)`, and its radius (0.1 m);
+- `rho_w`, `mu_w`: brine density and viscosity (1050 kg/m³, 0.8 mPa·s);
+- `co2_rho`, `co2_mu`: as above;
+- `temperature`: 70 °C, in K;
+- `p_ref`: the reference pressure, the mean hydrostatic pressure `1050·g·z`
+  over the 3D cells;
+- `rock_compressibility`: 4.35e-5 /bar, in 1/Pa, about `p_ref`;
+- `mass_rate`: the injection rate, 20 kt CO2 a year, in kg/s;
+- `dt`: the report steps (s): injection for 2 years in 24 steps (1 year in
+  12 for `ny > 1`) after co2lab's ramp-up ([`rampup_timesteps`](@ref), 7
+  halvings), then 2 years of migration in 12 steps;
+- `injecting`: whether each report step injects.
 """
 function sloping_aquifer(; nz::Integer = 5, ny::Integer = 1, co2_rho = nothing,
                          co2_mu = nothing, kwargs...)
@@ -135,11 +153,24 @@ end
 """
     rampup_timesteps(time, dt, n) -> Vector{Float64}
 
-MRST's `rampupTimesteps(time, dt, n)`: time steps covering `time`, starting
-with `n + 1` steps doubling from `dt/2ⁿ` (cut short if `time` is reached
-first), then steps of `dt`, and a final shorter step for the remainder (merged
-into the last step if below `1e-6 dt`). Returns a new vector of step lengths
-(the unit of `time` and `dt`); empty for `time = 0`.
+MRST's `rampupTimesteps`: time steps covering `time` that start small and
+grow to `dt`, for a gentle start of an injection.
+
+# Arguments
+
+- `time`: the total time.
+- `dt`: the target step length (same unit as `time`).
+- `n`: the number of halvings in the ramp-up.
+
+# Returns
+
+A new vector of step lengths (the unit of `time`); empty for `time = 0`:
+
+- `n + 1` steps doubling from `dt/2ⁿ` (cut short if `time` is reached
+  first);
+- then steps of `dt`;
+- then a shorter step for the remainder, merged into the last step if below
+  `1e-6 dt`.
 """
 function rampup_timesteps(time, dt, n)
     time == 0 && return Float64[]

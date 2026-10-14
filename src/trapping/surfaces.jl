@@ -1,25 +1,37 @@
-# Surfaces from files for trap analysis (roadmap Stage 8 item 6): co2lab-
-# spillpoint's readIrapClassicAsciiSurf and readIGEMSIRAP — IRAP classic ASCII
-# surfaces, and the IGEMS data set's surfaces as one-layer grids — and
-# one-layer grids under any surface given on a lattice (synthetic caprocks).
+# Surfaces for trap analysis: IRAP classic ASCII files, the IGEMS data set's
+# surfaces as one-layer grids, and one-layer grids under any surface given on
+# a lattice (synthetic caprocks). Counterparts of co2lab-spillpoint's
+# readIrapClassicAsciiSurf and readIGEMSIRAP.
 #
-# co2lab's IGEMS grids swap the file's x and y (the depth matrix is built with
-# y along the grid's x); here the surface keeps the file's orientation, and
-# `co2lab_compatible = true` swaps as co2lab does, for comparisons.
+# co2lab's IGEMS grids swap the file's x and y; here the surface keeps the
+# file's orientation, and `co2lab_compatible = true` swaps as co2lab does.
 
 # ------------------------------- IRAP surfaces --------------------------------
 
 """
     read_irap_surface(path) -> NamedTuple
 
-An IRAP classic ASCII surface (co2lab's `readIrapClassicAsciiSurf`): header
-of `ny, dx, dy`, `xmin, xmax, ymin, ymax`, `nx, angle`, then `nx · ny` values,
-x fastest; the missing value 9999900 becomes `NaN`. Throws if the header's
-spacing does not match its extent.
+Read an IRAP classic ASCII surface (co2lab's `readIrapClassicAsciiSurf`).
 
-Returns `(x, y, z, angle)`, new: node positions along x and y, `z` an
-`nx × ny` matrix (x along the first index — co2lab's is the transpose), and
-the rotation angle in degrees (not applied, as in co2lab).
+The file holds a header `ny, dx, dy`, `xmin, xmax, ymin, ymax`, `nx, angle`,
+then `nx · ny` values, x fastest.
+
+# Arguments
+
+- `path`: the file.
+
+# Returns
+
+A new NamedTuple:
+- `x`, `y`: node positions along x and y;
+- `z`: an `nx × ny` matrix of values (x along the first index; co2lab's is
+  the transpose); the missing value 9999900 becomes `NaN`;
+- `angle`: the rotation angle (degrees), not applied, as in co2lab.
+
+# Notes
+
+- Throws an `ArgumentError` if the header's spacing does not match its
+  extent exactly, or the number of values is wrong.
 """
 function read_irap_surface(path::AbstractString)
     tok = split(read(path, String))
@@ -45,11 +57,13 @@ end
 """
     igems_surface_path(name, i) -> String
 
-The IGEMS surface file `i` of family `name` (e.g. `"OSSNP1"`, 1–100) in
-`atlas_data_directory()`: `IGEMS surfaces/surfaces/<name>/<i>_<name>.irap`,
-or for `i == 1` without the full data set the sample
-`IGEMSsample/one_of_each/1_<name>.irap` (as co2lab's `readIGEMSIRAP`).
-Throws an `ArgumentError` naming the file if it is not there.
+The path of IGEMS surface `i` (1–100) of family `name` (e.g. `"OSSNP1"`) in
+`atlas_data_directory()`, as co2lab's `readIGEMSIRAP` finds it.
+
+Returns `IGEMS surfaces/surfaces/<name>/<i>_<name>.irap` if present; for
+`i == 1` without the full data set, the bundled sample
+`IGEMSsample/one_of_each/1_<name>.irap`. Throws an `ArgumentError` naming
+the file (and where to download it) if neither exists.
 """
 function igems_surface_path(name::AbstractString, i::Integer)
     base = atlas_data_directory()
@@ -65,15 +79,28 @@ end
 """
     igems_mesh(name, i; coarsening = 1, co2lab_compatible = false) -> NamedTuple
 
-IGEMS surface `i` of family `name` as a one-layer grid (co2lab's
-`readIGEMSIRAP(name, i, 'coarse', [c c])`): every `coarsening`-th value
-in each direction, then the first and last x-lines replaced by their
-neighbours (co2lab's fill of the missing edge values), cells of the
-surface's spacing (times `coarsening`) and 100 m thick from the surface
-down, cells with an undefined corner removed. With `co2lab_compatible`
-the surface is transposed first, as co2lab builds it.
+IGEMS surface `i` of family `name` as a one-layer grid for trap analysis
+(co2lab's `readIGEMSIRAP(name, i, 'coarse', [c c])`).
 
-Returns `(mesh, columns)`: a new `UnstructuredMesh` and its `VEColumns`.
+# Arguments
+
+- `name`, `i`: the surface ([`igems_surface_path`](@ref)).
+- `coarsening`: keep every `coarsening`-th value in each direction.
+- `co2lab_compatible`: transpose the surface first, as co2lab builds it.
+
+# Returns
+
+The NamedTuple `(mesh, columns)`: a new `UnstructuredMesh` and its
+`VEColumns` ([`surface_mesh`](@ref)).
+
+# Notes
+
+As co2lab:
+- the first and last x-lines are replaced by their neighbours (co2lab's fill
+  of the missing edge values);
+- the grid starts at the origin, with cells of the file's x spacing (times
+  `coarsening`) in both directions, 100 m thick from the surface down;
+- cells with an undefined corner are removed.
 """
 function igems_mesh(name::AbstractString, i::Integer; coarsening::Integer = 1,
                     co2lab_compatible::Bool = false)
@@ -94,13 +121,20 @@ end
     surface_mesh(x, y, top; bottom = top .+ 100.0) -> NamedTuple
 
 A one-layer corner-point grid between two surfaces given at the nodes of a
-lattice — for synthetic caprocks (co2lab's examples perturb a `cartGrid`'s
-nodes) and read surfaces: `x` (`nx + 1` values) and `y` (`ny + 1`) the node
-positions, `top` and `bottom` `(nx + 1) × (ny + 1)` depths (positive down).
-Cells with an undefined (`NaN`) corner on `top` are left out.
+lattice: for synthetic caprocks (co2lab's examples perturb a `cartGrid`'s
+nodes) and surfaces read from file.
 
-Returns `(mesh, columns)`: a new `UnstructuredMesh` (GeoEnergyIO's) and its
-`VEColumns`.
+# Arguments
+
+- `x`, `y`: node positions, `nx + 1` and `ny + 1` values (m).
+- `top`: caprock depth (m, positive down) per node, `(nx + 1) × (ny + 1)`;
+  `NaN` marks undefined nodes.
+- `bottom`: base depth per node, same size; default 100 m below `top`.
+
+# Returns
+
+The NamedTuple `(mesh, columns)`: a new `UnstructuredMesh` (GeoEnergyIO's)
+and its `VEColumns`. Cells with an undefined corner on `top` are left out.
 """
 function surface_mesh(x::AbstractVector, y::AbstractVector, top::AbstractMatrix;
                       bottom::AbstractMatrix = top .+ 100.0)

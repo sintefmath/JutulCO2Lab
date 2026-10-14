@@ -1,13 +1,11 @@
-# Source provenance for oracle reports.
+# Source provenance for oracle reports: which commits of Jutul, JutulDarcy and
+# MRST a comparison ran against.
 #
-# Jutul and JutulDarcy are `dev`-ed from local checkouts, and for a dev-ed
-# package Manifest.toml records only `path` and `version` — no commit, no tree
-# hash. It therefore does not pin what a gate actually ran against. This file
-# fills that gap: every `OracleReport` captures the commit and dirty state of
-# each checkout at construction time, so a result can always be attributed to
-# the source trees that produced it.
+# Why: Jutul and JutulDarcy are `dev`-ed from local checkouts, for which
+# Manifest.toml records no commit. So every `OracleReport` records the commit
+# and dirty state of each checkout when it is made.
 #
-# Record-only by design: nothing here fails a gate. A dirty checkout triggers a
+# Record-only by design: nothing here fails a gate; a dirty checkout gives a
 # warning, not an error.
 
 # -------------------------------- Source trees --------------------------------
@@ -15,11 +13,15 @@
 """
     SourceInfo
 
-Provenance of one source tree: package `name`, checkout `dir`, short `commit`
-hash, and whether tracked files have uncommitted changes (`dirty`).
+Provenance of one source tree (Jutul, JutulDarcy or MRST), as recorded in
+an `OracleReport`. Shown as `"name commit"`, plus `" (dirty)"` if dirty.
 
-`commit` is `"unknown"` when the directory is not a git repository or git is
-unavailable; `dirty` is then `missing`.
+# Fields
+
+- `commit`: `"unknown"` when the directory is not a git repository or git is
+  unavailable, `"not loaded"` for a package that is not loaded.
+- `dirty`: whether tracked files have uncommitted changes; `missing` when
+  unknown.
 """
 struct SourceInfo
     name::String                 # package
@@ -33,13 +35,14 @@ function Base.show(io::IO, s::SourceInfo)
     s.dirty === true && print(io, " (dirty)")
 end
 
-# Packages whose checkouts are tracked. UUIDs from their Project.toml; looked up
-# among loaded modules so that Oracle does not need to depend on them.
+# Packages whose checkouts are tracked, looked up among the loaded modules by
+# UUID so that Oracle does not need to depend on them.
 const TRACKED_PACKAGES = (
     Base.PkgId(Base.UUID("2b460a1a-8a2b-45b2-b125-b5c536396eb9"), "Jutul"),
     Base.PkgId(Base.UUID("82210473-ab04-4dce-b31b-11573c4f8e0a"), "JutulDarcy"),
 )
 
+# Output of `git -C dir args...`, stripped; `nothing` if git fails or is missing
 function _git(dir::AbstractString, args::Vector{String})
     cmd = Cmd(`git -C $dir $args`; ignorestatus = true)
     out = IOBuffer()
@@ -75,7 +78,10 @@ end
 
 Provenance of the Jutul and JutulDarcy source trees currently loaded.
 
-A package that is not loaded is reported with commit `"not loaded"`.
+# Returns
+
+A new vector of [`SourceInfo`](@ref), Jutul first. A package that is not
+loaded has commit `"not loaded"` and `dirty` `missing`.
 """
 function source_provenance()
     infos = SourceInfo[]
@@ -105,6 +111,7 @@ function _mrst_source_info(dump)
     return SourceInfo("MRST", root, commit, missing)
 end
 
+# Warn for each source tree whose checkout has uncommitted changes
 function _warn_dirty(infos)
     for s in infos
         s.dirty === true &&

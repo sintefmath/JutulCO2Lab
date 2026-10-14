@@ -1,11 +1,10 @@
 # The top surface of a VE domain as polygons in map view, and contour lines on
-# it (roadmap Stage 5 item 5). Geometry only — plotting is in the Makie
-# extension (ext/JutulCO2LabMakieExt).
+# it. Geometry only; plotting is in the Makie extension.
 #
-# co2lab's mapPlot resamples every field onto a 200 × 200 raster with
-# TriScatteredInterp and clips it to one boundary polygon; here fields are
-# drawn on the columns' own top faces and contoured on them exactly, which
-# also handles holes and grids in several pieces.
+# co2lab's mapPlot resamples every field onto a 200 × 200 raster and clips it
+# to one boundary polygon; here fields are drawn on the columns' own top faces
+# and contoured on them exactly, which also handles holes and grids in
+# several pieces.
 
 # ------------------------------- The top surface -------------------------------
 
@@ -13,22 +12,37 @@
     ve_top_surface(mesh, columns::VEColumns; blocks = 1:number_of_columns(columns))
         -> NamedTuple
 
-The caprock of a VE domain in map view: the top face of each column in
-`blocks` (the top face of its top cell) as a polygon. With all columns of a
-grid with several blocks per pillar (stacked columns, hybrid grids) the
-polygons of a pillar overlap; [`trap_surface`](@ref) takes one sheet. A top
-cell must have one top face (corner-point grids: faults lie between pillars);
-an error is thrown otherwise.
+The caprock of a VE domain in map view, as one polygon per column: the top
+face of its top cell. The basis for map plots and contour lines
+([`ve_contour_lines`](@ref)).
 
-Returns the NamedTuple `(x, y, z, polygons, xc, yc, outline, mesh_nodes,
-blocks)`, all new: `x`, `y`, `z` the coordinates of the surface's nodes (`z`
-the caprock depth there); `polygons[i]` the node indices of the top face of
-column `blocks[i]`, in the face's order (a collapsed pillar edge gives a
-triangle); `xc`, `yc` the mean of each polygon's nodes; `outline` the node
-pairs of the edges used by only one polygon (the lateral boundary, holes
-included); `mesh_nodes` the node of `mesh` each surface node is; `blocks`
-(a `Vector{Int}`) the column of each polygon. `mesh` and `columns` are only
-read.
+# Arguments
+
+- `mesh`, `columns`: the 3D mesh and its column partition
+  ([`ve_columns`](@ref)).
+- `blocks`: the columns to include; default all.
+
+# Returns
+
+A NamedTuple of new arrays:
+
+- `x`, `y`, `z`: coordinates of the surface's nodes (`z`: caprock depth).
+- `polygons`: `polygons[i]` holds the node indices of the top face of column
+  `blocks[i]`, in the face's order (a collapsed pillar edge gives a
+  triangle).
+- `xc`, `yc`: the mean of each polygon's nodes.
+- `outline`: node pairs `(a, b)`, `a < b`, of the edges used by only one
+  polygon: the lateral boundary, holes included.
+- `mesh_nodes`: for each surface node, the node of `mesh` it is.
+- `blocks`: the column of each polygon, a `Vector{Int}`.
+
+# Notes
+
+- With all columns of a grid with several blocks per pillar (stacked
+  columns, hybrid grids) the polygons of a pillar overlap; select one sheet
+  with `blocks` ([`trap_surface`](@ref) does).
+- Each top cell must have exactly one top face (on corner-point grids faults
+  lie between pillars); an error is thrown otherwise.
 """
 function ve_top_surface(mesh, columns::VEColumns;
                         blocks = 1:number_of_columns(columns))
@@ -56,7 +70,8 @@ function ve_top_surface(mesh, columns::VEColumns;
 end
 
 # Nodes of cell c's top face: a boundary face, or the interior face to the
-# cell above (a block below another block, or below fine cells); exactly one
+# cell above (a block below another block, or below fine cells). Throws unless
+# there is exactly one
 function _top_face_nodes(mesh, ijk, bdir, c)
     tops = [collect(mesh.boundary_faces.faces_to_nodes[f])
             for f in mesh.boundary_faces.cells_to_faces[c] if bdir[f] == _TOP]
@@ -86,15 +101,29 @@ end
 """
     ve_contour_lines(surface, values, levels) -> Vector{Vector{NTuple{4, Float64}}}
 
-Contour lines of a field on a [`ve_top_surface`](@ref): `values` per column
-(then each node takes the mean of the columns around it) or per node of the
-surface. Each polygon is split into triangles around its node mean, which
-takes the column's value (or the mean of the node values), and the lines are
-traced linearly in each triangle (marching triangles). Triangles with a `NaN`
-value are skipped.
+Contour lines of a field on a VE top surface, traced exactly on the columns'
+own top faces.
 
-Returns, for each level in `levels`, a new vector of line segments
-`(x1, y1, x2, y2)`. The arguments are only read.
+# Arguments
+
+- `surface`: the top surface ([`ve_top_surface`](@ref)).
+- `values`: the field, one value per polygon (column) or per node of
+  `surface`.
+- `levels`: the contour levels.
+
+# Returns
+
+A new vector with, for each level in `levels`, a vector of line segments
+`(x1, y1, x2, y2)`.
+
+# Notes
+
+- Per-column values are given to each node as the mean of the columns around
+  it. Each polygon is split into triangles around its centre (the mean of its
+  nodes), which takes the column's value, or for per-node values the mean of
+  its nodes' values; lines are traced linearly in each triangle (marching
+  triangles).
+- Triangles with a `NaN` value are skipped.
 """
 function ve_contour_lines(surface, values::AbstractVector, levels)
     node, centre = _node_and_centre_values(surface, values)

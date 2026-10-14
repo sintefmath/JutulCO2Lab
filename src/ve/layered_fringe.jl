@@ -1,38 +1,36 @@
-# The capillary fringe in a column whose rock varies with depth (roadmap Stage
-# 6, the combined model; design: analysis/stage6-upscaling-proposal.md). Not
-# in co2lab, which has the fringe ('P-scaled table') and the layers
-# ('sharp_interface_integrated') only one at a time.
+# The capillary fringe in a column whose rock varies with depth
+# (`LayeredFringe`).  co2lab has the fringe ('P-scaled table') and the layers
+# ('sharp_interface_integrated'), but not both at once.
 #
 # The fine-scale capillary pressure is linear in depth, pc(z) = Δρ g (h − z),
-# h the capillary height. Within one fine cell the rock is constant, so the
-# column's integrals split into one P-type term per cell, from the fringe
-# table's integrals over capillary pressure (SP, krP; `PScaledTable`):
+# with h the capillary height.  The rock is constant within a fine cell, so a
+# column's integrals are sums of one term per cell, from the fringe table's
+# integrals over capillary pressure (SP, krP; `PScaledTable`):
 #   ∫ s dz over [a, b] = (SP(Δρ g (h − a)) − SP(Δρ g (h − b))) / (Δρ g),
 # weighted by the cell's pore volume per depth (saturation) or permeability
-# (relperm). The current Δρ enters every evaluation; nothing is stored per
-# column but the rock. h is solved from the free saturation on plain values,
-# its derivatives taken by one Newton step with the AD values.
+# (relperm).  Every evaluation uses the current Δρ; only the rock is stored
+# per column.  h is solved on plain values, its derivatives taken by one
+# Newton step with the AD values.
 #
-# Decided with the researcher (2026-10-04; the design note's points 1–7):
-# - hysteresis by co2lab's endpoint scaling, linear in s and s_max at each
-#   depth, so it holds for the column averages too: h from the free
-#   saturation, h_max from sGmax, both at the current Δρ (an approximation:
-#   the maximum profile was set at the Δρ of its time); or by a fixed
-#   residual, capped by the history (`FixedResidual`; researcher,
-#   2026-10-06): h then solves the column's CO2 (monotone in h), with the
-#   depths where either profile holds r_g as breakpoints in each cell;
-# - the brine relperm integrated from a fine-scale curve `krw3D` over the
-#   actual saturation (free and residual), linear by default — co2lab's
-#   krW_simple in drainage, less by r_w/(1 − r_w)·(S − S_free) with residual CO2;
-# - physical capillary curves only (`co2lab_capillary_curve` converts
-#   co2lab's dimensionless (C, alpha));
-# - the caprock's rugosity dh: the CO2 filling the subscale relief (the top dh
-#   of the column, at the fringe's saturation there) is immobile, and the
-#   relief takes no part in lateral flow, brine included — both relperms are
-#   integrated from dh (co2lab's accretion layer of the sharp interface;
-#   researcher, 2026-10-04: the second pass);
-# - built on integrals over any depth interval, which roadmap Stage 12's
-#   transition flux needs.
+# Design:
+# - Hysteresis by co2lab's endpoint scaling, linear in s and s_max at each
+#   depth and so for the column averages too: h from the free saturation,
+#   h_max from sGmax, both at the current Δρ (an approximation: the maximum
+#   profile was set at the Δρ of its time).  Or a fixed residual capped by
+#   the history (`FixedResidual`): h then solves the column's CO2 (monotone
+#   in h), with the depths where either profile holds r_g as breakpoints.
+# - The brine relperm is integrated from a fine-scale curve `krw3D` over the
+#   actual saturation (free and residual); linear by default, which gives
+#   co2lab's krW_simple in drainage, less by r_w/(1 − r_w)·(S − S_free) with
+#   residual CO2.
+# - Physical capillary curves only (`co2lab_capillary_curve` converts
+#   co2lab's dimensionless (C, alpha)).
+# - Caprock rugosity dh: the CO2 filling the subscale relief (the top dh of
+#   the column, at the fringe's saturation there) is immobile, and the relief
+#   takes no part in lateral flow, brine included: both relperms are
+#   integrated from dh down (co2lab's accretion layer of the sharp interface).
+# - Built on integrals over any depth interval, as the transition flux of
+#   hybrid grids needs.
 #
 # Uniform rock gives `CapillaryFringeTable`'s heights and CO2 relperm.
 
@@ -44,36 +42,52 @@
                   geometry = ve_column_geometry(mesh, columns), tolerance = 1e-6,
                   tip_saturation = 1e-6, touched_saturation = 1e-3) -> LayeredFringe
 
-A capillary fringe in VE columns whose rock varies with depth: the columns
-`columns` of the 3D `mesh`, with the fine cells' porosity `poro` and
-x-permeability `perm_x` (per cell of `mesh`, as given to
-[`ve_domain`](@ref); `perm_y` only checked, as for
-[`SharpInterfaceIntegrated`](@ref)). The fine-scale curves, one set for all
-cells, or one per rock type (vectors, with `rock_type` the type of each cell
-of `mesh`, 1, 2, …):
-- `invPc3D`: the fine-scale brine saturation as a function of capillary
-  pressure (Pa); a physical curve (for co2lab's dimensionless `(C, alpha)`
-  see [`co2lab_capillary_curve`](@ref));
-- `kr3D`: the fine-scale CO2 relperm of the CO2 saturation, or an exponent
-  `β` for `s^β`;
-- `krw3D`: the fine-scale brine relperm of the brine saturation, or
-  `:linear` for `(s_w − r_w)/(1 − r_w)`;
-- `nothing` for `invPc3D` is a rock type without capillarity (a sharp
-  interface in it);
-- `hysteresis`: the [`HysteresisLaw`](@ref), [`EndpointScaling`](@ref)
-  (co2lab's default) or [`FixedResidual`](@ref);
+Vertical model for a capillary fringe in VE columns whose rock varies with
+depth: co2lab's `'P-scaled table'` fringe combined with the layers of
+`'sharp_interface_integrated'` (co2lab offers only one at a time).  Give it
+to [`co2lab_ve_fluid`](@ref) as `vertical`.
+
+Saturations are integrated by pore volume and relperms by permeability over
+the fringe's profile, cell by cell, with the hysteresis law's residual CO2.
+
+# Arguments
+
+- `mesh`, `columns`: the 3D mesh and its VE columns ([`ve_columns`](@ref)).
+- `poro`, `perm_x`: porosity and x-permeability (m²) per cell of `mesh`, as
+  given to [`ve_domain`](@ref).
+- `perm_y`: only checked against `perm_x`, as for
+  [`SharpInterfaceIntegrated`](@ref).
+- `invPc3D`: fine-scale brine saturation as a function of capillary
+  pressure (Pa).  A physical curve: convert co2lab's dimensionless
+  `(C, alpha)` with [`co2lab_capillary_curve`](@ref).  `nothing`: a rock
+  type without capillarity (a sharp interface in it).
+- `kr3D`: fine-scale CO2 relperm as a function of CO2 saturation, or an
+  exponent `β` for `s^β`; default 3.
+- `krw3D`: fine-scale brine relperm as a function of brine saturation, or
+  `:linear` (default) for `(s_w − r_w)/(1 − r_w)`.
+- `rock_type`: rock type (1, 2, …) of each cell of `mesh`; then
+  `invPc3D`, `kr3D` and `krw3D` may be vectors, one entry per rock type.
+  Default `nothing`: one rock type, one set of curves for all cells.
+- `hysteresis`: the [`HysteresisLaw`](@ref): [`EndpointScaling`](@ref)
+  (default, co2lab's) or [`FixedResidual`](@ref).
+- `geometry`: the columns' geometry ([`ve_column_geometry`](@ref)), computed
+  if not given.
 - `tolerance`, `tip_saturation`, `touched_saturation`: as for
   [`CapillaryFringeTable`](@ref).
 
-Saturations are integrated by pore volume, relperms by permeability, over
-the fringe's profile cell by cell, with the hysteresis law's residual CO2.
-The caprock's rugosity (the domain's `:rugosity`, `dh` per column) is the
-height of its subscale relief: the CO2 there, at the fringe's saturation, is
-immobile, and both relperms are integrated from `dh` down (at zero
-capillarity co2lab's accretion layer, as [`SharpInterfaceIntegrated`](@ref)).
+# Returns
 
-Returns a new `LayeredFringe` to give to [`co2lab_ve_fluid`](@ref) as
-`vertical`; it belongs to this grid. The arguments are only read.
+A new `LayeredFringe`, valid only for this grid.
+
+# Notes
+
+- Caprock rugosity (the domain's `:rugosity`, `dh` per column) is the height
+  of the subscale relief.  The CO2 there, at the fringe's saturation, is
+  immobile, and both relperms are integrated from `dh` down.  At zero
+  capillarity this is co2lab's accretion layer, as for
+  [`SharpInterfaceIntegrated`](@ref).
+- With uniform rock, the heights and CO2 relperm equal those of
+  [`CapillaryFringeTable`](@ref).
 """
 struct LayeredFringe{W, L <: HysteresisLaw} <: VerticalModel
     cells::SharpInterfaceIntegrated          # per column: cell boundaries, ∫φA, ∫k_x dz
@@ -127,12 +141,27 @@ end
 """
     co2lab_capillary_curve(C, alpha; height, drho, res_water = 0.0) -> Function
 
-co2lab's dimensionless fine-scale capillary curve `(C, alpha)` as a physical
-one: the brine saturation `s_w(p) = max((C'/(p + C'))^(1/alpha), res_water)`
-of the capillary pressure `p` (Pa), with `C' = C·g·height·drho`. co2lab takes
-`height` as the grid's tallest column and `drho` as its reference density
-difference ([`CapillaryFringeTable`](@ref) does so); here they are given.
-Returns a new function.
+Convert co2lab's dimensionless fine-scale capillary curve `(C, alpha)` to a
+physical one, e.g. for [`LayeredFringe`](@ref).
+
+# Arguments
+
+- `C`, `alpha`: co2lab's curve parameters.
+- `height`: the scaling height (m); co2lab uses the grid's tallest column.
+- `drho`: the scaling density difference (kg/m³); co2lab uses its reference
+  brine–CO2 density difference.
+- `res_water`: residual brine saturation, the curve's lower bound.
+
+# Returns
+
+A new function `p -> s_w`: the brine saturation
+`max((C'/(p + C'))^(1/alpha), res_water)` of the capillary pressure `p`
+(Pa; negative `p` taken as 0), with `C' = C·g·height·drho`.
+
+# Notes
+
+- [`CapillaryFringeTable`](@ref) does this scaling itself, from the grid;
+  here `height` and `drho` are given explicitly.
 """
 function co2lab_capillary_curve(C, alpha; height, drho, res_water = 0.0)
     Cs = C * Jutul.gravity_constant * height * drho
@@ -142,9 +171,9 @@ end
 """
     LayeredFringeModel
 
-The built form of [`LayeredFringe`](@ref) for a domain and fluid: the
-columns' rock, a fringe table per rock type, the residual saturations and the
-hysteresis law.
+The built form of [`LayeredFringe`](@ref) for a domain and fluid, made by
+[`setup_co2lab_model`](@ref): the columns' rock, a fringe table per rock type,
+the residual saturations and the hysteresis law.
 """
 struct LayeredFringeModel{T, W, L} <: VerticalModel
     cells::SharpInterfaceIntegrated  # per column: cell boundaries, ∫φ·area, ∫k_x dz
@@ -201,16 +230,18 @@ end
 """
     _interval_integrals(m, i, T, B, h, h_max, drho) -> NamedTuple
 
-Column `i`'s integrals over the depths `[T, B]` below its caprock, for the
-capillary heights `h` (free CO2) and `h_max` (maximum profile) and density
-difference `drho`, cell by cell: `free`, `max`, `co2` the CO2 saturation of
-the free (capillary height `h`), maximum and actual profiles times the pore
-volume (m³; actual by the hysteresis law, `_cell_integrals`), `kfree`,
-`kmax` the free and maximum profiles' CO2 saturation times `k_x dz`, `krG`,
-`krW` the CO2 and brine relperms times `k_x dz` (m³), `pv` and `kz` the
-interval's pore volume and `∫ k_x dz`. The column's quantities are those over
-`[0, H]`; roadmap Stage 12's transition flux asks for others. Arguments may
-carry AD derivatives. Returns a new NamedTuple.
+Column `i`'s integrals over the depths `[T, B]` below its caprock, cell by
+cell, for the capillary heights `h` (free CO2) and `h_max` (maximum profile)
+and density difference `drho`.  The column's quantities are those over
+`[0, H]`; the transition flux of hybrid grids asks for other intervals.
+Arguments may carry AD derivatives.
+
+Returns a new NamedTuple:
+- `free`, `max`, `co2`: CO2 saturation of the free, maximum and actual
+  profiles times pore volume (m³); actual by the hysteresis law;
+- `kfree`, `kmax`: free and maximum profiles' CO2 saturation times `k_x dz`;
+- `krG`, `krW`: CO2 and brine relperms times `k_x dz` (m³);
+- `pv`, `kz`: the interval's pore volume and `∫ k_x dz`.
 """
 function _interval_integrals(m::LayeredFringeModel, i, T, B, h, h_max, drho)
     c = m.cells
@@ -422,14 +453,20 @@ end
 """
     _fixed_height(m, i, S, h_max, drho) -> Real
 
-A fixed residual's capillary height of column `i` holding the CO2 saturation
-`S` after the maximum profile at `h_max`: the root of the column's CO2 less
-`S·V`, monotone in the height (its slope `φ·(s_top − r_g)` ≥ 0 wherever the
-mobile profile holds more than `r_g`), on plain values to round-off, the
-derivatives by one Newton step with the AD values. At or above the maximum's
-CO2, `h_max`. Below the CO2 of height 0 (all trapped; dissolution can take
-more), linear in `S` from the largest height still holding that much (the
-mobile profile then holds none above `r_g`). Zero for `drho ≤ 0`.
+Capillary height of column `i` under a fixed residual, holding the CO2
+saturation `S` after the maximum profile at `h_max`.
+
+It is the root of the column's CO2 less `S·V`, which is monotone in the
+height (slope `φ·(s_top − r_g)` ≥ 0 wherever the mobile profile holds more
+than `r_g`).  Solved on plain values to round-off; derivatives by one Newton
+step with the AD values.
+
+Special cases:
+- `S` at or above the maximum profile's CO2: `h_max`.
+- `S` below the CO2 at height 0 (all trapped; dissolution can take more):
+  linear in `S` from the largest height still holding that much (the mobile
+  profile then holds none above `r_g`).
+- `drho ≤ 0`: zero.
 """
 function _fixed_height(m::LayeredFringeModel, i, S, h_max, drho)
     z0 = zero(S) + zero(h_max) + zero(drho)

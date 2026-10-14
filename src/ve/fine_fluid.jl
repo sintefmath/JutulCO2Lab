@@ -1,27 +1,33 @@
-# The fluid described at the fine scale (roadmap Stage 12 step 2; researcher,
-# 2026-10-05): per rock type the CO2 and brine relperms and the capillary
-# curve, the residual saturations, the hysteresis law, PVT and dissolution.
-# From it, the fine 3D cells of a hybrid grid take their constitutive
-# functions and the VE blocks their VE fluid: the vertical model
-# `LayeredFringe` is the upscaling of these curves over each column (with no
-# capillarity anywhere `SharpInterfaceIntegrated`, its limit). One source, so
-# that VE blocks and fine cells agree (the design note's equilibrium check
-# P1). co2lab's own VE options (`co2lab_ve_fluid` with keywords) stay for
-# ports of co2lab cases and the gates against MRST.
+# The fluid described at the fine scale: per rock type the CO2 and brine
+# relperms and the capillary curve, plus residual saturations, hysteresis law,
+# PVT and dissolution. One source for both parts of a hybrid grid, so that VE
+# blocks and fine cells agree:
 #
-# Not part of the fine-scale fluid: co2lab's dissolution rate (an upscaled
-# parameter, given to the VE fluid) and the caprock's rugosity (the grid's).
+# - VE blocks get the upscaled curves: the vertical model `LayeredFringe`, or
+#   with no capillarity anywhere its limit `SharpInterfaceIntegrated`;
+# - fine 3D cells get the curves themselves (`FineCellFluid`).
+#
+# co2lab's own VE options (`co2lab_ve_fluid` with keywords) remain for ports
+# of co2lab cases. Not part of the fine-scale fluid: co2lab's dissolution rate
+# (an upscaled parameter, given to the VE fluid) and the caprock's rugosity
+# (the grid's).
 
 # ------------------------------ The fine fluid --------------------------------
 
 """
     RockCurves(; invPc3D = nothing, kr3D = 3, krw3D = :linear)
 
-One rock type's fine-scale curves: `invPc3D` the brine saturation as a
-function of capillary pressure (Pa; `nothing`: no capillarity), `kr3D` the
-CO2 relperm of the CO2 saturation (or a Corey exponent `β`: `s^β`), `krw3D`
-the brine relperm of the brine saturation (or `:linear`: `(s_w − r_w)/(1 −
-r_w)`). Returns a new `RockCurves`.
+One rock type's fine-scale curves, an entry of [`FineScaleFluid`](@ref)'s
+`rock_types`.
+
+# Keywords
+
+- `invPc3D`: brine saturation as a function of capillary pressure (Pa);
+  `nothing`: no capillarity.
+- `kr3D`: CO2 relperm as a function of CO2 saturation, or a Corey exponent
+  `β` for `s^β`.
+- `krw3D`: brine relperm as a function of brine saturation, or `:linear` for
+  `(s_w − r_w)/(1 − r_w)`.
 """
 struct RockCurves{P, K, W}
     invPc3D::P  # brine saturation of capillary pressure (Pa), or nothing
@@ -34,18 +40,25 @@ RockCurves(; invPc3D = nothing, kr3D = 3, krw3D = :linear) =
 """
     FineScaleFluid(; rock_types = [RockCurves()], residual = (0.0, 0.0),
                      hysteresis = EndpointScaling(), fine_hysteresis = :law,
-                     kwarg...) -> FineScaleFluid
+                     kwarg...)
 
-The fluid at the fine scale: `rock_types` the curves of each rock type
-([`RockCurves`](@ref)), `residual = (r_w, r_g)` (for all rock types),
-`hysteresis` the law ([`HysteresisLaw`](@ref); VE blocks and fine cells),
-`fine_hysteresis` the fine cells' (`:law`, or `:killough`: JutulDarcy's
-Killough model with the capillary pressure of the total saturation — VE
-blocks keep the law, a mismatch warned about), `kwarg...` the PVT and
-dissolution options of [`co2lab_ve_fluid`](@ref) (`co2_rho_pvt`, …,
-`dissolution`, `dis_max`, `dis_max_mass`). The VE fluid comes from
-[`co2lab_ve_fluid`](@ref)`(fluid, mesh, columns; …)`. Returns a new
-`FineScaleFluid`.
+The fluid described at the fine scale, the single source for a hybrid grid's
+VE blocks and fine cells. Turn it into a VE fluid with
+[`co2lab_ve_fluid`](@ref)`(fluid, mesh, columns; …)`.
+
+# Keywords
+
+- `rock_types`: the curves of each rock type ([`RockCurves`](@ref)).
+- `residual`: `(r_w, r_g)`, residual brine and CO2 saturations, for all rock
+  types.
+- `hysteresis`: the hysteresis law ([`HysteresisLaw`](@ref)) of VE blocks and
+  fine cells.
+- `fine_hysteresis`: the fine cells' hysteresis: `:law` (the law above), or
+  `:killough` (JutulDarcy's Killough model, with the capillary pressure of the
+  total saturation; VE blocks keep the law, and a warning notes the mismatch).
+- `kwarg...`: the PVT and dissolution options of [`co2lab_ve_fluid`](@ref)
+  (`co2_rho_pvt`, …, `dissolution`, `dis_max`, `dis_max_mass`). Throws for
+  `vertical`, `krmax` and `dis_rate`, which are not fine-scale options.
 """
 struct FineScaleFluid{L <: HysteresisLaw}
     rock_types::Vector{RockCurves}  # fine-scale curves per rock type
@@ -71,15 +84,31 @@ end
                     perm_y = nothing, rock_type = nothing, dis_rate = 0.0)
         -> CO2LabVEFluid
 
-The VE fluid of the fine-scale `fluid` on the blocks of `columns` (of the 3D
-`mesh`; `poro`, `perm_x`, `rock_type` per cell of `mesh`, rock type 1 for
-all if `nothing`): the vertical model [`LayeredFringe`](@ref) of its curves
-and hysteresis law, or, with no capillarity in any rock type,
-[`SharpInterfaceIntegrated`](@ref) (the same limit, where both laws agree)
-with the curves' endpoints; residual, PVT and dissolution
-from `fluid`; `dis_rate` co2lab's upscaled dissolution rate (VE blocks; fine
-cells dissolve instantaneously). The fine cells' fluid rides along (the
-result's `fine`). Returns a new `CO2LabVEFluid`; the arguments are only read.
+The VE fluid of a fine-scale `fluid` on the blocks of `columns`: its curves
+upscaled over each column, with residual, PVT and dissolution taken from
+`fluid`.
+
+# Arguments
+
+- `fluid`: the fine-scale fluid ([`FineScaleFluid`](@ref)).
+- `mesh`, `columns`: the 3D mesh and its columns ([`ve_columns`](@ref)).
+- `poro`, `perm_x`: porosity and x-permeability (m²) per cell of `mesh`.
+- `perm_y`: y-permeability per cell, only checked against `perm_x`.
+- `rock_type`: rock type per cell of `mesh` (index into
+  `fluid.rock_types`); `nothing`: rock type 1 everywhere.
+- `dis_rate`: co2lab's upscaled dissolution rate, for VE blocks (fine cells
+  dissolve instantaneously).
+
+# Returns
+
+A new `CO2LabVEFluid` whose vertical model is
+- [`LayeredFringe`](@ref) of the curves and hysteresis law, or,
+- with no capillarity in any rock type, [`SharpInterfaceIntegrated`](@ref)
+  (the same limit, where both laws agree) with the curves' endpoints; the
+  rock types must then share their relperm endpoints.
+
+Its field `fine` carries `(fluid, rock_type)` for the hybrid grid's fine
+cells.
 """
 function co2lab_ve_fluid(fluid::FineScaleFluid, mesh, columns::VEColumns; poro, perm_x,
                          perm_y = nothing, rock_type = nothing, dis_rate = 0.0)
@@ -106,8 +135,8 @@ function co2lab_ve_fluid(fluid::FineScaleFluid, mesh, columns::VEColumns; poro, 
     return CO2LabVEFluid(fields..., (fluid = fluid, rock_type = types))
 end
 
-# The sharp interface's endpoints from the curves: CO2 at 1 − r_w, brine in
-# the residual zone at 1 − r_g; one pair for all rock types
+# The sharp interface's relperm endpoints from the curves: CO2 at 1 − r_w,
+# brine (residual zone) at 1 − r_g; throws unless all rock types agree
 function _sharp_endpoints(rc, rw, rg)
     ends = unique((_brine_curve(r.krw3D, rw)(1 - rg), _co2_curve(r.kr3D)(1 - rw))
                   for r in rc)
@@ -120,11 +149,11 @@ end
 """
     _saturation_kinks(fluid::FineScaleFluid) -> Vector{Vector{Float64}}
 
-Per rock type, the CO2 saturations where a fine cell's functions kink, for
-[`FineGasSaturation`](@ref): the critical saturation (the largest at which the
-CO2 relperm is still zero, if above 0; by bisection) and the residual CO2
-`r_g` (if above 0), where the hysteresis laws switch. Returns new sorted
-vectors; `fluid` is only read.
+Per rock type, the CO2 saturations where a fine cell's functions kink, at
+which [`FineGasSaturation`](@ref) stops Newton updates: the critical
+saturation (the largest with zero CO2 relperm, if above 0) and the residual
+CO2 `r_g` (if above 0, where the hysteresis laws switch). Returns new sorted
+vectors, coinciding kinks merged.
 """
 function _saturation_kinks(fluid::FineScaleFluid)
     rw, rg = fluid.residual
@@ -158,11 +187,10 @@ _brine_curve(krw3D, rw) = krw3D
 """
     FineCellFluid
 
-The constitutive functions of a hybrid grid's fine 3D cells, from a
-[`FineScaleFluid`](@ref) and the rock type of each cell: per rock type the
-CO2 relperm (drainage, and the imbibition curve from the largest maximum,
-for Killough's model), the brine relperm and the capillary pressure as tables
-in the saturation; per domain cell its rock type (0 for VE blocks).
+The constitutive functions of a hybrid grid's fine 3D cells, built from a
+[`FineScaleFluid`](@ref) and each cell's rock type: per rock type, the
+relperms and capillary pressure as tables in the saturation. The imbibition
+curve (from the largest maximum, 1 − r_w) is for Killough's model.
 """
 struct FineCellFluid{K, I, L}
     drain::Vector{K}        # per rock type: CO2 relperm, drainage
@@ -181,7 +209,7 @@ end
 
 The fine cells' functions for `domain` (a hybrid `ve_domain`) from a VE
 fluid's `fine` (`(fluid, rock_type)`, rock types per cell of the 3D mesh).
-Returns a new `FineCellFluid`; the arguments are only read.
+Returns a new `FineCellFluid`.
 """
 function _fine_cell_fluid(fine, domain)
     ff, types = fine.fluid, fine.rock_type
@@ -202,9 +230,8 @@ function _fine_cell_fluid(fine, domain)
                          rw, rg)
 end
 
-# The capillary pressure as a function of the CO2 saturation, inverting the
-# brine saturation of capillary pressure; at zero CO2 the entry pressure (the
-# limit from above: CO2 enters only beyond it)
+# The capillary pressure as a function of CO2 saturation (the inverse of
+# invPc3D); at zero CO2 the entry pressure, the limit from above
 _capillary_of_co2(::Nothing, rw) = sg -> 0.0
 function _capillary_of_co2(invpc, rw)
     sgp(p) = 1 - invpc(max(p, 0.0))
@@ -226,9 +253,9 @@ end
     _fine_relperm(f, i, sG, smax) -> (krW, krG)
 
 Fine cell `i`'s relperms (brine, CO2) at CO2 saturation `sG` and maximum
-`smax`: the CO2's by the hysteresis law (its drainage curve at the law's
-saturation: the free one, or the saturation itself unless trapped) or
-Killough's, the brine's at `1 − sG`.
+`smax`. CO2: the drainage curve at the hysteresis law's saturation (the
+free one, or `sG` itself unless trapped), or Killough's model. Brine: its
+curve at `1 − sG`.
 """
 function _fine_relperm(f::FineCellFluid, i, sG, smax)
     t = f.rock_type[i]
@@ -242,9 +269,10 @@ end
 """
     _fine_capillary_pressure(f, i, sG, smax) -> Real
 
-Fine cell `i`'s capillary pressure (CO2 relative to brine): at the hysteresis
-law's saturation (endpoint scaling: the free one, zero free CO2 the entry
-pressure; a fixed residual: `sG`), or at `sG` with Killough's model.
+Fine cell `i`'s capillary pressure (CO2 relative to brine), evaluated at
+- the hysteresis law's saturation: the free one for endpoint scaling (zero
+  free CO2: the entry pressure), `sG` for a fixed residual;
+- `sG` with Killough's model.
 """
 function _fine_capillary_pressure(f::FineCellFluid, i, sG, smax)
     t = f.rock_type[i]

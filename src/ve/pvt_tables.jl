@@ -1,23 +1,19 @@
-# Tabulated phase properties in pressure and temperature (roadmap Stage 7):
-# JutulDarcy's CO2–brine tables (the default).
+# Phase properties (density, viscosity) as functions of pressure and
+# temperature, for the VE and fine-scale fluids.
 #
-# - JutulDarcy's: `co2_brine_property_tables` (its CO2Properties module), the
-#   CSP11 tables by default (NIST-consistent; researcher, 2026-10-02), the Salo
-#   et al. 2024 correlations on request and for salinity; density and
-#   viscosity of both phases (pure brine, CO2);
-# co2lab's sampled tables (for the comparisons with co2lab only) are read by
-# scripts/co2lab_tables.jl, as PhaseTables (researcher, 2026-10-02).
-#
-# A phase property is a `PhaseTable` (a function of p and T), or `(c, p_ref)`
-# for co2lab's linear model `ref·(1 + c·(p − p_ref))`, `(0, 0)` for constant.
+# A phase property is either
+# - a `PhaseTable`, a function of `(p, T)`: JutulDarcy's CO2–brine tables
+#   (`jutuldarcy_property_tables`, the default), or co2lab's sampled tables
+#   (read by the comparison scripts, for comparisons with co2lab only); or
+# - `(c, p_ref)`, co2lab's linear model `ref·(1 + c·(p − p_ref))`; `(0, 0)`
+#   for a constant.
 
 """
     PhaseTable
 
-A tabulated phase property `(p, T) -> value` (pressure in Pa, temperature in
-K), e.g. from [`jutuldarcy_property_tables`](@ref); any function of `p` and
-`T` (co2lab's sampled tables in the comparison scripts,
-`scripts/co2lab_tables.jl`).
+A tabulated phase property, callable as `t(p, T)` (pressure in Pa,
+temperature in K). Made by [`jutuldarcy_property_tables`](@ref), or wraps
+any function of `p` and `T` (e.g. co2lab's sampled tables).
 """
 struct PhaseTable{F}
     f::F            # (p, T) -> property value
@@ -32,16 +28,23 @@ end
                                salt_names = String[], salt_mole_fractions = Float64[])
         -> NamedTuple
 
-JutulDarcy's CO2–brine property tables (`co2_brine_property_tables`), as
-phase tables: `co2_source = :csp11` (default: the CSP11 tables, consistent
-with NIST) or `:salo24` (the Salo et al. 2024 correlations, which take
-salinity; their CO2 viscosity is 5–30 % above NIST's,
-`analysis/stage7-table-properties-2026-10-02.txt`); `co2_density = :nist`
-(default) or `:rk` (Redlich–Kwong). Salts (`salt_names`, e.g. `["NaCl"]`, and
-their `salt_mole_fractions`) require `co2_source = :salo24`.
+JutulDarcy's CO2–brine property tables (`co2_brine_property_tables`) as
+[`PhaseTable`](@ref)s, for tabulated densities and viscosities of pure
+brine and CO2.
 
-Returns the NamedTuple `(density, viscosity)`, each a tuple of new
-[`PhaseTable`](@ref)s `(brine, CO2)`.
+# Arguments
+
+- `co2_source`: `:csp11` (default; the CSP11 tables, consistent with NIST)
+  or `:salo24` (the Salo et al. 2024 correlations; their CO2 viscosity is
+  5–30 % above NIST's).
+- `co2_density`: `:nist` (default) or `:rk` (Redlich–Kwong).
+- `salt_names`, `salt_mole_fractions`: salts (e.g. `["NaCl"]`) and their
+  mole fractions; need `co2_source = :salo24` (an error otherwise).
+
+# Returns
+
+The NamedTuple `(density, viscosity)`, each a tuple of new `PhaseTable`s
+`(brine, CO2)`: density in kg/m³, viscosity in Pa·s.
 """
 function jutuldarcy_property_tables(; co2_source = :csp11, co2_density = :nist,
                                     salt_names = String[],
@@ -71,12 +74,11 @@ _tabulated(specs...) = any(s -> s isa PhaseTable, specs)
 # ------------------------------- Jutul variables -------------------------------
 
 """
-Shrinkage factors `b = ρ(p, T)/ρ_ref` per phase (brine, CO2), each tabulated
-or linear (`pvt`), at the cell's pressure and temperature (the `Temperature`
-parameter).
+Shrinkage factors `b = ρ(p, T)/ρ_ref` per phase (brine, CO2), at the cell's
+pressure and `Temperature` parameter; each phase tabulated or linear.
 """
 struct PVTShrinkage{R} <: JutulDarcy.PhaseVariables
-    rho_ref::NTuple{2, Float64}  # reference ("surface") densities
+    rho_ref::NTuple{2, Float64}  # reference ("surface") densities (kg/m³)
     pvt::R                       # per phase: PhaseTable or (c, p_ref)
 end
 
@@ -90,13 +92,17 @@ end
 end
 
 """
-Viscosities per phase (brine, CO2), each tabulated or linear (`pvt`, with
-`mu_ref` for linear ones), at the cell's temperature and, with `P = true`, at
-the phase pressures as co2lab's (CO2 at `p + pcWG`; wells, `P = false`, at
-`p`).
+    PVTViscosities(mu_ref, pvt; phase_pressures = true)
+
+Viscosities per phase (brine, CO2), at the cell's `Temperature` parameter;
+each phase tabulated or linear (`mu_ref` is used for linear ones only).
+
+The pressure: with `phase_pressures = true` (type parameter `P`; the
+reservoir) each phase's own, as co2lab (CO2 at `p + pcWG`); with `false`
+(wells, which have no capillary pressure) `p`.
 """
 struct PVTViscosities{U, P} <: JutulDarcy.PhaseVariables
-    mu_ref::NTuple{2, Float64}  # reference viscosities (linear ones)
+    mu_ref::NTuple{2, Float64}  # reference viscosities (Pa·s; linear ones)
     pvt::U                      # per phase: PhaseTable or (c, p_ref)
 end
 PVTViscosities(mu_ref, pvt::U; phase_pressures::Bool = true) where {U} =

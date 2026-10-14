@@ -1,10 +1,9 @@
-# The Norwegian CO2 Storage Atlas: a formation as a VE domain (roadmap Stage 5,
-# step 3) — co2lab-common/atlasgrid/getFormationTopGrid.m.
+# The Norwegian CO2 Storage Atlas, part 3: a formation as a 3D mesh and a VE
+# domain (co2lab's getFormationTopGrid).
 #
-# co2lab: getAtlasGrid, refineGrdecl (vertical layers), processGRDECL, the
-# largest connected piece, topSurfaceGrid, averageRock. Here: the grid section
-# of atlas_grid.jl, GeoEnergyIO's mesh_from_grid_section, the largest piece,
-# then ve_columns and ve_domain as for any other 3D grid (roadmap Stage 1).
+# The grid section of atlas_grid.jl is meshed by GeoEnergyIO, cut to its
+# largest connected piece, then given columns and a VE domain (ve_columns,
+# ve_domain) as any other 3D grid. Also: subsets of a grid section.
 
 # ------------------------------- The VE domain --------------------------------
 
@@ -13,37 +12,47 @@
                     perm = nothing, poro = nothing, rugosity = 0.0,
                     temperature = nothing, co2lab_compatible = false) -> NamedTuple
 
-Atlas formation `name` as a VE domain, as co2lab's
-`getFormationTopGrid(name, coarsening, 'vertical_layers', layers)`:
+An Atlas formation as a VE domain, ready for
+[`setup_co2lab_model`](@ref); co2lab's
+`getFormationTopGrid(name, coarsening, 'vertical_layers', layers)`.
 
-1. the grid section of [`atlas_grid_section`](@ref) with `nz = layers` (co2lab
-   refines a one-layer deck with `refineGrdecl` instead: the same layers, up
-   to rounding);
-2. the 3D mesh from GeoEnergyIO's `mesh_from_grid_section`, restricted to its
-   largest connected piece (the other pieces are deactivated in `ACTNUM` and
-   the mesh built again);
-3. columns ([`ve_columns`](@ref)) and the VE domain ([`ve_domain`](@ref));
-4. rock as co2lab: with rock maps, the maps per 3D cell, their `NaN`s
-   replaced by the formation's averages, then averaged over each column;
-   otherwise the formation's average values (`petro`) everywhere. With rock
-   maps, net-to-gross comes only from a net-to-gross map (co2lab drops the
-   Atlas's average net-to-gross then, and so does this); without, from the
-   average if the Atlas gives one.
+Steps: the mesh of [`atlas_mesh`](@ref) (grid section, largest connected
+piece, columns), then the rock per 3D cell and [`ve_domain`](@ref).
 
-`perm` (m²) and `poro`, if given, replace the formation's average values:
-needed where the Atlas has none (the Brent Group, Pliocene sand, Sleipner,
-and the sealing Rør and Not formations), for which co2lab builds grids with
-`NaN` rock; here they throw an `ArgumentError` instead. `rugosity` (m, a
-number or one value per column) and `temperature` (K; a number, one value
-per column or a function of depth) are passed on to [`ve_domain`](@ref);
-`min_thickness` (per layer) and `co2lab_compatible` to
-[`atlas_grid_section`](@ref).
+# Arguments
 
-Returns the NamedTuple `(mesh, columns, ve, grid, petro)`, all new: the 3D
-`UnstructuredMesh`, its `VEColumns`, [`ve_domain`](@ref)'s result, the grid
-section with `ACTNUM` restricted to the mesh's cells, and the formation's
-average rock (`(perm, poro, ntg)`, 40 in `STRUCTURES.md`, with `perm`,
-`poro` as given).
+- `name`: the formation (case-insensitive).
+- `coarsening`, `min_thickness` (m, per layer), `co2lab_compatible`: as
+  [`atlas_grid_section`](@ref).
+- `layers`: the number of vertical layers of the 3D grid (`nz`). Default 1.
+- `perm` (m²), `poro`: replace the formation's Atlas average values. Needed
+  where the Atlas has none (the Brent Group, Pliocene sand, Sleipner, and
+  the sealing Rør and Not formations); without them those throw an
+  `ArgumentError` (co2lab builds grids with `NaN` rock instead).
+- `rugosity` (m), `temperature` (K): passed on to [`ve_domain`](@ref); each
+  a number or one value per column, `temperature` also a function of depth.
+
+# Returns
+
+The NamedTuple `(mesh, columns, ve, grid, petro)`, all new:
+
+- `mesh`: the 3D `UnstructuredMesh` of the largest connected piece.
+- `columns`: its `VEColumns`.
+- `ve`: [`ve_domain`](@ref)'s result.
+- `grid`: the grid section, `"ACTNUM"` restricted to the mesh's cells.
+- `petro`: the formation's average rock `(perm, poro, ntg)`, with `perm` and
+  `poro` as given.
+
+# Notes
+
+- Rock, as co2lab: with rock maps, the maps per 3D cell with their `NaN`s
+  replaced by the averages, then averaged over each column; otherwise the
+  averages everywhere.
+- With rock maps, net-to-gross comes only from a net-to-gross map (co2lab
+  then drops the Atlas's average net-to-gross, and so does this); without
+  maps, from the average if the Atlas gives one.
+- co2lab makes the layers by refining a one-layer deck (`refineGrdecl`);
+  the layers are the same up to rounding.
 """
 function atlas_ve_domain(name::AbstractString; coarsening::Integer = 1,
                          layers::Integer = 1, min_thickness::Real = 1e-3,
@@ -67,14 +76,27 @@ end
     atlas_mesh(name; coarsening = 1, layers = 1, min_thickness = 1e-3,
                co2lab_compatible = false) -> NamedTuple
 
-Steps 1–3 of [`atlas_ve_domain`](@ref) without the rock: the geometry of
-Atlas formation `name` — also of formations without Atlas rock values (for
-maps, trap analysis). The arguments are as for [`atlas_ve_domain`](@ref).
+The geometry of an Atlas formation, without rock: the 3D mesh and its
+columns, for maps and trap analysis. Works also for formations without Atlas
+rock values. [`atlas_ve_domain`](@ref) builds on it.
 
-Returns the NamedTuple `(mesh, columns, grid, petro)`, all new: the 3D
-`UnstructuredMesh` of the largest connected piece, its `VEColumns`, the grid
-section with `ACTNUM` restricted to the mesh's cells, and the Atlas's average
-rock (possibly `NaN`).
+The grid section of [`atlas_grid_section`](@ref) (with `nz = layers`) is
+meshed by GeoEnergyIO and restricted to its largest connected piece (the
+other pieces are made inactive and the mesh built again).
+
+# Arguments
+
+As for [`atlas_ve_domain`](@ref): `name`, `coarsening`, `layers`,
+`min_thickness`, `co2lab_compatible`.
+
+# Returns
+
+The NamedTuple `(mesh, columns, grid, petro)`, all new:
+
+- `mesh`: the 3D `UnstructuredMesh` of the largest connected piece.
+- `columns`: its `VEColumns` ([`ve_columns`](@ref)).
+- `grid`: the grid section, `"ACTNUM"` restricted to the mesh's cells.
+- `petro`: the Atlas's average rock `(perm, poro, ntg)`, possibly `NaN`.
 """
 function atlas_mesh(name::AbstractString; coarsening::Integer = 1,
                     layers::Integer = 1, min_thickness::Real = 1e-3,
@@ -92,13 +114,20 @@ end
 """
     grid_section_subset(grid, mesh, keep) -> NamedTuple
 
-Part of a corner-point grid (co2lab's `extractSubgrid`): the grid section
-`grid` with only the cells of its mesh `mesh` for which `keep` (one `Bool`
-per cell of `mesh`) is true left active, meshed anew — e.g. the cells whose
-centroids lie in a region. `grid` and `mesh` are only read.
+Part of a corner-point grid, meshed anew (co2lab's `extractSubgrid`), e.g.
+the cells whose centroids lie in a region.
 
-Returns `(mesh, columns, grid)`, all new: the mesh, its `VEColumns` and the
-grid section (a copy of `grid` with a new `"ACTNUM"`).
+# Arguments
+
+- `grid`: a grid section.
+- `mesh`: the mesh of `grid`.
+- `keep`: one `Bool` per cell of `mesh`, true for the cells to keep. A wrong
+  length throws an `ArgumentError`.
+
+# Returns
+
+The NamedTuple `(mesh, columns, grid)`, all new: the mesh of the kept cells,
+its `VEColumns`, and a copy of `grid` with a new `"ACTNUM"`.
 """
 function grid_section_subset(grid, mesh, keep::AbstractVector{Bool})
     length(keep) == number_of_cells(mesh) ||
@@ -113,8 +142,8 @@ function grid_section_subset(grid, mesh, keep::AbstractVector{Bool})
     return (mesh = m, columns = first(ve_columns(m)), grid = sub)
 end
 
-# ACTNUM (new Array{Bool, 3}) keeping only the largest connected piece of the
-# section's mesh (co2lab: processGRDECL's pieces, the one with most cells)
+# A new ACTNUM (Array{Bool, 3}) keeping only the largest connected piece of
+# the section's mesh (co2lab: the processGRDECL piece with most cells)
 function _largest_piece(grid)
     mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
     # pieces connected through faces

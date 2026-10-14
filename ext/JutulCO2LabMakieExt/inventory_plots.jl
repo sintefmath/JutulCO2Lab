@@ -1,4 +1,5 @@
 # The trapping inventory over a run (co2lab's plotTrappingDistribution).
+# Public functions are documented in src/plotting.jl.
 
 # co2lab's getInventoryColors, as plotTrappingDistribution assigns them
 function _inventory_colours()
@@ -15,10 +16,12 @@ function _inventory_colours()
     return [c[1], c[2], c[3], c[4], subscale, c[5], c[6], c[7]]
 end
 
+# Legend labels, in the order of _inventory_colours
 const _INVENTORY_LABELS = ["Dissolved", "Structural residual", "Residual",
                            "Residual in plume", "Structural subscale",
                            "Structural plume", "Free plume", "Exited"]
 
+# A new figure with one axis (years, Mt)
 function plot_trapping_history(history; title = "", kwarg...)
     fig = Figure(size = (1000, 550))
     ax = Axis(fig[1, 1]; title = title, xlabel = "years since simulation start",
@@ -27,6 +30,7 @@ function plot_trapping_history(history; title = "", kwarg...)
     return fig
 end
 
+# Stacked bands per category, the exited mass on top
 function plot_trapping_history!(ax, history; legend = true)
     years = history.t ./ (365.25 * 86400)
     # the exited mass on top (negative round-off clipped), in Mt

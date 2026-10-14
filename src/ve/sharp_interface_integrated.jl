@@ -1,16 +1,16 @@
-# co2lab's 'sharp_interface_integrated' (roadmap Stage 6 item 3): the sharp
-# interface in a column whose rock varies with depth (addVERelpermSharpInterface
+# co2lab's 'sharp_interface_integrated' vertical model: the sharp interface in
+# a column whose rock varies with depth (co2lab: addVERelpermSharpInterface
 # with 'type', 'integrated'; upscaledSat2height's heterogeneous branch).
 #
-# - heights by pore volume: h_max from sGmax·Vtot = (1 − rw)·V(h_max), h from
-#   sG·Vtot − rg·V(h_max) = (1 − rw − rg)·V(h), V(z) the pore volume above
-#   depth z; V is piecewise linear in z (one piece per fine cell), so it is
-#   inverted exactly (co2lab: Newton to 1e-5 m³);
-# - relperm by permeability: the CO2's as the plume's share of ∫ k_x dz
-#   (co2lab; x only, researcher 2026-10-02), the brine's zoned like the sharp
-#   interface's — 1 below h_max, the endpoint between h and h_max — where
-#   co2lab scales the whole brine column by the endpoint (co2lab-issues.org);
-# - the touched brine (dissolution) and the inventory split by pore volume.
+# - Heights by pore volume: h_max from sGmax·Vtot = (1 − rw)·V(h_max), h from
+#   sG·Vtot − rg·V(h_max) = (1 − rw − rg)·V(h), with V(z) the pore volume above
+#   depth z. V is piecewise linear (one piece per fine cell), so it is inverted
+#   exactly (co2lab: Newton to 1e-5 m³).
+# - Relperm by x-permeability: the CO2's is the plume's share of ∫ k_x dz, as in
+#   co2lab. The brine's is zoned like the sharp interface's (1 below h_max, the
+#   endpoint between h and h_max), where co2lab scales the whole brine column
+#   by the endpoint.
+# - The touched brine (dissolution) and the inventory split go by pore volume.
 #
 # Uniform rock gives `SharpInterface`'s results.
 
@@ -21,16 +21,25 @@
                              geometry = ve_column_geometry(mesh, columns),
                              anisotropy_rtol = 1e-6) -> SharpInterfaceIntegrated
 
-The integrated sharp interface for the VE columns `columns` of the 3D `mesh`,
-from the fine cells' porosity `poro` and x-permeability `perm_x` (per cell of
-`mesh`; the same as given to [`ve_domain`](@ref)). The relperm uses `perm_x`
-only, as co2lab; if `perm_y` is given and differs from it by more than
-`anisotropy_rtol` (relative) anywhere, a warning says so. `geometry` is the
-columns' geometry, if already computed.
+Build the integrated sharp interface for one grid, to give to
+[`co2lab_ve_fluid`](@ref) as `vertical`.
 
-Returns a new `SharpInterfaceIntegrated` (cumulative integrals per column) to
-give to [`co2lab_ve_fluid`](@ref) as `vertical`; it belongs to this grid. The
-arguments are only read.
+# Arguments
+
+- `mesh`, `columns`: the 3D mesh and its VE columns ([`ve_columns`](@ref)).
+- `poro`, `perm_x`: porosity and x-permeability (m²) per cell of `mesh`, the
+  same as given to [`ve_domain`](@ref).
+- `perm_y`: only checked: the relperm uses `perm_x` only, as co2lab, and a
+  warning is given if `perm_y` differs from it by more than `anisotropy_rtol`
+  (relative) anywhere.
+- `geometry`: the columns' geometry ([`ve_column_geometry`](@ref)), if
+  already computed.
+
+# Returns
+
+A new `SharpInterfaceIntegrated` holding cumulative integrals per column. It
+belongs to this grid: using it on a domain with a different number of
+columns (e.g. in [`setup_co2lab_model`](@ref)) throws.
 """
 function SharpInterfaceIntegrated(mesh, columns::VEColumns; poro, perm_x,
                                   perm_y = nothing,
@@ -57,7 +66,7 @@ function SharpInterfaceIntegrated(mesh, columns::VEColumns; poro, perm_x,
     return SharpInterfaceIntegrated(pos, z, V, K)
 end
 
-# The model belongs to its grid: check that the domain has its columns
+# The model itself, after checking that the domain has its number of columns
 function _vertical_model(spec::SharpInterfaceIntegrated, domain, fluid)
     n = length(domain[:column_height])
     length(spec.pos) - 1 == n ||
@@ -68,9 +77,8 @@ end
 
 # ------------------------------ Column integrals ------------------------------
 
-# `Y` (V or K) of column i at depth h below the caprock, linear within each
-# cell; at a cell boundary the slope of the cell below (co2lab's
-# integrateVertically)
+# `Y` (V or K) of column i at depth h below the caprock (co2lab's
+# integrateVertically): linear within each cell, at a boundary the slope below
 function _integral(m::SharpInterfaceIntegrated, i, Y, h)
     r = m.pos[i]:(m.pos[i+1] - 1)
     k = clamp(searchsortedlast(view(m.z, r), Jutul.value(h)), 1, length(r) - 1)

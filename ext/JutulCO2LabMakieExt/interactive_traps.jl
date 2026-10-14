@@ -1,9 +1,9 @@
-# The interactive trap viewer (roadmap Stage 11 item 5): co2lab's
-# interactiveTrapping in Makie's own widgets, so that it runs in a GLMakie
-# window or in a browser (WGLMakie) alike. The caprock in 3D, coloured by
-# spill region or depth, with traps and rivers; a click picks a column and
-# shows the traps CO2 injected there would fill, in spill order, with a pie
-# and a bar chart of their volumes.
+# The interactive trap viewer, co2lab's interactiveTrapping, in Makie's own
+# widgets so that it runs in a GLMakie window or a browser (WGLMakie) alike:
+# the caprock in 3D, coloured by spill region or depth, with traps and rivers;
+# a click picks a column and shows the traps CO2 injected there would fill, in
+# spill order, with a pie and a bar chart of their volumes. Public functions
+# are documented in src/plotting.jl.
 
 # ---------------------------------- Layout ------------------------------------
 
@@ -104,6 +104,7 @@ _blocks(b) = [b]
 
 # ----------------------------------- Viewer -----------------------------------
 
+# A new viewer: layout, widgets, callbacks, then the first surface drawn
 function interactive_traps(s; res = nothing, method::Symbol = :node, traps = true,
                            spill_regions = false, lighting = false, contours = false,
                            path_colours = true, injection_column = 0,
@@ -129,6 +130,7 @@ function interactive_traps(s; res = nothing, method::Symbol = :node, traps = tru
     return v
 end
 
+# Another surface in the viewer, analysed with the method selected
 function interactive_traps!(v, s; res = nothing, title = "", injection_column = 0)
     v.info.text[] = "Computing the traps ..."
     m = Symbol(v.method.selection[])
@@ -380,6 +382,7 @@ function _value_colorbar(fig)
     return cb
 end
 
+# The caprock coloured by per-column values, or back to the viewer's colours
 function show_column_values!(v, values; label = "", colormap = :viridis)
     _locked(v) do
         c = v.current[]

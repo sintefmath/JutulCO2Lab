@@ -1,7 +1,9 @@
-# Map view of a VE domain (co2lab's mapPlot) on the columns' top faces.
+# Map view of a VE domain (co2lab's mapPlot) on the columns' top faces, and its
+# outline. Public functions are documented in src/plotting.jl.
 
 # ---------------------------------- The map -----------------------------------
 
+# A new figure with one map axis and, for a background, a colour bar
 function plot_ve_map(surface; title = "", colorbar = true, kwarg...)
     fig, ax = _map_figure(title)
     plot_ve_map!(ax, surface; kwarg...)
@@ -10,6 +12,7 @@ function plot_ve_map(surface; title = "", colorbar = true, kwarg...)
     return fig
 end
 
+# Map view (2D axis); the Axis3 method is in surface_3d.jl
 function plot_ve_map!(ax, surface; background = nothing, colormap = :viridis,
                       depth_contours = 40, plumes = [], plume_threshold = 0.3,
                       plume_colors = [:red, :blue, :cyan, :green, :magenta],
@@ -53,6 +56,7 @@ function plot_ve_map!(ax, surface; background = nothing, colormap = :viridis,
     return ax
 end
 
+# The lateral boundary as line segments (2D axis)
 function plot_ve_outline!(ax, surface; color = :black, linewidth = 2, label = nothing)
     x, y = surface.x, surface.y
     pts = Point2f[Point2f(x[n], y[n]) for e in surface.outline for n in e]

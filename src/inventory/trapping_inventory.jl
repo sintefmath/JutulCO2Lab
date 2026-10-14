@@ -1,12 +1,12 @@
-# The trapping inventory of a VE simulation (roadmap Stage 9 item 2):
-# co2lab-ve's massTrappingDistributionVE and postprocessStates — where the CO2
-# is, by trapping mechanism, per state and over a run.
+# The trapping inventory of a VE simulation: where the CO2 is, by trapping
+# mechanism, per state and over a run (co2lab-ve's massTrappingDistributionVE
+# and postprocessStates).
 #
 # Per column, the plume (height h) holds mobile CO2 above the residual zone
-# (down to h_max). Both are split at the column's trap height zt (from the
-# caprock down to its trap's spill depth, from trap_analysis) into structural
-# and free parts, and at the subscale height dh (the caprock's rugosity) into
-# subscale-trapped parts; the dissolved CO2 is a category of its own.
+# (down to h_max). Both are split at the column's trap height zt (caprock down
+# to its trap's spill depth, from trap_analysis) into structural and free
+# parts, and at the subscale height dh (the caprock's rugosity) into
+# subscale-trapped parts. Dissolved CO2 is a category of its own.
 
 "Names of the inventory categories, in co2lab's reporting order."
 const TRAPPING_CATEGORIES = (:dissolved, :structural_residual, :residual,
@@ -15,11 +15,11 @@ const TRAPPING_CATEGORIES = (:dissolved, :structural_residual, :residual,
 
 # ------------------------------ Column properties -----------------------------
 
-# What the inventory needs per column besides the state: static pore volume,
-# height, rugosity (the grid's, if it has one), trap height (from the trap
-# analyses `res` on the trap surfaces `s`: one of each, or vectors, one per
-# sheet), the pressure dependence of pore volume, the temperature (tabulated
-# properties) and the column-specific vertical model
+# Per-column inputs of the inventory besides the state: static pore volume,
+# height, rugosity (the grid's, if any), trap height (from trap analyses `res`
+# on trap surfaces `s`: one of each, or vectors, one per sheet), pore-volume
+# pressure dependence, temperature (tabulated properties) and the vertical
+# model
 function _inventory_columns(model, fluid::CO2LabVEFluid, s, res)
     rmodel = JutulDarcy.reservoir_model(model)
     domain = JutulDarcy.reservoir_domain(rmodel)
@@ -33,9 +33,9 @@ function _inventory_columns(model, fluid::CO2LabVEFluid, s, res)
             vertical = _vertical_model(fluid.vertical, domain, fluid))
 end
 
-# Per column, the height below its top that lies in a trap (co2lab's zt):
+# Per column, the height below its top that lies in a trap (co2lab's zt),
 # from each surface's polygons (its `blocks`; without them, polygon i is
-# column i and the surface must cover every column) and their trap regions;
+# column i and the surface must cover every column) and trap regions;
 # 0 for columns on no surface (fine cells, sheets not given)
 function _trap_heights(H, surfaces, results)
     length(surfaces) == length(results) ||
@@ -71,25 +71,23 @@ end
     trapping_inventory(state, model, fluid, s, res; co2lab_compatible = false)
         -> NamedTuple
 
-Where the CO2 of a VE simulation state is, by trapping mechanism — co2lab's
-`massTrappingDistributionVE`. `state` is a reservoir
-state of a run of `model` ([`setup_co2lab_model`](@ref) with `fluid`); `s`
-and `res` are a trap surface ([`trap_surface`](@ref)) and its trap analysis
-([`trap_analysis`](@ref)), or vectors of them, one per sheet
-([`ve_sheets`](@ref)) of a grid with several blocks per pillar. Columns on
-none of the surfaces (fine cells, sheets not given) have no structural
-trapping. The subscale height is the grid's rugosity (`:rugosity` of the VE
-domain), zero if it has none.
+Where the CO2 of one VE simulation state is, by trapping mechanism (co2lab's
+`massTrappingDistributionVE`). [`trapping_history`](@ref) does this for a
+whole run.
 
-Each column's immobile (residual) and mobile CO2 is split between the zones
-under the caprock (subscale relief, structural trap, below) by where it lies
-in the column. For a sharp interface the saturation is even over the plume,
-so by height, as co2lab. For a capillary fringe by the fringe's saturation
-profile (the mobile part by the current one, the immobile part by the
-maximum one); `co2lab_compatible = true` splits it by height as co2lab does
-(co2lab-issues.org).
+# Arguments
 
-Returns a new NamedTuple of masses (kg), in co2lab's reporting order
+- `state`: a reservoir state of a run of `model`.
+- `model`, `fluid`: the model ([`setup_co2lab_model`](@ref)) and its fluid.
+- `s`, `res`: a trap surface ([`trap_surface`](@ref)) and its
+  [`trap_analysis`](@ref); or vectors of them, one per sheet
+  ([`ve_sheets`](@ref)) of a grid with several blocks per pillar.
+- `co2lab_compatible`: for a capillary fringe, split by height as co2lab
+  does (see Notes).
+
+# Returns
+
+A new NamedTuple of CO2 masses (kg), in co2lab's reporting order
 ([`TRAPPING_CATEGORIES`](@ref)):
 - `dissolved`: dissolved in the brine;
 - `structural_residual`: residual CO2 within traps;
@@ -99,7 +97,22 @@ Returns a new NamedTuple of masses (kg), in co2lab's reporting order
 - `structural_subscale`: in the caprock's subscale relief (rugosity);
 - `structural_plume`: mobile CO2 within traps;
 - `free_plume`: mobile CO2 outside traps.
-Each is at least zero, as in co2lab. The arguments are only read.
+
+Each is at least zero, as in co2lab.
+
+# Notes
+
+- Columns on none of the surfaces (fine cells, sheets not given) have no
+  structural trapping.
+- The subscale height is the VE domain's `:rugosity`, zero if it has none.
+- Each column's immobile (residual) and mobile CO2 is split between the
+  zones under the caprock (subscale relief, structural trap, below) by
+  where it lies in the column:
+  - sharp interface: the saturation is even over the plume, so by height,
+    as co2lab;
+  - capillary fringe: by the fringe's saturation profile (mobile part by
+    the current one, immobile part by the maximum one). co2lab splits by
+    height here too, which is what `co2lab_compatible = true` does.
 """
 function trapping_inventory(state, model, fluid::CO2LabVEFluid, s, res;
                             co2lab_compatible::Bool = false)
@@ -146,13 +159,17 @@ end
     _category_saturations(m, S, Smax, h, h_max, col, drho, rw, rg;
                           co2lab_compatible = false) -> NamedTuple
 
-Each column's CO2 saturation split by vertical model `m` into immobile
+Each column's CO2 saturation split by the vertical model `m` into immobile
 (residual) and mobile parts, each in subscale traps (depth `col.dh`), in
-structural traps (`col.zt`) and free; `res` the residual CO2 outside traps
-below the plume. `h`, `h_max` are the model's heights (uncapped), `drho` the
-density differences, `col` the inventory's column properties. For the sharp
-interface co2lab's `massTrappingDistributionVE`. Returns a new NamedTuple of
-vectors, one entry per column.
+structural traps (`col.zt`) and free. For the sharp interface this is
+co2lab's `massTrappingDistributionVE`.
+
+`h`, `h_max` are the model's heights (uncapped), `drho` the density
+differences, `col` the inventory's column properties.
+
+Returns a new NamedTuple of vectors, one entry per column: `immob_sub`,
+`mobile_sub`, `immob_struct`, `mobile_struct`, `immob_free`, `mobile_free`,
+and `res`, the residual CO2 outside traps below the plume.
 """
 function _category_saturations(::SharpInterface, S, Smax, h, h_max, col, drho, rw, rg;
                                co2lab_compatible::Bool = false)
@@ -188,18 +205,26 @@ end
     trapping_history(result, model, fluid, s, res; initial = 0.0,
                      co2lab_compatible = false) -> NamedTuple
 
-The trapping inventory ([`trapping_inventory`](@ref)) of every report step of
-a run (co2lab's `postprocessStates`), with the CO2 that has left the domain:
-`result` is `simulate_reservoir`'s result (a `ReservoirSimResult`), the
-other arguments as for [`trapping_inventory`](@ref); `initial` the CO2 mass
-in place at the start; `co2lab_compatible` as for
-[`trapping_inventory`](@ref).
+The trapping inventory ([`trapping_inventory`](@ref)) at every report step
+of a run, with the CO2 that has left the domain (co2lab's
+`postprocessStates`).
 
-Returns the new NamedTuple `(t, inventory, injected, exited)`: the report
-times (s), one inventory per step, the CO2 mass injected up to each step
-(net, from the wells' CO2 mass rates) and the mass that has left the domain
-(`initial + injected` minus the inventory's total). The arguments are only
-read.
+# Arguments
+
+- `result`: `simulate_reservoir`'s result (a `ReservoirSimResult`).
+- `model`, `fluid`, `s`, `res`, `co2lab_compatible`: as for
+  [`trapping_inventory`](@ref).
+- `initial`: the CO2 mass (kg) in place at the start.
+
+# Returns
+
+A new NamedTuple:
+- `t`: the report times (s);
+- `inventory`: one [`trapping_inventory`](@ref) per step;
+- `injected`: net CO2 mass (kg) injected up to each step, from the wells'
+  CO2 mass rates;
+- `exited`: CO2 mass (kg) that has left the domain, `initial + injected`
+  minus the inventory's total.
 """
 function trapping_history(result, model, fluid::CO2LabVEFluid, s, res;
                           initial::Real = 0.0, co2lab_compatible::Bool = false)

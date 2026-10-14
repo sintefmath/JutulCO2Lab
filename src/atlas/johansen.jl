@@ -1,8 +1,9 @@
-# The Johansen formation's NPD models — the sector model (NPD5) and the
-# full-field model — as co2lab-spillpoint's trapsJohansen example reads them:
-# the layers of the Johansen formation cut from the decks. Both are faulted
-# corner-point grids. And the sector model as a VE domain with its rock, as
-# co2lab-ve's exampleVEJohansen builds it (makeJohansenVEgrid).
+# The Johansen formation's NPD models, both faulted corner-point grids:
+#
+# - the sector model (NPD5) and the full-field model as meshes of the Johansen
+#   layers, as co2lab's trapsJohansen example reads them (for trap analysis);
+# - the sector model as a VE domain with its rock, as co2lab's
+#   exampleVEJohansen builds it (makeJohansenVEgrid).
 
 # ---------------------------------- The data ----------------------------------
 
@@ -19,8 +20,10 @@ const _JOHANSEN_MODELS = Dict(
 
 Directory holding the Johansen NPD decks (`NPD5.grdecl`,
 `FULLFIELD_IMAXJMAX.GRDECL` and its fault include file) and the sector
-model's rock (`NPD5_Permeability.txt`, `NPD5_Porosity.txt`): `Johansen` in
-[`atlas_data_directory`](@ref), as MRST's data directory has it.
+model's rock (`NPD5_Permeability.txt`, `NPD5_Porosity.txt`).
+
+Returns `Johansen` in [`atlas_data_directory`](@ref), as MRST's data
+directory has it.
 """
 johansen_data_directory() = joinpath(atlas_data_directory(), "Johansen")
 
@@ -29,22 +32,36 @@ johansen_data_directory() = joinpath(atlas_data_directory(), "Johansen")
 """
     johansen_mesh(model = :sector; co2lab_compatible = false) -> NamedTuple
 
-The Johansen formation in one of the NPD models, `model = :sector` (NPD5,
-layers 6–11) or `:full_field` (layers 10–14), cut from the decks as
-co2lab's `trapsJohansen` cuts them (`cutGrdecl`).
+The Johansen formation's layers in one of the NPD models, as a mesh with
+columns (no rock), cut from the deck as co2lab's `trapsJohansen` cuts them
+(`cutGrdecl`). For trap analysis and maps.
 
-The full-field model has inactive layers of zero thickness between active
-ones. GeoEnergyIO connects the cells across them (its pinch-out processing,
-by default also without a `PINCH` keyword), so a column continues below
-them; MRST's `processGRDECL` does not, and co2lab's `topSurfaceGrid` then
-drops the cells below the gap. `co2lab_compatible = true` meshes without
-pinch-out connections, as MRST. Throws an `ArgumentError` naming the file
-and where to download it if the deck is not in
-[`johansen_data_directory`](@ref).
+# Arguments
 
-Returns `(mesh, columns, grid)`, all new: GeoEnergyIO's `UnstructuredMesh`,
-its `VEColumns` and the cut grid section (a `Dict`: `"cartDims"`, `"COORD"`,
-`"ZCORN"`, `"ACTNUM"`; layer 1 is the model's first Johansen layer).
+- `model`: `:sector` (NPD5, deck layers 6–11) or `:full_field` (deck layers
+  10–14); otherwise an `ArgumentError`.
+- `co2lab_compatible`: mesh without connections across pinched-out layers,
+  as MRST (see Notes). Default `false`.
+
+# Returns
+
+The NamedTuple `(mesh, columns, grid)`, all new:
+
+- `mesh`: GeoEnergyIO's `UnstructuredMesh`.
+- `columns`: its `VEColumns`.
+- `grid`: the cut grid section (`Dict` with `"cartDims"`, `"COORD"`,
+  `"ZCORN"`, `"ACTNUM"`); its layer 1 is the model's first Johansen layer.
+
+Throws an `ArgumentError` naming the file and its download address if the
+deck is not in [`johansen_data_directory`](@ref).
+
+# Notes
+
+- The full-field model has inactive zero-thickness layers between active
+  ones. GeoEnergyIO connects cells across them (pinch-out processing, by
+  default even without a `PINCH` keyword), so a column continues below.
+  MRST does not, and co2lab's `topSurfaceGrid` then drops the cells below
+  the gap; `co2lab_compatible = true` gives MRST's behaviour.
 """
 function johansen_mesh(model::Symbol = :sector; co2lab_compatible::Bool = false)
     haskey(_JOHANSEN_MODELS, model) ||
@@ -64,10 +81,10 @@ function johansen_mesh(model::Symbol = :sector; co2lab_compatible::Bool = false)
     return (mesh = mesh, columns = first(ve_columns(mesh)), grid = grid)
 end
 
-# The layers `layers` of a grid section as a section of their own (co2lab's
-# cutGrdecl): ZCORN and ACTNUM cut, COORD kept. Cutting, rather than making
-# the other layers inactive, keeps the top faces whole: under inactive cells
-# GeoEnergyIO splits them where the layer above is faulted.
+# The layers `layers` of a grid section as a new section (co2lab's cutGrdecl):
+# ZCORN and ACTNUM cut, COORD kept. Cutting, rather than deactivating the other
+# layers, keeps the top faces whole: under inactive cells GeoEnergyIO splits
+# them where the layer above is faulted.
 function _cut_layers(grid, layers)
     nx, ny, nz = grid["cartDims"]
     # two ZCORN levels per layer (its top and bottom)
@@ -81,9 +98,11 @@ end
 """
     johansen_well_point() -> NTuple{2, Float64}
 
-The map position `(x, y)` of the injection well of the Johansen benchmark
-(Eigestad et al.): the centroid of the sector model's cell (48, 48) in the
-formation's top layer, as co2lab's `trapsJohansen` takes it.
+The map position of the injection well of the Johansen benchmark
+(Eigestad et al.), as co2lab's `trapsJohansen` takes it: the centroid of the
+sector model's cell (48, 48) in the formation's top layer.
+
+Returns `(x, y)` (m). Reads the sector model ([`johansen_mesh`](@ref)).
 """
 function johansen_well_point()
     m = johansen_mesh(:sector)
@@ -104,21 +123,30 @@ const _JOHANSEN_ZIP = "https://www.sintef.no/contentassets/" *
 """
     johansen_grid_section(; min_perm = 0.11) -> Dict{String, Any}
 
-The Johansen sector model (NPD5, all 11 layers) as a GeoEnergyIO grid
-section, as co2lab's `makeJohansenVEgrid` prepares it from the data set: the
-grid of `NPD5.grdecl`; the rock of `NPD5_Permeability.txt` (mD) and
-`NPD5_Porosity.txt`, one value per cell in deck order; cells with
-permeability below `min_perm` (mD) made inactive, which removes the shales
-(Dunlin above, Amundsen below). The layers holding active cells are cut out
-of the deck (co2lab's `cutGrdecl`; for `min_perm = 0.11`, deck layers 6–10),
-which leaves the cells as they are but keeps their top faces whole. Throws
-an `ArgumentError` naming the directory and the download address if a file
-is not in [`johansen_data_directory`](@ref).
+The Johansen sector model (NPD5) with its rock as a GeoEnergyIO grid
+section, as co2lab's `makeJohansenVEgrid` prepares it from the data set.
+The rock comes from `NPD5_Permeability.txt` (mD) and `NPD5_Porosity.txt`,
+one value per cell in deck order.
 
-Returns a new `Dict` with `"cartDims"`, `"COORD"`, `"ZCORN"`, `"ACTNUM"`,
-`"layers"` (the deck layers kept, a `UnitRange`; layer 1 of the section is
-the first of them) and the rock as `Array{Float64, 3}`: `"PERMX"`, `"PERMY"`
-(= x) and `"PERMZ"` (0.1 x) in m², as MRST converts them, and `"PORO"`.
+# Arguments
+
+- `min_perm`: cells with permeability below this (mD) are made inactive;
+  the default 0.11 removes the shales (Dunlin above, Amundsen below).
+
+# Returns
+
+A new `Dict{String, Any}` of the deck layers that hold active cells (cut as
+co2lab's `cutGrdecl`; deck layers 6–10 for the default `min_perm`):
+
+- `"cartDims"`, `"COORD"`, `"ZCORN"`, `"ACTNUM"`: the grid.
+- `"layers"`: the deck layers kept (`UnitRange`); section layer 1 is the
+  first of them.
+- `"PERMX"`, `"PERMY"` (= x), `"PERMZ"` (0.1 x): permeability (m², as MRST
+  converts it), `Array{Float64, 3}`.
+- `"PORO"`: porosity, `Array{Float64, 3}`.
+
+Throws an `ArgumentError` naming the directory and the download address if
+a file is not in [`johansen_data_directory`](@ref).
 """
 function johansen_grid_section(; min_perm::Real = 0.11)
     dir = johansen_data_directory()
@@ -149,8 +177,8 @@ function johansen_grid_section(; min_perm::Real = 0.11)
                              "layers" => layers))
 end
 
-# The numbers of a Johansen rock file in file order (MRST's
-# reshape(load(file)', [], 1)) as an array of size `dims`; '%' starts a comment
+# The numbers of a Johansen rock file, in file order (as MRST loads them), as
+# a new array of size `dims`; '%' starts a comment
 function _read_johansen_values(path, dims)
     v = Float64[]
     for line in eachline(path)
@@ -165,21 +193,31 @@ end
 """
     johansen_ve_domain(; min_perm = 0.11, kwargs...) -> NamedTuple
 
-The Johansen sector model as a VE domain, built from the data set as
-co2lab's `exampleVEJohansen` builds it (`makeJohansenVEgrid` with
-`remakeGrid`, then `topSurfaceGrid` and `averageRock`):
-[`johansen_grid_section`](@ref); its largest connected piece (MRST's `G(1)`)
-meshed by GeoEnergyIO; columns with the cells below a hole discarded
-(`discard_below_holes`); and [`ve_domain`](@ref) with the column averages of
-the x- and y-permeability and porosity. `kwargs` are passed on to
-[`ve_domain`](@ref) (e.g. `fault_flux`).
+The Johansen sector model as a VE domain, as co2lab's `exampleVEJohansen`
+builds it (`makeJohansenVEgrid` with `remakeGrid`, then `topSurfaceGrid` and
+`averageRock`).
 
-Returns the NamedTuple `(mesh, columns, ve, grid, sides)`, all new: the 3D
-`UnstructuredMesh` (discarded cells removed), its `VEColumns`,
-[`ve_domain`](@ref)'s result, the grid section (`ACTNUM` the largest piece,
-before discarding), and the lateral boundary sides
-([`ve_boundary_sides`](@ref)), all closed until opened by
-[`ve_boundary_conditions`](@ref).
+Steps: [`johansen_grid_section`](@ref); its largest connected piece (MRST's
+`G(1)`), meshed by GeoEnergyIO; columns, with the cells below a hole
+discarded; then [`ve_domain`](@ref) with the column averages of x- and
+y-permeability and porosity.
+
+# Arguments
+
+- `min_perm`: as [`johansen_grid_section`](@ref) (mD). Default 0.11.
+- `kwargs`: passed on to [`ve_domain`](@ref) (e.g. `fault_flux`).
+
+# Returns
+
+The NamedTuple `(mesh, columns, ve, grid, sides)`, all new:
+
+- `mesh`: the 3D `UnstructuredMesh`, discarded cells removed.
+- `columns`: its `VEColumns`.
+- `ve`: [`ve_domain`](@ref)'s result.
+- `grid`: the grid section, `"ACTNUM"` the largest piece (before
+  discarding).
+- `sides`: the lateral boundary sides ([`ve_boundary_sides`](@ref)), all
+  closed until opened by [`ve_boundary_conditions`](@ref).
 """
 function johansen_ve_domain(; min_perm::Real = 0.11, kwargs...)
     grid = johansen_grid_section(; min_perm)

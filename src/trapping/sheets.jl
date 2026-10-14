@@ -1,28 +1,38 @@
-# Sheets of a VE grid: the caprock surfaces of grids with several VE blocks
+# Sheets: the separate caprock surfaces of a VE grid with several VE blocks
 # per pillar (stacked columns below holes, sealed or leaky layers, VE regions
-# under fine cells). A sheet is a contiguous surface of connected top faces of
-# VE columns; each gets its own trap analysis (trap_surface(...; sheet)), and
-# CO2 leaving a sheet over an open rim edge spills up to the sheet above
-# (sheet_spill_targets).
+# under fine cells). Each sheet gets its own trap analysis
+# (`trap_surface(...; sheet)`); CO2 spilling over an open rim edge of a sheet
+# rises to the sheet above (`sheet_spill_targets`).
 
 # ---------------------------------- Sheets ------------------------------------
 
 """
     ve_sheets(mesh, columns::VEColumns) -> NamedTuple
 
-The sheets of a VE grid: two VE columns in different pillars belong to the
-same sheet when their top cells share a face of `mesh` (their top faces join,
-or meet across a fault with partial offset); a sheet is a connected set of
-such columns. Columns lower in a pillar (below a hole, a sealed or leaky
-face, or fine cells) form sheets of their own; fine cells (`is_ve` false)
-belong to none. Sheets are numbered by their first column (columns are in
-pillar order, top first).
+Split the VE columns into sheets: connected caprock surfaces, each analysed
+for traps on its own (`trap_surface(...; sheet)`).
 
-Returns the NamedTuple `(sheet, nsheets, top)`, all new: `sheet` the sheet of
-each column (`Vector{Int}`, 0 for fine cells), the number of sheets, and per
-sheet whether all its columns are the first block of their pillar
-(`Vector{Bool}`: the formation's top, nothing above it). `mesh` and
-`columns` are only read.
+Two VE columns in different pillars are on the same sheet when their top
+cells share a face of `mesh` (top faces that join, or meet across a fault
+with partial offset). Columns lower in a pillar (below a hole, a sealed or
+leaky face, or fine cells) form sheets of their own; fine cells belong to
+none.
+
+# Arguments
+
+- `mesh`: the 3D mesh.
+- `columns`: its column partition ([`ve_columns`](@ref)).
+
+# Returns
+
+A new NamedTuple:
+- `sheet`: the sheet of each column (`Vector{Int}`; 0 for fine cells);
+- `nsheets`: the number of sheets;
+- `top`: per sheet, whether all its columns are the first block of their
+  pillar, i.e. the formation's top with nothing above (`Vector{Bool}`).
+
+Sheets are numbered by their first column (columns are in pillar order, top
+first).
 """
 function ve_sheets(mesh, columns::VEColumns)
     nb = number_of_columns(columns)
@@ -57,9 +67,9 @@ function _first_blocks(columns::VEColumns)
             for b in 1:number_of_columns(columns)]
 end
 
-# The columns of the trap surface `sheet`: `:top` the first block of each
-# pillar if VE (the formation's top: on grids with one block per pillar, all
-# columns), an `Integer` the columns of that sheet of `ve_sheets`
+# The columns of the trap surface `sheet`: `:top` gives the first block of each
+# pillar if VE (the formation's top; all columns on grids with one block per
+# pillar), an `Integer` the columns of that sheet of `ve_sheets`
 function _surface_blocks(mesh, columns::VEColumns, sheet)
     sheet === :top && return findall(_first_blocks(columns))
     sheet isa Integer ||
@@ -75,22 +85,34 @@ end
 """
     sheet_spill_targets(mesh, columns::VEColumns, s) -> Vector{NamedTuple}
 
-Where CO2 goes that reaches an open rim edge of the trap surface `s`
-([`trap_surface`](@ref) of `mesh` and `columns`, typically one sheet): across
-the edge into the cell of the neighbouring pillar beside the top of the
-polygon's column (the shallowest one touching it), then up that pillar to the
-first VE column — the CO2 rises in it to its top, on the sheet that column
-belongs to. Sealed edges (faults) are closed and not listed.
+Where CO2 goes when it reaches an open rim edge of the trap surface `s`
+(typically one sheet): across the edge into the neighbouring pillar, then up
+that pillar to the first VE column, in which it rises to the top of that
+column's sheet. This links the trap analyses of stacked sheets.
 
-Returns a new vector with one NamedTuple `(edge, polygon, block, target,
-target_sheet)` per open boundary edge of `s`: the edge (index into
-`s.edges`), the polygon of `s` it bounds and that polygon's column, the
-column the CO2 reaches (`target`; 0 if the edge is on the grid's outer
-boundary, where CO2 leaves the domain, or the pillar beyond has only fine
-cells up to its top, where it stays in the fine region: then the topmost fine
-cell's column) and its sheet ([`ve_sheets`](@ref); 0 for none). The edge's
-side is the lateral side of the top cell whose faces hold both its end
-nodes. `mesh`, `columns` and `s` are only read.
+# Arguments
+
+- `mesh`, `columns`: the 3D mesh and its column partition.
+- `s`: a [`trap_surface`](@ref) of `mesh` and `columns`.
+
+# Returns
+
+A new vector with one NamedTuple per open boundary edge of `s` (sealed
+edges, e.g. faults, are closed and not listed):
+- `edge`: the edge (index into `s.edges`);
+- `polygon`: the polygon of `s` it bounds;
+- `block`: that polygon's column;
+- `target`: the column the CO2 reaches; 0 if the edge is on the grid's outer
+  boundary (CO2 leaves the domain). If the pillar beyond has only fine cells
+  up to its top, the CO2 stays in the fine region: the topmost fine cell's
+  column;
+- `target_sheet`: the sheet of `target` ([`ve_sheets`](@ref)); 0 for none.
+
+# Notes
+
+- The CO2 enters the neighbouring pillar at its shallowest cell beside the
+  top cell of the edge's column. The edge's side is the lateral side of that
+  top cell whose faces hold both end nodes of the edge.
 """
 function sheet_spill_targets(mesh, columns::VEColumns, s)
     sh = ve_sheets(mesh, columns)

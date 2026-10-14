@@ -1,37 +1,53 @@
-# The trapping analysis's front end (roadmap Stage 8 item 4): co2lab's
-# trapAnalysis(Gt, method, ...), on a trap surface.
+# The trapping analysis's front end: co2lab's trapAnalysis(Gt, method, ...),
+# on a trap surface.
 
 """
     trap_analysis(s; method = :cell, closed_boundary_edges = [],
                   closed_fault_edges = [], project_to_cells = true)
         -> NamedTuple
 
-Structural traps of a [`trap_surface`](@ref) `s`, as co2lab's
-`trapAnalysis(Gt, method == :cell, ...)`:
+The structural traps of a [`trap_surface`](@ref) `s` and how CO2 spills
+between them (co2lab's `trapAnalysis`). The result feeds the trap
+quantities ([`trap_volumes`](@ref), [`trapping_capacity`](@ref), ...) and
+the trapping inventory.
 
-- `method = :cell`: from column depths and column adjacency (co2lab's
-  cell-based method); `method = :node`: along the surface's nodes and edges
+# Arguments
+
+- `s`: the [`trap_surface`](@ref).
+- `method`: `:cell` (default) from column depths and column adjacency
+  (co2lab's cell-based method); `:node` along the surface's nodes and edges
   (the node-based method, co2lab's default in its VE examples).
 - `closed_boundary_edges`, `closed_fault_edges`: edges (node pairs of
-  `s.edges`) across which CO2 does not spill — node-based method only; the
-  cell-based method throws if given any (co2lab only warns and ignores
-  them).
+  `s.edges`) across which CO2 does not spill; node-based method only.
+- `project_to_cells`: node-based method only; `false` gives results per
+  node instead of per column.
+
+# Returns
+
+A new NamedTuple:
+- `traps`: the trap of each column (0: none);
+- `trap_z`: the spill depth of each trap (m);
+- `trap_regions`: the trap each column drains into (0: none);
+- `trap_adj`: which trap spills into which, a sparse `Bool` matrix
+  (`trap_adj[i, j]`: `i` spills into `j`);
+- `rivers`: the rivers leaving each trap (`rivers[t]`: vectors of columns,
+  from the trap downstream);
+- `top`: the columns at the top of the traps.
+
+With `project_to_cells = false` these are per node: trap and spill region
+per node, rivers as node lists, `top` the top nodes.
+
+# Notes
+
 - Sealed fault edges of the surface (`s.sealed`, [`trap_surface`](@ref)'s
   default) are closed boundaries with both methods: no CO2 leaves the
   domain over them.
+- The cell-based method throws if given closed edges (co2lab only warns and
+  ignores them).
 - The node-based method needs every column's top face to have four distinct
   corners (co2lab's `activeCellNodes`); it throws otherwise.
-- `project_to_cells`: node-based method only (`false`: results per node —
-  trap, spill region per node, rivers as node lists, `top` the top nodes).
-
-Returns a new NamedTuple `(traps, trap_z, trap_regions, trap_adj, rivers,
-top)`: the trap index of each column (0: none), the spill depth of each trap,
-the trap each column drains into (0: none), which trap spills into which (a
-sparse `Bool` matrix, `trap_adj[i, j]`: `i` spills into `j`), the rivers
-leaving each trap (`rivers[t]`: vectors of columns, from the trap
-downstream) and the columns at the top of the traps. Trap numbers may differ
-from co2lab's (it numbers equal-depth pieces in `dmperm`'s order). `s` is
-only read.
+- Trap numbers may differ from co2lab's (it numbers equal-depth pieces in
+  `dmperm`'s order).
 """
 function trap_analysis(s; method::Symbol = :cell, closed_boundary_edges = [],
                        closed_fault_edges = [], project_to_cells::Bool = true)

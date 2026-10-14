@@ -1,42 +1,41 @@
 # VE columns on a 3D parent mesh.
 #
-# The VE domain is a Jutul CoarseMesh over the 3D grid, one block per column
-# (see analysis/ve-meshing/grid-representation-comparison.md). CoarseMesh
-# accepts any partition and knows nothing about columns; this file builds
-# the column partition and the per-column data VE needs, from the 3D mesh
-# alone.
+# The VE domain is a Jutul CoarseMesh over the 3D grid, one block per column.
+# CoarseMesh accepts any partition and knows nothing about columns; this file
+# builds the column partition and the per-column geometry VE needs, from the
+# 3D mesh alone.
 #
-# A column is a vertically connected stretch of one pillar — in pure VE
-# usually the whole pillar (analysis/ve-meshing/isve-branch-proposal.md).
-# Cells are grouped by (i, j) pillar and ordered by k, as MRST's
-# topSurfaceGrid/identify_column_cells (co2lab-common/grid/topSurfaceGrid.m:
-# 735-779) — no geometric sort. Unlike co2lab, a pillar is cut where two
-# consecutive cells share no face (or only a sealed one), not at every gap in
-# k: a pinched-out layer does not cut (analysis/co2lab-issues.org).
+# A column is a vertically connected stretch of one pillar, in pure VE usually
+# the whole pillar. Cells are grouped by (i, j) pillar and ordered by k, as
+# co2lab's topSurfaceGrid (no geometric sort). Unlike co2lab, a pillar is cut
+# where two consecutive cells share no face (or only a sealed one), not at
+# every gap in k: a pinched-out layer does not cut.
 
 # ------------------------------ Column partition ------------------------------
 
 """
     VEColumns
 
-Column partition of a 3D mesh. A column is a vertically connected stretch of
-one pillar; with `below_holes = :stack` ([`ve_columns`](@ref)) a pillar can
-hold several. On a hybrid grid (roadmap Stage 12) a "column" is a *block*: a
-VE block (a vertically connected stretch of VE cells) or a single fine 3D
-cell.
+Column partition of a 3D mesh, made by [`ve_columns`](@ref): the blocks of
+the VE domain ([`ve_domain`](@ref)).
 
-- `cells`: fine cells of all columns, concatenated, each column top→bottom
-- `pos`: column `c` is `cells[pos[c]:pos[c+1]-1]`
+A column is a vertically connected stretch of one pillar; with
+`below_holes = :stack` a pillar can hold several. On a hybrid grid a
+"column" is a *block*: a VE block (a vertically connected stretch of VE
+cells) or a single fine 3D cell.
+
+Columns are numbered in increasing pillar order (`i + nx*(j-1)`), top to
+bottom within a pillar; with one column per pillar this is the order co2lab
+gives the cells of its top-surface grid.
+
+# Fields
+
 - `partition`: fine cell → column, as `CoarseMesh(mesh, partition)` expects
-- `column_ij`: per column, the logical `(i, j)` of its pillar (one entry per
-  column, so a pillar holding several columns appears several times)
-- `is_ve`: per column, `true` for a VE block, `false` for a fine 3D cell
-- `sealed`, `leaky`: the interior faces of the mesh given as sealed (no
-  flow) and as leaky (cut into blocks, flow kept), sorted
-
-Columns are numbered in increasing pillar order (`i + nx*(j-1)`), top to bottom
-within a pillar — with one column per pillar the order MRST gives the cells
-of its top-surface grid.
+  (0 for discarded cells; see [`ve_trim`](@ref)).
+- `column_ij`: one entry per column, so a pillar holding several columns
+  appears several times.
+- `sealed`, `leaky`: sorted interior face indices of the mesh; leaky faces
+  cut the pillar into blocks but keep their flow.
 """
 struct VEColumns
     cells::Vector{Int}                  # fine cells, column by column, top first
@@ -51,7 +50,7 @@ end
 """
     number_of_columns(columns) -> Int
 
-Number of columns in `columns`.
+Returns the number of columns (blocks) in `columns`.
 """
 number_of_columns(c::VEColumns) = length(c.pos) - 1
 
@@ -59,8 +58,10 @@ number_of_columns(c::VEColumns) = length(c.pos) - 1
     column_cells(columns, col) -> view
 
 The fine cells of column `col`, top to bottom, as indices into the mesh the
-columns were built on. Returns a **view** into `columns.cells`, not a copy:
-writing to it would change `columns`.
+columns were built on.
+
+Returns a **view** into `columns.cells`, not a copy: writing to it would
+change `columns`.
 """
 column_cells(c::VEColumns, col::Integer) = view(c.cells, c.pos[col]:(c.pos[col+1]-1))
 
@@ -69,16 +70,23 @@ column_cells(c::VEColumns, col::Integer) = view(c.cells, c.pos[col]:(c.pos[col+1
 """
     ve_mesh_from_mrst(G::AbstractDict) -> UnstructuredMesh
 
-Build a Jutul mesh from an MRST grid read with `MAT.matread`, keeping MRST's
-logical indices (`cartDims`, `cells.indexMap`), which Jutul's own
+Build a Jutul mesh from an MRST grid, keeping what the VE columns need:
+MRST's logical indices (`cartDims`, `cells.indexMap`), which Jutul's own
 `UnstructuredMesh(::MRSTWrapMesh)` conversion drops, and the direction of
-every boundary face (MRST's face tags, stored as entity tags — see
-`vefaces.jl`). Depth is positive down, as in MRST.
+every boundary face (MRST's face tags). Depth is positive down, as in MRST.
 
-Returns a new `UnstructuredMesh`: MRST's cells in MRST's order, its interior
-and boundary faces each in MRST's face order, `structure = cartDims`,
-`cell_map = cells.indexMap`, `z_is_depth = true`, and a `:direction` tag on
-every boundary face. `G` is only read.
+# Arguments
+
+- `G`: a 3D MRST grid as read with `MAT.matread`.
+
+# Returns
+
+A new `UnstructuredMesh` with
+
+- MRST's cells in MRST's order, its interior and boundary faces each in
+  MRST's face order;
+- `structure = cartDims`, `cell_map = cells.indexMap`, `z_is_depth = true`;
+- a `:direction` entity tag on every boundary face.
 """
 function ve_mesh_from_mrst(G::AbstractDict)
     cd = Int.(vec(G["cartDims"]))
@@ -96,36 +104,45 @@ end
     ve_columns(mesh; below_holes = :discard, sealed_faces = (), leaky_faces = (),
                is_ve = nothing) -> (columns, discarded)
 
-Identify the VE columns of a 3D `mesh` with logical `(i, j, k)` indices.
+Partition a 3D mesh into VE columns: the first step in building a VE domain
+([`ve_domain`](@ref)).
 
-Cells are grouped by `(i, j)` pillar and ordered by `k` (top→bottom; `k` is
-assumed to increase downwards, as in MRST). A pillar is cut wherever two
-consecutive cells are *disconnected*: they share no interior face, or only
-faces listed in `sealed_faces` or `leaky_faces` (interior face indices of
-`mesh`; leaky faces separate VE blocks but keep their flow, roadmap Stage
-12). A gap in `k` whose cells still share a face (a pinch-out) does not cut.
-Below a cut:
+Cells are grouped by `(i, j)` pillar and ordered by `k`, top to bottom. A
+pillar is cut wherever two consecutive cells are *disconnected*: they share
+no interior face, or only sealed or leaky ones. A gap in `k` whose cells
+still share a face (a pinch-out) does not cut.
 
-- `below_holes = :discard` — co2lab's treatment (`topSurfaceGrid`'s
-  `discard_below_holes`): every cell below the pillar's first cut is
-  discarded; one column per pillar.
-- `below_holes = :stack` — each connected stretch is its own column. Such
-  columns connect laterally through partial faces, which take the transition
-  flux (roadmap Stage 12, `transition_flux.jl`).
+# Arguments
 
-`is_ve` (one `Bool` per cell of `mesh`, `nothing` = all VE) marks fine 3D
-cells (`false`) of a hybrid grid (roadmap Stage 12; whole pillars with
-[`ve_except_pillars`](@ref)): each becomes a block of its own, and a
-pillar's VE cells are also cut where fine cells interrupt them (not a hole:
-nothing is discarded for it).
+- `mesh`: a 3D mesh with logical `(i, j, k)` indices, `k` increasing
+  downwards (as in MRST).
+- `below_holes`: what to do below a cut:
+  - `:discard` (default, co2lab's `topSurfaceGrid` treatment): every cell
+    below the pillar's first cut is discarded; one column per pillar.
+  - `:stack`: each connected stretch is its own column. Such columns connect
+    laterally through partial faces, which take the transition flux.
+- `sealed_faces`: interior face indices of `mesh` with no flow; they cut.
+- `leaky_faces`: interior face indices of `mesh` that cut the pillar into
+  separate VE blocks but keep their flow.
+- `is_ve`: one `Bool` per cell of `mesh`, `false` for the fine 3D cells of a
+  hybrid grid (whole pillars: [`ve_except_pillars`](@ref)); default
+  `nothing`, all VE. Each fine cell becomes a block of its own, and the VE
+  cells around it are cut into separate blocks (nothing is discarded).
 
-Returns `(columns, discarded)`: a new `VEColumns` of the cells kept (cell
-indices into `mesh`), and the discarded cells as a sorted `Vector{Int}` of
-indices into `mesh` (empty if nothing is discarded). `mesh` is only read.
+# Returns
 
-If any cells are discarded, the partition still refers to `mesh`'s cell
-numbering and does **not** cover every cell, so it cannot be passed to
-`CoarseMesh` as-is; use [`ve_trim`](@ref) first.
+The tuple `(columns, discarded)`:
+
+- `columns`: a new [`VEColumns`](@ref) of the cells kept (cell indices into
+  `mesh`).
+- `discarded`: the discarded cells, a sorted `Vector{Int}` of indices into
+  `mesh` (empty if none).
+
+# Notes
+
+- If any cells are discarded, the partition still uses `mesh`'s cell
+  numbering and does **not** cover every cell, so it cannot be passed to
+  `CoarseMesh` as-is: use [`ve_trim`](@ref) and build the columns again.
 """
 function ve_columns(mesh; below_holes::Symbol = :discard, sealed_faces = (),
                     leaky_faces = (), is_ve = nothing)
@@ -196,12 +213,19 @@ end
 """
     ve_except_pillars(mesh, fine) -> Vector{Bool}
 
-The `is_ve` argument of [`ve_columns`](@ref) for a hybrid grid whose fine
-3D regions are whole pillars: `fine` gives the pillars as logical `(i, j)`
-pairs (any collection) or as a function `(i, j) -> Bool`.
+The `is_ve` argument of [`ve_columns`](@ref) for a hybrid grid whose fine 3D
+regions are whole pillars.
 
-Returns a new `Vector{Bool}`, one entry per cell of `mesh`: `false` for the
-cells of the chosen pillars, `true` elsewhere. `mesh` is only read.
+# Arguments
+
+- `mesh`: the 3D mesh, with logical indices.
+- `fine`: the fine pillars, as logical `(i, j)` pairs (any collection) or as
+  a function `(i, j) -> Bool`.
+
+# Returns
+
+A new `Vector{Bool}`, one entry per cell of `mesh`: `false` for the cells of
+the fine pillars, `true` elsewhere.
 """
 function ve_except_pillars(mesh, fine)
     # a collection of pillars: membership; a function: its value
@@ -231,8 +255,9 @@ end
 """
     _connected_below(mesh, ijk, sealed_faces) -> Vector{Int}
 
-For every cell, the cell below it in its pillar that it shares an unsealed
-interior face with (0 if none). Throws if a cell connects to two cells below.
+For every cell, the cell below it in its pillar that it shares an interior
+face not in `sealed_faces` with (0 if none). Throws if a cell connects to two
+cells below.
 """
 function _connected_below(mesh, ijk, sealed_faces)
     sealed = Set{Int}(sealed_faces)
@@ -272,25 +297,35 @@ end
 """
     ve_trim(mesh, discarded) -> UnstructuredMesh
 
-Remove `discarded` cells from `mesh`, keeping logical indices and boundary
-face directions correct. `mesh` is only read.
+Remove the cells that [`ve_columns`](@ref) discarded, keeping logical
+indices and boundary face directions correct, so the columns can be built
+again on a mesh they cover completely.
 
-Returns a new `UnstructuredMesh` with:
+# Arguments
+
+- `mesh`: the 3D mesh.
+- `discarded`: indices of the cells of `mesh` to remove.
+
+# Returns
+
+A new `UnstructuredMesh` with
+
 - the kept cells, renumbered 1…n in their original order;
 - `cell_map` composed with the parent's, so `cell_ijk` still gives each
   cell's original logical index; `structure` and `z_is_depth` unchanged;
-- interior faces between two kept cells unchanged; faces between a kept and
-  a discarded cell turned into boundary faces; only the nodes still used;
+- interior faces between two kept cells unchanged, faces between a kept and
+  a discarded cell turned into boundary faces, only the nodes still used;
 - a `:direction` tag on every boundary face (the new ones from the logical
   indices of the two original cells).
 
 If `discarded` is empty it returns **`mesh` itself**, not a copy.
 
-Works around `Jutul.extract_submesh` setting the submesh's `cell_map` to the
-parent's *local* cell numbers rather than composing it with the parent's own
-`cell_map` (`Jutul/src/meshes/unstructured/utils.jl`, fixed upstream in
-Jutul.jl #357), which gives wrong `(i, j, k)` for any parent that already has
-inactive cells.
+# Notes
+
+- Use this rather than `Jutul.extract_submesh` alone: some Jutul versions set
+  the submesh's `cell_map` to the parent's *local* cell numbers instead of
+  composing it with the parent's `cell_map`, which gives wrong `(i, j, k)`
+  for a parent that already has inactive cells (Jutul.jl #357).
 """
 function ve_trim(mesh::UnstructuredMesh, discarded)
     isempty(discarded) && return mesh
@@ -310,27 +345,41 @@ end
 """
     ve_column_geometry(mesh, columns) -> NamedTuple
 
-Per-column and per-fine-cell VE geometry, from the 3D mesh alone:
+The VE geometry of the columns — caprock depth, height, lateral extent and
+cell depths — from the 3D mesh alone; the counterpart of the geometry in
+co2lab's top-surface grid `Gt`. Used by [`ve_domain`](@ref), wells and
+reconstruction.
 
-- `z_top`: caprock depth per column — depth of the centroid of the top
-  column cell's top face (MRST's `Gt.cells.z`)
-- `H`: column height, `sum(dz)` (MRST's `Gt.cells.H`)
-- `dz`: per fine cell (in `columns.cells` order), depth difference between the
-  centroids of its bottom and top faces (MRST's `Gt.columns.dz`)
-- `z`: per fine cell, cumulative `dz` down the column — depth of the cell's
-  bottom face relative to the caprock (MRST's `Gt.columns.z`)
-- `dx`, `dy`: per column, the x and y extent of the bounding box of the top
-  cell's top face nodes (MRST's `cellDims(Gt)`, used for the well index)
-- `z_cell`: per fine cell (in `columns.cells` order), depth of the cell
-  centroid (MRST's `G.cells.centroids(:, 3)`, used for 3D pressure)
+# Arguments
 
-All seven are new `Vector{Float64}`s, returned as the NamedTuple
-`(z_top, H, dz, z, dx, dy, z_cell)`.
+- `mesh`, `columns`: the 3D mesh and its column partition
+  ([`ve_columns`](@ref)).
 
-A cell's top and bottom faces are found by topology, as MRST's face tags 5
-and 6: interior faces from the logical indices of the two cells, boundary
-faces from the tags stored at import (`vefaces.jl`). Each cell must have
-exactly one of each. `mesh` and `columns` are only read.
+# Returns
+
+The NamedTuple `(z_top, H, dz, z, dx, dy, z_cell)` of new `Vector{Float64}`s
+(m; depths positive down). Per column:
+
+- `z_top`: caprock depth, the centroid depth of the top cell's top face
+  (co2lab's `Gt.cells.z`).
+- `H`: column height, `sum(dz)` (`Gt.cells.H`).
+- `dx`, `dy`: x and y extent of the bounding box of the top cell's top-face
+  nodes (`cellDims(Gt)`, used for the well index).
+
+Per fine cell, in `columns.cells` order:
+
+- `dz`: depth difference between the centroids of its bottom and top faces
+  (`Gt.columns.dz`).
+- `z`: cumulative `dz` down the column, the depth of the cell's bottom face
+  below the caprock (`Gt.columns.z`).
+- `z_cell`: depth of the cell centroid (`G.cells.centroids(:, 3)`, used for
+  3D pressure).
+
+# Notes
+
+- Top and bottom faces are found by topology (interior faces from the cells'
+  logical indices, boundary faces from their direction tags), as co2lab's
+  face tags 5 and 6. Each cell must have exactly one of each.
 """
 function ve_column_geometry(mesh, columns::VEColumns)
     geo = tpfv_geometry(mesh)
@@ -378,6 +427,7 @@ end
     _cell_top_bottom_depth(mesh, geo, ijk, bdir, c) -> (z_top, z_bottom)
 
 Centroid depths of cell `c`'s top and bottom faces, identified by direction.
+Throws unless the cell has exactly one of each.
 """
 function _cell_top_bottom_depth(mesh, geo, ijk, bdir, c)
     top, bot = Float64[], Float64[]

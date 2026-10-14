@@ -1,8 +1,9 @@
 """
-Makie extension of JutulCO2Lab: map views of VE domains and CO2 Storage Atlas
-data (roadmap Stage 5 item 5), and of trapping analyses (Stage 8). Loaded
-with any Makie backend (GLMakie, CairoMakie). The functions are documented
-where they are declared, in `src/plotting.jl`.
+Makie extension of JutulCO2Lab: map and 3D views of VE domains, CO2 Storage
+Atlas data, trapping analyses and trapping inventories, and the interactive
+trap viewer. Loaded with any Makie backend (GLMakie, CairoMakie, WGLMakie).
+The public functions are documented where they are declared, in
+`src/plotting.jl`; the methods here carry only short comments.
 """
 module JutulCO2LabMakieExt
 
@@ -31,6 +32,7 @@ function _map_figure(title; size = (900, 800))
     return (fig, ax)
 end
 
+# show_figure: documented in src/plotting.jl
 function show_figure(fig, name; dir = "figures")
     if nameof(Makie.current_backend()) == :CairoMakie
         mkpath(dir)

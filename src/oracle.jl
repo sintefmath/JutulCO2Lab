@@ -1,23 +1,30 @@
 """
     JutulCO2Lab.Oracle
 
-Comparison harness for the roadmap's acceptance gates.
+Comparison harness for gating JutulCO2Lab against MRST-co2lab: Julia results
+vs MRST results on identical input, quantity by quantity, each with a
+declared tolerance, collected in a pass/fail report.
 
-The pass/fail oracle is **Julia-VE vs MRST-VE on identical input** (roadmap,
-"How to use this"). Every trap catalogued in feasibility §2b fails *silently* —
-the model converges and the answer is wrong — so a comparison must be run
-per-quantity with a declared tolerance, not eyeballed on a plot.
+Many errors fail *silently* (the model converges and the answer is wrong),
+so comparisons are numeric with explicit tolerances, not eyeballed on plots.
 
-Two things this module deliberately does *not* do:
+# Usage
 
-  - It does not guess cell/face orderings. MRST's cell and face numbering and
-    Jutul's need not agree, and a silently-permuted comparison is exactly the
-    kind of false pass this harness exists to prevent. Pass an explicit
-    `perm` (see [`check!`](@ref)) or compare order-invariant reductions.
-  - It does not define VE physics tolerances for you. [`STAGE1_TOL`](@ref) is a
-    starting point for the Stage 1 *geometry* gate, where quantities should
-    agree to near machine precision because both sides compute the same
-    arithmetic. Flow quantities need looser, deliberately-chosen values.
+    ref = read_mrst_dump("stage1_johansen.mat")
+    rep = OracleReport("Johansen grid"; mrst = ref)
+    check!(rep, "column height", H_julia, H_mrst; tol = STAGE1_TOL[:height])
+    display(rep)
+    passed(rep) || error("gate failed")
+
+# Deliberately not done
+
+- No guessing of cell or face orderings: MRST's and Jutul's numbering need
+  not agree, and a silently permuted comparison is exactly the false pass
+  this harness exists to prevent. Pass an explicit `perm` to
+  [`check!`](@ref), or compare order-invariant reductions.
+- No VE physics tolerances: [`STAGE1_TOL`](@ref) suits grid and geometry
+  quantities, which should agree to near round-off. Flow quantities need
+  looser, deliberately chosen values.
 """
 module Oracle
 
@@ -35,10 +42,11 @@ include("provenance.jl")
 """
     MrstDump
 
-A `.mat` file written by the MATLAB side of the harness (see
-`scripts/mrst_dump_stage1.m`), loaded into a `Dict{String, Any}`.
+An MRST reference dump: a `.mat` file written by the MRST/Octave dump
+scripts, loaded with [`read_mrst_dump`](@ref).
 
-Access with `d["name"]`; `keys(d)` lists what the dump contains.
+Access a variable with `d["name"]`; `keys(d)` lists what the dump contains,
+`haskey(d, "name")` tests for one.
 """
 struct MrstDump
     path::String             # file it was read from
@@ -56,16 +64,18 @@ end
 """
     read_mrst_dump(path) -> MrstDump
 
-Read a MATLAB `.mat` file produced by the MRST side of the harness.
+Read a `.mat` file written by the MRST side of the harness.
 
-MAT.jl handles both the v5 and the HDF5-based v7.3 format, so `save(..., '-v7.3')`
-on the MATLAB side is fine (and is what large Johansen dumps will need).
+# Arguments
 
-MATLAB stores everything as `Float64` and column-major; scalars arrive as
-1×1 matrices. This function leaves that as-is rather than second-guessing
-each field — squeeze/`only` at the call site where the expected shape is known.
+- `path`: the file; v5 and the HDF5-based v7.3 format (`save(..., '-v7.3')`,
+  needed for large dumps) both work.
 
-Returns a new [`MrstDump`](@ref) wrapping the file's contents.
+# Returns
+
+A new [`MrstDump`](@ref) with the file's variables as MATLAB stored them:
+`Float64`, column-major, scalars as 1×1 matrices. Reshape (e.g. `vec`,
+`only`) at the call site, where the expected shape is known.
 """
 function read_mrst_dump(path::AbstractString)
     isfile(path) || throw(ArgumentError("no such MRST dump: $path"))
@@ -77,11 +87,10 @@ end
 """
     Tolerance(rtol, atol)
 
-Per-quantity comparison tolerance. A value passes when
+The tolerance of one quantity's comparison in [`check!`](@ref). A value `a`
+passes against the MRST reference `b` when
 
     |a - b| <= atol + rtol * |b|
-
-elementwise, with `b` the MRST reference.
 """
 struct Tolerance
     rtol::Float64  # relative tolerance
@@ -91,15 +100,15 @@ end
 """
     STAGE1_TOL
 
-Default tolerances for the Stage 1 grid/geometry gate (roadmap Stage 1
-"Gate"). These are tight on purpose: at Stage 1 both sides perform the same
-arithmetic on the same input, so anything beyond round-off is a real
-discrepancy, not a modelling difference.
+Default [`Tolerance`](@ref)s for comparing grid and geometry quantities,
+keyed by quantity (`:height`, `:pore_volume`, `:transmissibility`, ...).
 
-`atol` values are in SI and are set relative to the magnitude of the quantity
-(a transmissibility of ~1e-12 m³ needs an `atol` far below a pore volume of
-~1e5 m³). Override per call when a quantity's scale differs from the
-assumptions here.
+They are tight on purpose: both sides do the same arithmetic on the same
+input, so anything beyond round-off is a real discrepancy.
+
+`atol` is in SI units, scaled to the quantity's typical magnitude (a
+transmissibility of ~1e-12 m³ needs an `atol` far below a pore volume of
+~1e5 m³). Pass another tolerance when a quantity's scale differs.
 """
 const STAGE1_TOL = Dict{Symbol, Tolerance}(
     :height          => Tolerance(1e-12, 1e-9),    # m
@@ -119,8 +128,9 @@ const STAGE1_TOL = Dict{Symbol, Tolerance}(
 """
     CheckResult
 
-Outcome of one quantity comparison. `maxabs`/`maxrel` are reported even on a
-pass so that a gate can be watched drifting before it breaks.
+The outcome of one quantity's comparison, returned by [`check!`](@ref).
+`maxabs` and `maxrel` are kept even on a pass, so a gate can be seen drifting
+before it breaks.
 """
 struct CheckResult
     name::String     # quantity compared
@@ -129,24 +139,24 @@ struct CheckResult
     maxrel::Float64  # largest relative difference
     tol::Tolerance   # tolerance applied
     ok::Bool         # passed
-    note::String     # remark shown in the report
+    note::String     # remark shown in the report (e.g. why it failed)
 end
 
 """
     OracleReport(title; mrst = nothing)
 
-Accumulates [`check!`](@ref) results and prints them as one table.
+A comparison report: collects [`check!`](@ref) results and displays them as
+one table, with a PASS/FAIL line ([`passed`](@ref)).
 
-    ref = read_mrst_dump("stage1_johansen.mat")
-    rep = OracleReport("Stage 1 — Johansen grid"; mrst = ref)
-    check!(rep, "column height", H_julia, H_mrst; tol = STAGE1_TOL[:height])
-    display(rep)
-    passed(rep) || error("gate failed")
+# Constructor
 
-On construction the report records the commit and dirty state of the loaded
-Jutul and JutulDarcy checkouts (see [`source_provenance`](@ref)), and warns if
-either has uncommitted changes. Pass the MRST dump as `mrst` to record the MRST
-commit it was generated from as well. All of it is printed in the header.
+- `title`: the report's heading.
+- `mrst`: optionally the [`MrstDump`](@ref) compared against, to record the
+  MRST commit it was made from.
+
+The header records the commit and dirty state of the loaded Jutul and
+JutulDarcy checkouts ([`source_provenance`](@ref)); construction warns if
+either has uncommitted changes. See the module docstring for an example.
 """
 struct OracleReport
     title::String                 # heading of the report
@@ -164,7 +174,7 @@ end
 """
     passed(report) -> Bool
 
-True when every check in `report` passed. An empty report is *not* a pass —
+Whether every check in `report` passed. Returns `false` for an empty report:
 a gate that ran no checks has not been executed.
 """
 passed(r::OracleReport) = !isempty(r.results) && all(x -> x.ok, r.results)
@@ -173,18 +183,26 @@ passed(r::OracleReport) = !isempty(r.results) && all(x -> x.ok, r.results)
     check!(report, name, julia, mrst; tol, perm = nothing, note = "")
 
 Compare `julia` against the MRST reference `mrst` elementwise and record the
-result in `report`. Returns the [`CheckResult`](@ref).
+result in `report`.
 
-Modifies: `report.results` (appends one `CheckResult`). `julia` and `mrst` are
-only read.
+# Arguments
 
-`perm` maps Julia indices onto MRST indices: the comparison is
-`julia[i]` vs `mrst[perm[i]]`. Supply it whenever the two orderings differ —
-there is no attempt to infer one. Without it, the arrays are compared in
-their given order and a length mismatch is a failure, not an error.
+- `report`: the [`OracleReport`](@ref) to add to.
+- `name`: the quantity's name in the report.
+- `julia`, `mrst`: the values, scalars or arrays; arrays are flattened
+  (MAT.jl returns MATLAB's 1×1 and N×1 matrices as such).
+- `tol`: the [`Tolerance`](@ref).
+- `perm`: maps Julia indices onto MRST indices, comparing `julia[i]` with
+  `mrst[perm[i]]`. Supply it whenever the orderings differ; none is
+  inferred. Default: compare in the given order.
+- `note`: a remark shown in the report.
 
-Scalars and arrays are both accepted; MATLAB's 1×1 and N×1 matrices are
-flattened first, since that is how MAT.jl returns them.
+# Returns
+
+The new [`CheckResult`](@ref). A length mismatch, an empty comparison or a
+non-finite value is recorded as a failure, not thrown.
+
+Modifies: `report.results` (appends one `CheckResult`).
 """
 function check!(report::OracleReport, name::AbstractString, julia, mrst;
                 tol::Tolerance,
@@ -232,9 +250,10 @@ end
 """
     _compare(a, b, tol) -> (maxabs, maxrel, ok, nonfinite)
 
-Elementwise comparison of equal-length vectors `a` (Julia) and `b` (MRST):
-largest absolute and relative difference over the finite pairs, whether every
-pair is within `tol`, and the number of non-finite pairs (each one a failure).
+Elementwise comparison of equal-length vectors `a` (Julia) and `b` (MRST).
+Returns the largest absolute and relative difference over the finite pairs,
+whether every pair is within `tol`, and the number of non-finite pairs (each
+one a failure).
 """
 function _compare(a, b, tol::Tolerance)
     maxabs = 0.0

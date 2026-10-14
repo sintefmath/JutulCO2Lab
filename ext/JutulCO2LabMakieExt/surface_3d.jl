@@ -1,9 +1,11 @@
 # The top surface of a VE domain in 3D, at the caprock's depths, as co2lab draws
-# its top-surface grid (plotCellData, plotGrid on Gt): maps and trap analyses
-# on the surface, rotatable in GLMakie.
+# its top-surface grid (plotCellData, plotGrid on Gt), and the Axis3 methods of
+# the map, outline and trap plots. Public functions are documented in
+# src/plotting.jl.
 
 # ---------------------------------- The axis ----------------------------------
 
+# Depth down, x and y to scale, MATLAB's view angles
 function ve_axis3(pos, surface; exaggeration = 10.0, view = (-37.5, 30.0), title = "")
     dx, dy, dz = (-(reverse(extrema(v))...) for v in (surface.x, surface.y, surface.z))
     # x and y to scale, depth exaggerated
@@ -23,6 +25,7 @@ end
 
 # ------------------------------- Surface in 3D --------------------------------
 
+# The columns' top faces as one mesh, and their edges
 function plot_ve_surface!(ax, surface; color = (:steelblue, 0.6), offset = 0.0,
                           colormap = :viridis, shading = false, strokecolor = :black,
                           strokewidth = 1, smooth = true)
@@ -118,6 +121,7 @@ end
 # A small lift (towards shallower) to draw lines and overlays over the surface
 _lift(surface) = 2e-3 * max(-(reverse(extrema(surface.z))...), 1.0)
 
+# The lateral boundary just above the caprock
 function plot_ve_outline!(ax::Axis3, surface; color = :black, linewidth = 2,
                           label = nothing)
     x, y, z = surface.x, surface.y, surface.z .- _lift(surface)
@@ -129,6 +133,7 @@ end
 
 # ------------------------------------ Maps ------------------------------------
 
+# The map on the caprock (no plumes)
 function plot_ve_map!(ax::Axis3, surface; background = nothing, colormap = :viridis,
                       depth_contours = 0, plumes = [], wells = Int[], regions = nothing,
                       region_color = (:red, 0.3), outline = true, kwarg...)
@@ -168,6 +173,7 @@ end
 
 # ------------------------------------ Traps -----------------------------------
 
+# The trap colours on the lit caprock, with rivers, labels, outline, faults
 function plot_traps!(ax::Axis3, s, res; regions = true, trap_values = nothing,
                      colormap = :viridis, rivers = true, labels = false,
                      outline = true, faults = true)

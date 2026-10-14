@@ -1,12 +1,10 @@
-# The Norwegian CO2 Storage Atlas: from top and thickness maps to a corner-point
-# grid section (roadmap Stage 5, step 2) — co2lab-common/atlasgrid
-# (getAtlasGrid.m, helpers/convertAtlasTo3D.m, helpers/refineInfo.m,
-# helpers/updateWithHeterogeneity.m).
+# The Norwegian CO2 Storage Atlas, part 2: from a formation's top and
+# thickness maps to a corner-point grid section (co2lab's getAtlasGrid,
+# convertAtlasTo3D, refineInfo, updateWithHeterogeneity).
 #
-# The grid's pillars stand at the positions of the top map's values; top and
-# thickness (and rock maps) are interpolated bilinearly onto them exactly as
-# MATLAB/Octave's `interp2` does, so that co2lab's decks are reproduced to the
-# last bit with `co2lab_compatible = true`.
+# The pillars stand at the top map's values; thickness and rock maps are
+# interpolated onto them exactly as Octave's `interp2` does, so that
+# `co2lab_compatible = true` reproduces co2lab's decks to the last bit.
 
 # ----------------------------- Jurassic formations ----------------------------
 
@@ -24,38 +22,55 @@ const _JURASSIC_TOP = ("Sognefjordfm", "Fensfjordfm", "Krossfjordfm", "Huginfmea
                        min_thickness = 1e-3, co2lab_compatible = false)
         -> NamedTuple
 
-Grid section of Atlas formation `name` (case-insensitive), as co2lab's
-`getAtlasGrid(name, 'coarsening', c, 'refining', r, 'nz', nz)`:
+The corner-point grid section of an Atlas formation, as co2lab's
+`getAtlasGrid(name, 'coarsening', c, 'refining', r, 'nz', nz)`. It is the
+first step of [`atlas_mesh`](@ref) and [`atlas_ve_domain`](@ref).
 
-- the top map (the formation's own, or the `Jurassic`/`Jurassicmid` map for
-  the Jurassic formations) and the thickness map, read with
-  [`read_atlas_maps`](@ref) at `coarsening`, then refined `refining` times
-  laterally by bilinear interpolation;
-- one pillar at each value of the top map; top and thickness interpolated
-  bilinearly onto the pillars, the thickness split into `nz` equal layers;
-- a cell is active when all four of its pillars have a top and a positive
-  thickness, and the cell is at least `min_thickness` thick (in metres, the
-  mean over its four corners; the maps hold "zero" thickness as values down
-  to 1e-9 m, which co2lab keeps as cells micrometres thick);
-- rock maps of the formation (`PORO`, `PERMX` = `PERMY` = `PERMZ` in m²,
-  `NTG`), where the Atlas has them, interpolated to the cell centres; `NaN`
-  where the maps have no value.
+The grid has one vertical pillar at each value of the formation's top map,
+between the top and the top plus the thickness map.
 
-`co2lab_compatible = true` with `min_thickness = 0` reproduces co2lab's deck
-exactly, for comparisons:
-co2lab's placement of the maps ([`read_atlas_maps`](@ref)) and its
-activity mask, which also removes the cells east and north of an undefined
-pillar and wraps around the lattice's edges (`co2lab-issues.org`).
+# Arguments
 
-Returns `(grid, petro)`, both new:
+- `name`: the formation (case-insensitive); see
+  [`atlas_grid_formations`](@ref). The Jurassic formations take the
+  `Jurassic` or `Jurassicmid` top map.
+- `coarsening`: keep every `coarsening`-th map value
+  ([`read_atlas_maps`](@ref)). Default 1.
+- `refining`: refine the maps this many times laterally, bilinearly.
+  Default 1.
+- `nz`: the number of equal layers the thickness is split into. Default 1.
+- `min_thickness`: cells thinner than this (m, mean over the four corners)
+  are inactive. Default 1e-3: the maps hold "zero" thickness as values down
+  to 1e-9 m, which co2lab keeps as cells micrometres thick.
+- `co2lab_compatible`: with `min_thickness = 0`, reproduce co2lab's deck
+  exactly, for comparisons (see Notes). Default `false`.
+
+# Returns
+
+The NamedTuple `(grid, petro)`, both new:
+
 - `grid`: a GeoEnergyIO grid section (`Dict{String, Any}`) for
-  `mesh_from_grid_section` — `"cartDims"` `(nx, ny, nz)`, `"COORD"`,
-  `"ZCORN"` (both `Vector{Float64}`, 0 at undefined pillars, as GeoEnergyIO's
-  `cpgrid_from_horizons`), `"ACTNUM"` (`Array{Bool, 3}`), and the rock arrays
-  above (`Array{Float64, 3}`) if present;
-- `petro`: the formation's average rock `(perm, poro, ntg)` as
-  [`atlas_average_rock`](@ref), with each value replaced by the mean of its
-  rock map where there is one (co2lab's `petroinfo`).
+  `mesh_from_grid_section`:
+  - `"cartDims"`: `(nx, ny, nz)`;
+  - `"COORD"`, `"ZCORN"`: `Vector{Float64}`, 0 at undefined pillars (as
+    GeoEnergyIO's `cpgrid_from_horizons`);
+  - `"ACTNUM"`: `Array{Bool, 3}`; a cell is active when its four pillars
+    have a top and a positive thickness, and it is `min_thickness` thick;
+  - `"PORO"`, `"PERMX"` = `"PERMY"` = `"PERMZ"` (m²), `"NTG"`: the
+    formation's rock maps at the cell centres (`Array{Float64, 3}`), where
+    the Atlas has them; `NaN` where a map has no value.
+- `petro`: the average rock `(perm, poro, ntg)` of
+  [`atlas_average_rock`](@ref), each value replaced by the mean of its rock
+  map where there is one (co2lab's `petroinfo`).
+
+# Notes
+
+- `co2lab_compatible = true` uses co2lab's placement of the maps (see
+  [`read_atlas_maps`](@ref)) and its activity mask, which also removes the
+  cells east and north of an undefined pillar and wraps around the
+  lattice's edges.
+- Rock maps are only added for formations with their own top map, as in
+  co2lab.
 """
 function atlas_grid_section(name::AbstractString; coarsening::Integer = 1,
                             refining::Integer = 1, nz::Integer = 1,
@@ -91,9 +106,11 @@ end
 
 The formations of `region` (as [`atlas_formation_names`](@ref)) that
 [`atlas_grid_section`](@ref) can build: those with a thickness map and a top
-map (their own, or the Jurassic one) in the data directory — the formations
-co2lab's `getAtlasGrid(names)` returns decks for. Returns a new vector, in
-the order of `atlas_formation_names(region)`.
+map (their own or a Jurassic one) in the data directory. These are the
+formations co2lab's `getAtlasGrid(names)` returns decks for.
+
+Returns a new vector of names, in the order of
+`atlas_formation_names(region)`.
 """
 function atlas_grid_formations(region::Symbol = :all)
     files = atlas_map_files()
@@ -108,8 +125,8 @@ function atlas_grid_formations(region::Symbol = :all)
                   atlas_formation_names(region))
 end
 
-# The formation's top and thickness maps (Atlas map NamedTuples, 39 in
-# STRUCTURES.md); the Jurassic formations take the Jurassic top maps.
+# The formation's top and thickness maps (as read_atlas_maps returns them);
+# the Jurassic formations take the Jurassic top maps.
 function _atlas_top_and_thickness(name, coarsening, co2lab_compatible)
     is(n) = m -> lowercase(m) == lowercase(n)
     # formations without a top map of their own take a Jurassic one
@@ -127,10 +144,9 @@ end
 
 # ------------------------------- Deck arrays ----------------------------------
 
-# Depths of the nz + 1 layer surfaces at each pillar (nx + 1, ny + 1, nz + 1):
-# top and thickness / nz interpolated to the top map's positions
-# (convertAtlasTo3D); NaN where either is undefined or the thickness is not
-# positive.
+# Depths of the nz + 1 layer surfaces at each pillar, (nx + 1, ny + 1, nz + 1)
+# (co2lab's convertAtlasTo3D); NaN where top or thickness is undefined or the
+# thickness is not positive.
 function _atlas_node_depths(top, thick, nz)
     X, Y = _map_positions(top.meta)
     tx, ty = _map_positions(thick.meta)
@@ -179,9 +195,9 @@ end
 "Set the non-finite entries of `v` to 0. Modifies: `v`. Returns `v`."
 _zero_undefined!(v) = (v[.!isfinite.(v)] .= 0.0; v)
 
-# Active cells of one layer (nx × ny): all four pillars defined; co2lab's mask
+# Active cells of one layer (nx × ny): all four pillars defined. co2lab's mask
 # instead dilates the undefined pillars by one in each direction, wrapping
-# around the edges (circshift), and takes cell (i, j) from pillar (i, j).
+# around the edges, and takes cell (i, j) from pillar (i, j).
 function _atlas_active_cells(Z, co2lab_compatible)
     undef = isnan.(Z[:, :, 1])
     nx, ny = size(undef, 1) - 1, size(undef, 2) - 1
@@ -204,12 +220,15 @@ end
     _add_atlas_rock_maps!(grid, petro, name, top_meta; coarsening, refining,
                           co2lab_compatible) -> NamedTuple
 
-The formation's rock maps (`<name>_poro`, `_perm`, `_ntg`), if any, added to
+Add the formation's rock maps (`<name>_poro`, `_perm`, `_ntg`), if any, to
 the grid section as cell arrays, interpolated to the cell centres of the
 lattice of `top_meta` (co2lab's `updateWithHeterogeneity`; unlike co2lab,
-repeated over all layers). Modifies: `grid` (entries `"PORO"`, `"PERMX"`,
-`"PERMY"`, `"PERMZ"`, `"NTG"`). Returns `petro` with each value that has a
-map replaced by the map's mean over the lattice's cells (a new NamedTuple).
+repeated over all layers).
+
+Returns a new NamedTuple: `petro` with each value that has a map replaced by
+the map's mean over the lattice's cells.
+
+Modifies: `grid` (entries `"PORO"`, `"PERMX"`, `"PERMY"`, `"PERMZ"`, `"NTG"`).
 """
 function _add_atlas_rock_maps!(grid, petro, name, top_meta; coarsening, refining,
                                co2lab_compatible)
@@ -270,10 +289,18 @@ end
 """
     atlas_map_values(map, x, y) -> Vector{Float64}
 
-An Atlas map (as [`read_atlas_maps`](@ref) returns it) at the positions
-`(x[k], y[k])`, interpolated bilinearly between its values (as Octave's
-`interp2`); `NaN` outside the map and where a neighbouring value is
-undefined. `map` is only read; returns a new vector.
+Values of an Atlas map at given positions, interpolated bilinearly (as
+Octave's `interp2`); e.g. to sample a map on a mesh's cells.
+
+# Arguments
+
+- `map`: one map, as an element of [`read_atlas_maps`](@ref)'s result.
+- `x`, `y`: the positions (m), `(x[k], y[k])`.
+
+# Returns
+
+A new vector, one value per position; `NaN` outside the map and where a
+neighbouring value is undefined.
 """
 function atlas_map_values(map, x::AbstractVector, y::AbstractVector)
     X, Y = _map_positions(map.meta)

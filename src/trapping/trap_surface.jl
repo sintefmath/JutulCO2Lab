@@ -1,17 +1,14 @@
-# The top surface as the trapping analysis sees it (roadmap Stage 8 item 1) —
-# what co2lab-spillpoint takes from the top-surface grid Gt: node coordinates
-# and depths, edges with the columns on either side, and per column its
-# caprock depth, height, area, centroid and corner nodes.
+# The top surface as the trapping analysis sees it: what co2lab-spillpoint
+# takes from the top-surface grid Gt -- node coordinates and depths, edges with
+# the columns on either side, and per column its caprock depth, height, area,
+# centroid and corner nodes.
 #
 # Nodes are numbered as co2lab numbers them (sorted by x, then y, then depth),
 # so that ties between equally steep neighbours are broken the same way.
 #
-# Across faults the columns' top faces do not share edges. By default a fault
-# is sealing: its edges on the surface are marked `sealed`, and the trapping
-# analysis treats them as closed boundaries. With open faults the surface is
-# stitched there as co2lab's topSurfaceGrid does (stitch_neighbors): for each
-# pair of columns connected in the 3D grid but not along an edge, the two
-# closest node pairs in map view are merged into their mean.
+# Faults (columns' top faces not sharing an edge) are sealing by default: their
+# edges are marked `sealed` and treated as closed boundaries. With open faults
+# the surface is stitched as co2lab's topSurfaceGrid does (stitch_neighbors).
 
 # ---------------------------------- Surface -----------------------------------
 
@@ -19,60 +16,73 @@
     trap_surface(mesh, columns::VEColumns; faults = :sealing, sheet = :top)
         -> NamedTuple
 
-The caprock of a VE domain for trap analysis: [`ve_top_surface`](@ref)'s
-polygons with co2lab's numbering and the quantities co2lab-spillpoint reads
-from its top-surface grid `Gt`.
+The caprock of a VE domain, prepared for trap analysis: the polygons of
+[`ve_top_surface`](@ref) with co2lab's node numbering, plus the quantities
+co2lab-spillpoint reads from its top-surface grid `Gt`. This is the input of
+[`trap_analysis`](@ref).
 
-`sheet` picks the columns: `:top` (default) the first VE block of every
-pillar — the formation's top; on a grid with one block per pillar, every
-column, as co2lab's `Gt` — or a sheet number of [`ve_sheets`](@ref) (a
-contiguous surface of connected top faces, e.g. under an internal layer).
-The surface's other boundary edges are open: CO2 reaching them leaves it
-(upwards, to the sheet above: [`sheet_spill_targets`](@ref)).
+# Arguments
 
-Each column's polygon has only the corners of its top face (at most four;
-nodes that faults add on the edges are left out, as co2lab's faces have
-none). Nodes at the same position are one node.
+- `mesh`, `columns`: the 3D mesh and its column partition
+  ([`ve_columns`](@ref)).
+- `faults`: how faults are treated (see below); `:sealing` (default) or
+  `:open`.
+- `sheet`: which columns form the surface:
+  - `:top` (default): the first VE block of every pillar, i.e. the
+    formation's top; with one block per pillar, every column (as co2lab's
+    `Gt`);
+  - an integer: a sheet of [`ve_sheets`](@ref), a contiguous surface of
+    connected top faces (e.g. under an internal layer). Its other boundary
+    edges are open: CO2 reaching them leaves upwards, to the sheet above
+    ([`sheet_spill_targets`](@ref)).
 
-Faults — a column side whose logical neighbour pillar holds a column of the
-same surface, but whose top edge the neighbour does not share — are
-- `faults = :sealing` (default): closed boundaries. Their edges are marked
-  in `sealed`; [`trap_analysis`](@ref) lets no CO2 spill across them.
-- `faults = :open`: stitched as co2lab's `topSurfaceGrid` stitches them (for
-  columns connected in the 3D grid without a shared edge, the two closest
-  node pairs of the two columns, in map view, merged at their mean
-  position); co2lab's surface. Columns not connected in 3D (a complete
-  offset) keep an open boundary between them, as in co2lab.
-A fault without throw leaves no gap in the grid and is not seen.
+# Returns
 
-Returns the NamedTuple `(x, y, z, polygons, corners, edges, edge_columns,
-sealed, zc, H, area, cx, cy, xc, yc, outline, blocks)`, all new — a superset
-of [`ve_top_surface`](@ref)'s result, so that the map plots and
-[`ve_contour_lines`](@ref) take it too. Its "columns" are its polygons,
-numbered `1:length(blocks)`; `blocks[i]` is polygon `i`'s column of
-`columns` (`1:n` with one block per pillar), and every per-column quantity
-here and in [`trap_analysis`](@ref)'s result is per polygon:
-- `x`, `y`, `z`: node coordinates and caprock depths, nodes sorted by
-  `(x, y, z)` as co2lab's `uniqueNodes` (stitched nodes moved);
-- `polygons[col]`: the column's top-face nodes;
+A new NamedTuple, a superset of [`ve_top_surface`](@ref)'s result (so map
+plots and [`ve_contour_lines`](@ref) accept it). Its "columns" are its
+polygons, numbered `1:length(blocks)`; every per-column quantity here and in
+[`trap_analysis`](@ref)'s result is per polygon.
+
+- `x`, `y`, `z`: node coordinates and caprock depths (m), nodes sorted by
+  `(x, y, z)` as co2lab's `uniqueNodes` (stitched nodes moved).
+- `polygons[col]`: the column's top-face nodes.
 - `corners`: `4 × ncol`, each column's west-south, east-south, west-north and
-  east-north nodes (co2lab's `cellNodes`; for columns with four distinct
-  top-face nodes, else 0);
-- `edges`: `2 × nedge` node pairs (smaller first) in co2lab's order — when
-  every column has four corners, as its `cartesian_face_reordering`: each
-  column's west and east edges column by column, then all south edges,
-  then all north edges; otherwise sorted — and
-  `edge_columns`: `2 × nedge`, the columns on either side (0 at the
-  boundary);
-- `sealed`: per edge, whether it is a boundary edge along a sealing fault;
-- `zc`, `H`: caprock depth and height per column
-  ([`ve_column_geometry`](@ref));
-- `area`, `cx`, `cy`: the area and centroid of each column's polygon in map
-  view (co2lab's `Gt.cells.volumes`, `Gt.cells.centroids`);
-- `xc`, `yc`: the mean of each polygon's nodes, as [`ve_top_surface`](@ref);
-- `outline`: boundary edges as node pairs, as [`ve_top_surface`](@ref);
-- `blocks`: the column of `columns` of each polygon.
-`mesh` and `columns` are only read.
+  east-north node (co2lab's `cellNodes`); 0 for columns without four distinct
+  top-face nodes.
+- `edges`: `2 × nedge` node pairs (smaller first) in co2lab's order. When
+  every column has four corners this is `cartesian_face_reordering`'s: each
+  column's west and east edges column by column, then all south, then all
+  north edges; otherwise sorted.
+- `edge_columns`: `2 × nedge`, the columns on either side (0 at the boundary).
+- `sealed`: per edge, whether it is a boundary edge along a sealing fault.
+- `zc`, `H`: caprock depth and height (m) per column
+  ([`ve_column_geometry`](@ref)).
+- `area`, `cx`, `cy`: area (m²) and centroid of each polygon in map view
+  (co2lab's `Gt.cells.volumes`, `Gt.cells.centroids`).
+- `xc`, `yc`: the mean of each polygon's nodes, as [`ve_top_surface`](@ref).
+- `outline`: boundary edges as node pairs, as [`ve_top_surface`](@ref).
+- `blocks`: the column of `columns` for each polygon (`1:n` with one block
+  per pillar).
+
+# Faults
+
+A fault is a column side whose logical neighbour pillar holds a column of the
+same surface, but which does not share its top edge with it. A fault without
+throw leaves no gap in the grid and is not seen.
+
+- `faults = :sealing`: closed boundaries. Their edges are marked in
+  `sealed`; [`trap_analysis`](@ref) lets no CO2 spill across them.
+- `faults = :open`: stitched as co2lab's `topSurfaceGrid` does, giving
+  co2lab's surface: for columns connected in the 3D grid without a shared
+  edge, the two closest node pairs (in map view) are merged at their mean
+  position. Columns not connected in 3D (a complete offset) keep an open
+  boundary between them, as in co2lab.
+
+# Notes
+
+- Each polygon has only the corners of its top face (at most four): nodes
+  that faults add on the edges are left out, as co2lab's faces have none.
+- Nodes at the same position are one node.
 """
 function trap_surface(mesh, columns::VEColumns; faults::Symbol = :sealing,
                       sheet = :top)
@@ -128,11 +138,10 @@ function _unique_nodes(x, y, z, polygons)
             [renum[p] for p in polygons], renum)
 end
 
-# The positions in a top face's node list of its corners: a corner-point
-# cell's top face has at most four; where a fault splits the faces beside it,
-# GeoEnergyIO adds nodes on its edges. The node closest to the line through its
-# two neighbours is dropped, repeatedly, until four distinct nodes are left
-# (co2lab's faces have none).
+# The positions of a top face's corners in its node list. A corner-point top
+# face has at most four corners, but faults beside it add nodes on its edges
+# (co2lab's faces have none); the node nearest the line through its two
+# neighbours is dropped until four distinct nodes are left.
 function _corner_positions(x, y, z, p)
     pos = collect(eachindex(p))
     p = copy(p)
@@ -153,11 +162,11 @@ end
 
 # -------------------------------- Fault edges ---------------------------------
 
-# The edges of the corner polygons that lie on a fault, as pairs of surface
-# nodes of `s` (ve_top_surface): an edge on a side of its column whose logical
-# neighbour pillar holds a column of the surface; the side from the top
-# cell's lateral faces that contain the edge's raw pieces (`keep`: each
-# polygon's corner positions)
+# The edges of the corner polygons that lie on a fault, as a set of node pairs
+# of `s` (ve_top_surface). An edge is on a fault if it lies on a column side
+# whose logical neighbour pillar holds a column of the surface; the side is
+# found from the top cell's lateral faces. `keep`: each polygon's corner
+# positions.
 function _fault_edges(mesh, columns, s, keep)
     ijk = [cell_ijk(mesh, c) for c in 1:number_of_cells(mesh)]
     bdir = _boundary_directions(mesh)

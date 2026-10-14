@@ -1,55 +1,53 @@
-# VE boundary conditions (roadmap Stage 2 item 5).
-#
-# co2lab's pressure boundary condition on the lateral sides of the VE columns,
-# as MRST computes it (getBoundaryConditionFluxesAD.m, called by
-# ReservoirModel.addBoundaryConditionsAndSources for CO2VEBlackOilTypeModel).
-# Per phase, with the column's caprock pressure p (brine) and p + pcWG (CO2):
+# VE boundary conditions: co2lab's pressure boundary condition on the lateral
+# sides of the VE columns, as co2lab computes it. Per phase, with the column's
+# caprock pressure p (brine) and p + pcWG (CO2):
 #
 #   dP = p_bc − p_phase − ρ_phase·g·(z_edge − z_cell)
 #
 # - one boundary pressure p_bc for both phases (no capillary pressure outside);
 # - the gravity term runs from the column's caprock depth to the side's
-#   caprock-edge depth (MRST's Gt.cells.z and Gt.faces.z);
-# - densities are the column's (MRST averages inside and outside, and the
+#   caprock-edge depth;
+# - densities are the column's (co2lab averages inside and outside, and the
 #   outside density defaults to the inside one);
-# - outflow (dP ≤ 0) with the phase's own mobility, inflow (dP > 0) with the
+# - outflow (dP ≤ 0) uses the phase's own mobility, inflow (dP > 0) the
 #   column's total mobility times the inflow saturation (brine only by
-#   default: open_boundary_conditions.m's `'sat', [1, 0]`).
+#   default, as co2lab's `open_boundary_conditions`).
 #
 # JutulDarcy's FlowBoundaryCondition has none of this (no pcWG, no gravity
-# term, one flow direction for all phases), hence a separate force. It is
-# passed as JutulDarcy's `bc` force: setup_reservoir_forces(model; bc = bcs).
+# term, one flow direction for all phases), hence a separate force, passed as
+# JutulDarcy's `bc` force: setup_reservoir_forces(model; bc = bcs).
 #
-# With dissolution, co2lab passes no dissolved components to the boundary
-# fluxes (CO2VEBlackOilTypeModel.addBoundaryConditionsAndSources, dissolved =
-# {}): the brine phase's mass — dissolved CO2 included — is booked to the
-# brine component, and the dissolved-CO2 law sees no boundary flux — the
-# brine balance loses the dissolved CO2's mass (analysis/co2lab-issues.org).
-# Here brine leaves with its dissolved CO2 and enters without any
-# (`dissolved = :carry`, the default); `dissolved = :co2lab` reproduces
-# co2lab's booking for comparisons.
+# Dissolved CO2: co2lab books the brine phase's whole mass, dissolved CO2
+# included, to the brine component, and its dissolved-CO2 law sees no boundary
+# flux, so the brine balance loses the dissolved CO2's mass. Here brine leaves
+# with its dissolved CO2 and enters without any (`dissolved = :carry`, the
+# default); `dissolved = :co2lab` reproduces co2lab's booking for comparisons.
 
 # ---------------- Boundary conditions and the sides they open -----------------
 
 """
     VEBoundaryCondition(cell, pressure, trans, dz, sat, carry_dissolved)
 
-co2lab's pressure boundary condition on one lateral side of VE column `cell`:
-boundary pressure `pressure` (Pa, both phases), transmissibility `trans` (m³,
-permeability times geometry; the column's half transmissibility to the side),
-`dz` = caprock-edge depth − column caprock depth (m, depth positive down;
-for a fine cell of a hybrid grid, side centroid − cell centroid),
-`sat` = saturations (brine, CO2) of inflowing fluid, `carry_dissolved`: with
-dissolution, whether brine carries its dissolved CO2 across (see the top of
-`vebc.jl`). Build with [`ve_boundary_conditions`](@ref).
+co2lab's pressure boundary condition on one lateral side of a VE column.
+Build with [`ve_boundary_conditions`](@ref); pass to the simulator as the
+`bc` force.
+
+# Fields
+
+- `trans`: permeability times geometry (m³), the column's half
+  transmissibility to the side.
+- `dz`: caprock-edge depth minus column caprock depth (m, depth positive
+  down); for a fine cell of a hybrid grid, side centroid minus cell centroid.
+- `carry_dissolved`: with dissolution, whether brine carries its dissolved
+  CO2 across (`true`), or co2lab's booking is used (`false`).
 """
 struct VEBoundaryCondition{T <: Real}
-    cell::Int              # VE column
-    pressure::T            # boundary pressure (Pa)
+    cell::Int              # VE column (block) the side belongs to
+    pressure::T            # boundary pressure, both phases (Pa)
     trans::T               # half transmissibility (m³)
-    dz::T                  # edge depth − datum depth (m)
-    sat::NTuple{2, T}      # inflow saturations
-    carry_dissolved::Bool  # brine carries its rs across
+    dz::T                  # edge depth − block datum depth (m)
+    sat::NTuple{2, T}      # saturations (brine, CO2) of inflowing fluid
+    carry_dissolved::Bool  # brine carries its dissolved CO2 across
 end
 
 """
@@ -57,14 +55,23 @@ end
                     i = nothing, j = nothing, include_across_fault = false)
         -> Vector{Int}
 
-Indices into `sides` ([`ve_boundary_sides`](@ref)) of the sides to open, the
-counterpart of MRST's `searchForBoundaryFaces`: sides in one of `directions`
-(Jutul's direction names), whose column's logical `i` (and `j`) lies in `i`
-(`j`) — a range, a collection or `nothing` for any. Sides flagged
-`across_fault` (a fully offset fault, sealed) are left out unless
-`include_across_fault = true`.
+Select the boundary sides to open, by direction and logical position; the
+counterpart of MRST's `searchForBoundaryFaces`. The result goes to
+[`ve_boundary_conditions`](@ref).
 
-Returns a new `Vector{Int}`, increasing. `sides` and `columns` are only read.
+# Arguments
+
+- `sides`: the domain's boundary sides ([`ve_boundary_sides`](@ref)).
+- `columns`: the column partition ([`ve_columns`](@ref)).
+- `directions`: lateral directions to include (Jutul's names); default all.
+- `i`, `j`: logical column indices to include (a range, a collection, or
+  `nothing` for any).
+- `include_across_fault`: also include sides flagged `across_fault` (a fully
+  offset, sealed fault); default `false`.
+
+# Returns
+
+A new `Vector{Int}` of indices into `sides`, increasing.
 """
 function ve_select_sides(sides::VEBoundarySides, columns::VEColumns;
                          directions = (:left, :right, :lower, :upper),
@@ -93,26 +100,29 @@ end
                            trans = nothing, dissolved = :carry)
         -> Vector{VEBoundaryCondition}
 
-co2lab's pressure boundary conditions on the sides `sides[ix]` (from
-[`ve_boundary_sides`](@ref) and [`ve_select_sides`](@ref)); `ve` is the
-NamedTuple from [`ve_domain`](@ref).
+co2lab's pressure boundary conditions on the selected boundary sides.
 
-- `pressure`: a function of the side's caprock-edge depth (e.g. hydrostatic,
-  `z -> ρ_w·g·z`, as co2lab's `open_boundary_conditions`) or one value per
-  selected side (Pa).
-- `sat`: saturations (brine, CO2) of inflowing fluid; co2lab's default is
-  brine.
-- `trans`: one transmissibility per selected side; defaults to the column's
-  half transmissibility to the side, `sides.half_trans`. Give MRST's
-  `T_all(bc.face)` for runs on identical input.
-- `dissolved` (with dissolution only): `:carry` — brine leaves with its
-  dissolved CO2 and enters without any; `:co2lab` — the brine phase's mass,
-  dissolved CO2 included, is booked to brine, as co2lab does (for
-  comparisons with co2lab).
+# Arguments
 
-Returns a new vector, one condition per selected side, in the order of
-`ix`; pass it as `setup_reservoir_forces(model; bc = ...)`. Arguments are
-only read.
+- `ve`: the NamedTuple from [`ve_domain`](@ref).
+- `sides`, `ix`: the boundary sides ([`ve_boundary_sides`](@ref)) and the
+  indices of those to open ([`ve_select_sides`](@ref)).
+- `pressure`: boundary pressure (Pa): a function of the side's caprock-edge
+  depth (e.g. hydrostatic `z -> ρ_w·g·z`, as co2lab's
+  `open_boundary_conditions`) or one value per selected side.
+- `sat`: saturations (brine, CO2) of inflowing fluid; default brine, as
+  co2lab.
+- `trans`: one transmissibility per selected side; default
+  `sides.half_trans`, the column's half transmissibility to the side. Give
+  MRST's `T_all(bc.face)` for runs on identical input.
+- `dissolved` (with dissolution only): `:carry` (default), brine leaves with
+  its dissolved CO2 and enters without any; `:co2lab`, the brine phase's
+  whole mass is booked to brine, as co2lab does (for comparisons).
+
+# Returns
+
+A new `Vector{VEBoundaryCondition}`, one per selected side in the order of
+`ix`. Pass it as `setup_reservoir_forces(model; bc = ...)`.
 """
 function ve_boundary_conditions(ve, sides::VEBoundarySides, ix; pressure,
                                 sat = (1.0, 0.0), trans = nothing, dissolved = :carry)
@@ -142,9 +152,9 @@ end
 """
     _ve_bc_volume_flux(bc, p_ph, mob_ph, rho_ph, mob_t, sat_ph, g) -> flux
 
-Reservoir-volume flux (m³/s) of one phase *into* the column through `bc`,
-MRST's `qRes`: `dP = p_bc − p_ph − rho_ph·g·dz`; for `dP > 0` (inflow)
-`mob_t·T·dP·sat_ph`, otherwise `mob_ph·T·dP`.
+Reservoir-volume flux (m³/s) of one phase *into* the column through `bc`
+(MRST's `qRes`). With `dP = p_bc − p_ph − rho_ph·g·dz`, returns
+`mob_t·T·dP·sat_ph` for inflow (`dP > 0`), otherwise `mob_ph·T·dP`.
 """
 function _ve_bc_volume_flux(bc, p_ph, mob_ph, rho_ph, mob_t, sat_ph, g)
     dP = bc.pressure - p_ph - rho_ph * g * bc.dz
@@ -155,11 +165,12 @@ end
 """
     _ve_bc_mass_outflow(bc, state, g) -> (brine, co2, dissolved)
 
-Mass flux (kg/s) *out of* the column through `bc`, from the column's
-pressure, capillary pressure, relative permeabilities, viscosities and
-densities in `state` (read with `state[:Name]`, so both a simulator state and
-an output state work), per component row of the mass balance: brine and CO2,
-and the part of the CO2 that is dissolved (zero without dissolution, and with
+Mass flux (kg/s) *out of* the column through `bc`, per component row of
+the mass balance. `state` is read with `state[:Name]`, so a simulator state
+and an output state both work.
+
+Returns `(brine, co2, dissolved)`: `co2` includes the dissolved CO2,
+`dissolved` is its dissolved part (zero without dissolution and with
 co2lab's booking, where the brine phase's whole mass counts as brine).
 """
 function _ve_bc_mass_outflow(bc, state, g)
@@ -193,17 +204,28 @@ end
 """
     ve_boundary_mass_fluxes(bcs, state) -> Matrix{Float64}
 
-Mass fluxes out of the domain (kg/s, positive out) through each boundary
-condition in `bcs`, evaluated on `state`, which must hold `:Pressure`,
-`:CapillaryPressure`, `:RelativePermeabilities`, `:PhaseViscosities` and
-`:PhaseMassDensities` (add them to the reservoir model's
-`output_variables` to get them in simulation output); with dissolution and
-`dissolved = :carry` also `:ShrinkageFactors` and `:Rs`.
+Mass fluxes out of the domain through each boundary condition, for
+post-processing a state (e.g. to account for CO2 leaving the domain).
 
-Returns a new 3 × `length(bcs)` matrix: row 1 brine, row 2 CO2 (free and
-dissolved), row 3 the dissolved part of row 2. With co2lab's booking of
-dissolved CO2 row 1 holds the brine phase's whole mass and row 3 is zero.
-Arguments are only read.
+# Arguments
+
+- `bcs`: the boundary conditions ([`ve_boundary_conditions`](@ref)).
+- `state`: a simulator or output state holding `:Pressure`,
+  `:CapillaryPressure`, `:RelativePermeabilities`, `:PhaseViscosities` and
+  `:PhaseMassDensities`; with dissolution and `dissolved = :carry` also
+  `:ShrinkageFactors` and `:Rs`. Add them to the reservoir model's
+  `output_variables` to get them in simulation output.
+
+# Returns
+
+A new 3 × `length(bcs)` matrix (kg/s, positive out):
+
+- row 1: brine;
+- row 2: CO2, free and dissolved;
+- row 3: the dissolved part of row 2.
+
+With co2lab's booking of dissolved CO2, row 1 holds the brine phase's whole
+mass and row 3 is zero.
 """
 function ve_boundary_mass_fluxes(bcs::AbstractVector{<:VEBoundaryCondition}, state)
     q = zeros(3, length(bcs))
@@ -216,8 +238,9 @@ end
 
 # --------------------------------- Jutul hook ---------------------------------
 
+# The boundary fluxes in the mass-conservation law; component rows brine and
+# CO2 (free and dissolved).
 # Modifies: `acc` (the mass-conservation accumulation, per component and cell).
-# Component rows: brine, CO2 (free and dissolved).
 function Jutul.apply_forces_to_equation!(
         acc, storage, model::CO2LabModel, eq::JutulDarcy.ConservationLaw{:TotalMasses},
         eq_s, force::AbstractVector{<:VEBoundaryCondition}, time)

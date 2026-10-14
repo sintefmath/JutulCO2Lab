@@ -1,20 +1,17 @@
-# Reconstruction of fine-scale (3D) states from VE states (roadmap Stage 2
-# item 6; capillary fringe: Stage 6 item 1b), as co2lab's VEstates23D:
+# Reconstruction of fine-scale (3D) states from VE states, as co2lab's
+# VEstates23D:
 #
-# - pressure (pVE_to_p3D.m): the column's caprock brine pressure extended
-#   hydrostatically with the brine density at that pressure,
+# - pressure (co2lab's pVE_to_p3D): the column's caprock brine pressure
+#   extended hydrostatically with the brine density at that pressure,
 #   p + ρ_w(p)·g·(z_cell − z_top), z_cell the 3D cell centroid depth;
-# - saturation (height2finescaleSat.m, sharp_interface_h2s): from the plume
-#   heights (h, h_max). Cells above h hold 1 − rw of CO2, the cell cut by h
-#   the filled fraction of that; with residual CO2 (rg > 0) the zone between
-#   h and h_max holds rg. The fill of a column is MRST's fillDegree.m.
-#
-# - dissolved CO2 (VEstates23D, rs part): the column's rs fills the brine from
-#   the caprock down — saturated (dis_max) down to the depth where the brine
-#   volume above holds the column's fraction rs/dis_max of it, none below.
-#
-# The saturations come from the fluid's vertical model (`_fine_saturations`):
-# sharp_interface_h2s, or for a capillary fringe cap_fringe_h2s.
+# - saturation: from the plume heights (h, h_max) by the fluid's vertical
+#   model (`_fine_saturations`): co2lab's sharp_interface_h2s, or
+#   cap_fringe_h2s for a capillary fringe. Sharp interface: cells above h hold
+#   1 − rw of CO2, the cell cut by h its filled fraction of that, and with
+#   residual CO2 (rg > 0) the zone between h and h_max holds rg;
+# - dissolved CO2: the column's rs fills the brine from the caprock down,
+#   saturated (dis_max) down to where the brine above holds the column's
+#   fraction rs/dis_max of it, none below.
 
 # ------------------------------ Filling a column ------------------------------
 
@@ -22,9 +19,9 @@
     _fill_degree(h, zb) -> (n, t)
 
 MRST's `fillDegree` for one column with cumulative cell-bottom depths below
-the caprock `zb` (increasing): `n` cells are completely filled by a plume of
-height `h` (`zb[k] ≤ h`), and cell `n + 1` is filled to fraction `t` (0 when
-all cells are filled). Negative `h` counts as 0.
+the caprock `zb` (increasing). Returns `n`, the number of cells completely
+filled by a plume of height `h` (`zb[k] ≤ h`), and `t`, the filled fraction
+of cell `n + 1` (0 when all cells are filled). Negative `h` counts as 0.
 """
 function _fill_degree(h, zb)
     h = max(h, zero(h))
@@ -73,14 +70,15 @@ end
 """
     _column_dissolved(zb, dz, brine, frac) -> Vector
 
-Fraction of `dis_max` dissolved in each cell of one column (cumulative
-cell-bottom depths `zb`, thicknesses `dz`, brine volume per unit height
-`brine` = porosity × brine saturation) when the column holds the fraction
-`frac` of its saturated amount: co2lab's `VEstates23D` finds the depth `h` at
-which the brine above holds `frac` of the column's brine (Newton on
-`integrateVertically`) and saturates everything above it. The integral is
-piecewise linear, so `h` is found exactly here; with no brine at all, `h` is
-co2lab's initial guess `frac·H`. Returns a new vector, top cell first.
+Fraction of `dis_max` dissolved in each cell of one column holding the
+fraction `frac` of its saturated amount, as co2lab's `VEstates23D`: the
+brine is saturated from the caprock down to the depth `h` where the brine
+above holds `frac` of the column's brine, and holds none below.
+
+The column is given by cumulative cell-bottom depths `zb`, thicknesses `dz`
+and brine volume per unit height `brine` (porosity × brine saturation).
+`h` is found exactly (co2lab: Newton); with no brine at all it is co2lab's
+initial guess `frac·H`. Returns a new vector, top cell first.
 """
 function _column_dissolved(zb, dz, brine, frac)
     # brine to saturate: the fraction frac of the column's, filled from the top
@@ -110,22 +108,34 @@ end
 """
     ve_reconstruct(state, ve, columns, fluid; poro3D = nothing) -> NamedTuple
 
-Fine-scale state on the 3D grid from a VE reservoir state, as co2lab's
-`VEstates23D`, for the fluid's vertical model. `state` needs `:Pressure`,
-`:sG`, `:sGmax` and, with dissolution, `:Rs` (a reservoir output state, or
-the `:Reservoir` entry of a full state); `ve` is [`ve_domain`](@ref)'s
-NamedTuple, `columns` the columns it was built on, `fluid` the
-[`co2lab_ve_fluid`](@ref) of the run. `poro3D` (per 3D cell) weights the brine
-volume for the dissolved CO2; `nothing` means uniform, as co2lab's default.
+The fine-scale state on the 3D grid from a VE reservoir state, as co2lab's
+`VEstates23D`: for plotting and comparing VE results cell by cell.
 
-Returns the NamedTuple `(pressure, sG, sGmax, rs)` of new `Vector{Float64}`s,
-one value per cell of the 3D mesh, in the mesh's cell order: brine pressure
-extended hydrostatically from the caprock (Pa), CO2 saturation, maximum CO2
-saturation, and dissolved CO2 ratio (`rs`; `nothing` without dissolution).
-The heights are recomputed from `sG` and `sGmax` by the fluid's vertical
-model (for the sharp interface co2lab's `upscaledSat2height`); a fine 3D
-cell of a hybrid grid takes its block's own values. Arguments are only
-read.
+# Arguments
+
+- `state`: a VE reservoir state with `:Pressure`, `:sG`, `:sGmax` and, with
+  dissolution, `:Rs` (a reservoir output state, or the `:Reservoir` entry of
+  a full state).
+- `ve`: [`ve_domain`](@ref)'s NamedTuple.
+- `columns`: the columns `ve` was built on.
+- `fluid`: the run's [`co2lab_ve_fluid`](@ref).
+- `poro3D`: porosity per 3D cell, weighting the brine volume for the
+  dissolved CO2; `nothing`: uniform, co2lab's default.
+
+# Returns
+
+The NamedTuple `(pressure, sG, sGmax, rs)` of new `Vector{Float64}`s, one
+value per cell of the 3D mesh, in the mesh's cell order:
+
+- `pressure`: brine pressure (Pa), extended hydrostatically from the caprock;
+- `sG`, `sGmax`: CO2 saturation and maximum CO2 saturation;
+- `rs`: dissolved CO2 ratio; `nothing` without dissolution.
+
+# Notes
+
+- The plume heights are recomputed from `sG` and `sGmax` by the fluid's
+  vertical model (sharp interface: co2lab's `upscaledSat2height`).
+- A fine 3D cell of a hybrid grid takes its block's own values.
 """
 function ve_reconstruct(state, ve, columns::VEColumns, fluid::CO2LabVEFluid;
                         poro3D = nothing)

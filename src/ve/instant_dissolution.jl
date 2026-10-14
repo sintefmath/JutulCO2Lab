@@ -1,25 +1,24 @@
-# co2lab's instantaneous dissolution (makeVEFluid's dis_rate 0 or Inf; roadmap
-# Stage 4 item 2).
+# co2lab's instantaneous dissolution (makeVEFluid's dis_rate 0 or Inf): brine
+# is saturated (rs = dis_max) wherever free CO2 is present.
 #
-# Brine is saturated (rs = dis_max) wherever free CO2 is present. co2lab solves
-# for one unknown X per cell besides pressure (CO2VEBlackOilTypeModel.m:
-# getPrimaryVariables, initStateAD, updateState): X is sG where the brine is
-# saturated and rs where it is not (then sG = 0). The switch happens in the
-# update after each Newton iteration, classified on the state before it:
+# co2lab (CO2VEBlackOilTypeModel) solves for one unknown X per cell besides
+# pressure: X is sG where the brine is saturated, rs where it is not (then
+# sG = 0). After each Newton iteration X is updated, classified on the state
+# before the update:
 #
-#   undersaturated: rs += dX, capped to [0, dis_max]; at dis_max the cell is
-#                   saturated from then on, with sG = 0
+#   undersaturated: rs += dX, capped to [0, dis_max]; at dis_max the cell turns
+#                   saturated, with sG = 0
 #   saturated:      sG += dX, the step limited to dsMaxAbs = 0.2 and sG capped
 #                   to [0, 1 − res_water]; a cell whose sG falls to 0 turns
 #                   undersaturated, with rs = dis_max − eps
 #
-# Here X is JutulDarcy's black-oil switching value BlackOilX (value plus phase
-# state: OilOnly = undersaturated, OilAndGas = saturated), under a variable
-# type of our own with co2lab's update rule instead of JutulDarcy's (roadmap
-# standing decision). sG and Rs become secondary variables computed from X, so
-# everything that reads them is unchanged. There is no dissolved-CO2 law; with
-# hysteresis the residual CO2 consumed by dissolution is the dissolved-CO2
-# balance's residual (co2lab's s_depletion = max(eq_dis, 0)).
+# Here X is JutulDarcy's black-oil switching value BlackOilX (OilOnly =
+# undersaturated, OilAndGas = saturated), under a variable type of our own
+# that applies co2lab's update rule instead of JutulDarcy's. sG and Rs become
+# secondary variables computed from X, so everything that reads them is
+# unchanged. There is no dissolved-CO2 law; with hysteresis, the residual CO2
+# consumed by dissolution is the dissolved-CO2 balance's residual (co2lab's
+# s_depletion = max(eq_dis, 0)).
 
 import JutulDarcy: BlackOilX, OilOnly, OilAndGas
 import Jutul: replace_value
@@ -29,10 +28,19 @@ import Jutul: replace_value
 """
     DissolvedOrFreeCO2(dis_max, res_water; ds_max = 0.2)
 
-co2lab's unknown `X` for instantaneous dissolution: `rs` in undersaturated
-cells, `sG` in saturated ones, stored as JutulDarcy's `BlackOilX` (phase state
-`OilOnly` / `OilAndGas`). Updated with co2lab's switching rule (see the top of
-`instant_dissolution.jl`); `ds_max` is co2lab's `dsMaxAbs`.
+The primary variable of instantaneous dissolution, co2lab's unknown `X`:
+`rs` in undersaturated cells, `sG` in saturated ones. Stored as JutulDarcy's
+`BlackOilX` (phase state `OilOnly` / `OilAndGas`), but updated after each
+Newton iteration by co2lab's switching rule:
+
+- undersaturated: `rs += dX`, capped to `[0, dis_max]`; reaching `dis_max`
+  turns the cell saturated, with `sG = 0`;
+- saturated: `sG += dX`, the step limited to `ds_max` (co2lab's `dsMaxAbs`)
+  and `sG` capped to `[0, 1 − res_water]`; `sG` falling to 0 turns the cell
+  undersaturated, with `rs = dis_max − eps`.
+
+[`setup_co2lab_model`](@ref) installs it as `:CO2X` for instantaneous
+dissolution.
 """
 struct DissolvedOrFreeCO2 <: Jutul.ScalarVariable
     dis_max::Float64    # saturated rs
@@ -53,7 +61,6 @@ _co2lab_x(v::DissolvedOrFreeCO2, sG, rs) =
              BlackOilX(Float64(min(rs, v.dis_max - eps())), OilOnly, false)
 
 # JutulDarcy's storage hooks for BlackOilX, for this variable type
-# (JutulDarcy/src/blackoil/variables/variables.jl:105-195)
 Jutul.scalarized_primary_variable_type(model, ::DissolvedOrFreeCO2, T = Float64) =
     BlackOilX{T}
 
@@ -123,7 +130,7 @@ function Jutul.update_primary_variable!(state, v::DissolvedOrFreeCO2, state_symb
     return X
 end
 
-# One cell of co2lab's update (CO2VEBlackOilTypeModel.m:403-430).
+# One cell of co2lab's update of X by dx; returns the new BlackOilX
 function _update_co2lab_x(v, x::BlackOilX, dx)
     val = x.val
     if x.phases_present == OilOnly
@@ -177,10 +184,11 @@ end
 
 Switch a reservoir model built for rate-driven dissolution to co2lab's
 instantaneous mode: unknown `:CO2X` ([`DissolvedOrFreeCO2`](@ref)) instead of
-`sG` and `Rs` (which become secondary), no dissolved-CO2 law.
+`sG` and `Rs` (which become secondary), no dissolved-CO2 law. Returns
+`rmodel`.
 
 Modifies: `rmodel.primary_variables`, `rmodel.secondary_variables`,
-`rmodel.equations`. `fluid` is only read.
+`rmodel.equations`.
 """
 function _set_instant_dissolution!(rmodel, fluid::CO2LabVEFluid)
     P, S = rmodel.primary_variables, rmodel.secondary_variables
@@ -204,8 +212,8 @@ end
 struct InstantDissolution end
 
 # co2lab's s_depletion for instantaneous dissolution: the dissolved-CO2
-# balance's residual where positive (CO2VEBlackOilTypeModel.m:100-107) — the
-# dissolved mass gained beyond what the brine brought in.
+# balance's residual where positive, i.e. the dissolved mass gained beyond
+# what the brine brought in
 function _residual_depletion(eq::HysteresisEquation{<:Any, InstantDissolution}, state,
                              state0, model, c, dt, ldisc, src)
     ρV = reference_densities(model.system)[2]

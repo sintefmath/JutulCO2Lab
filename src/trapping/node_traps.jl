@@ -1,12 +1,13 @@
 # Structural traps along the surface's nodes and edges: co2lab-spillpoint's
-# node-based method, trapAnalysis(Gt, false) — findUpslopeNeighbor,
-# nodeSpillField, computeNodeTraps (roadmap Stage 8 item 3). Results per node;
-# node_to_cells.jl projects them to columns (n2cTraps).
+# node-based method, trapAnalysis(Gt, false) (findUpslopeNeighbor,
+# nodeSpillField, computeNodeTraps). Results are per node; the projection to
+# columns (co2lab's n2cTraps) is in node_to_cells.jl.
 #
-# Every node drains to its steepest upslope neighbour (over edges and quad
-# diagonals); nodes draining to the same local top form a region; a region
-# spills over the shallowest point of its rim; regions whose spill paths form
-# a cycle are merged into one trap, cycle by cycle, as co2lab does.
+# - Every node drains to its steepest upslope neighbour (over edges and quad
+#   diagonals); nodes draining to the same local top form a region.
+# - A region spills over the shallowest point of its rim.
+# - Regions whose spill paths form a cycle are merged into one trap, cycle by
+#   cycle, as co2lab does.
 
 # ------------------------------ Upslope neighbour -----------------------------
 
@@ -51,11 +52,12 @@ end
 
 # --------------------------------- Regions ------------------------------------
 
-# co2lab's nodeSpillField: the region of each node (0: drains out of the
-# domain over an open boundary node; k: to the k-th local top in node order),
-# the downstream neighbour (0 at tops and open boundary nodes) and the spill
-# edges — rows (edge, region 1, region 2, z1, z2, node 1, node 2) of the
-# edges between regions, in edge order
+# co2lab's nodeSpillField. Returns (region, down, spill):
+# - region: per node, 0 if it drains out over an open boundary node, k if it
+#   drains to the k-th local top in node order;
+# - down: per node, the downstream neighbour (0 at tops and open boundary);
+# - spill: the edges between regions, in edge order, as tuples
+#   (edge, region 1, region 2, z1, z2, node 1, node 2)
 function _spill_field(s, up, closed_bnodes)
     nn = length(s.z)
     # boundary nodes: on an edge with a column on one side only
@@ -100,11 +102,11 @@ function _region_spill_rows(nreg, spill)
     return rows
 end
 
-# co2lab's locate_neighbor_traps: for a group of regions `members`, its spill
-# depth (the shallowest of its rim edges' deeper ends), the spill edges at
-# that depth (one per inner node: the one with the shallowest outer end) and
-# the groups beyond them (`group_of` maps region → group; `rows` from
-# _region_spill_rows)
+# co2lab's locate_neighbor_traps for the group of regions `members`. Returns
+# (groups, z, edges): the groups beyond its spill edges, its spill depth (the
+# shallowest of its rim edges' deeper ends) and its spill edges at that depth
+# (per inner node, the one with the shallowest outer end). `group_of` maps
+# region -> group; `rows` comes from _region_spill_rows.
 function _group_spill(members, group_of, spill, rows)
     member_set = Set(members)
     inside(r) = r in member_set
@@ -148,12 +150,11 @@ function _merge_groups(A, cycle)
     return _spones(P' * A * P)
 end
 
-# co2lab's track_stream: groups of regions (initially one each) and which
-# group spills into which; walks of growing length are accumulated, and a
-# group on a cycle is merged with every group on its cycles — one cycle at a
-# time, the merged group spilling anew over its own shallowest rim point.
-# Returns (members, z, spill_edges, adjacency), groups ordered by their first
-# region.
+# co2lab's track_stream: groups of regions (one each to begin with) and which
+# group spills into which. A group on a spill cycle is merged with the other
+# groups on it, one cycle at a time; the merged group then spills anew over
+# its own shallowest rim point. Returns (members, z, spill_edges, adjacency),
+# groups ordered by their first region.
 function _merge_cycles(nreg, spill)
     members = [[r] for r in 1:nreg]
     group_of = collect(1:nreg)
@@ -194,9 +195,10 @@ end
 
 # ------------------------------- Node traps -----------------------------------
 
-# co2lab's computeNodeTraps: trap and spill region of each node, the traps'
-# spill depths and connections, and the rivers (node lists) from each trap's
-# spill edges, following the downstream neighbours from both ends
+# co2lab's computeNodeTraps. Returns (traps, trap_z, trap_regions, trap_adj,
+# rivers, down): per node its trap and spill region (0: none); per trap its
+# spill depth, which traps it spills into (Bool matrix) and its rivers (node
+# lists from each spill edge); and each node's downstream neighbour
 function _node_traps(s, closed_bnodes, closed_fnodes)
     up = _upslope_neighbours(s, Set(closed_fnodes))
     f = _spill_field(s, up, closed_bnodes)

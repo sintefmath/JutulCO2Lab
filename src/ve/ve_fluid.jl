@@ -1,64 +1,83 @@
-# co2lab's VE constitutive functions and PVT (roadmap Stage 2 items 1 and 3).
+# co2lab's VE fluid: settings, constitutive functions and their Jutul variables.
 #
-# - the vertical model (roadmap Stage 6 item 0): how a column's fine-scale
-#   profile follows from its upscaled state. It gives the heights (h, h_max)
-#   from sG, sGmax, the column height H and Δρ, the relative permeabilities
-#   from the heights, and the fine-scale saturations for reconstruction. h is
-#   the capillary height Pc/(Δρ g): the plume thickness for a sharp interface.
-#   `SharpInterface` is co2lab's 'sharp_interface_simple': upscaledSat2height
-#   (homogeneous case), and the relperm with endpoints and the accretion layer
-#   of addVERelpermSharpInterface — from the caprock rugosity, a property of
-#   the VE grid (`ve_domain`), per column;
-# - pcWG = Δρ g h for every vertical model, added to the brine
-#   (reference-phase) pressure to give the CO2 pressure; Δρ from our black-oil
-#   phase densities (researcher's decision: natural in JutulDarcy; equals
-#   co2lab's without dissolved CO2);
-# - co2lab's PVT (makeVEFluid): densities linear in pressure per phase,
-#   constant or linear viscosities.
+# - Vertical models: how a column's fine-scale profile follows from its
+#   upscaled state.  They give the capillary heights (h, h_max) from sG, sGmax,
+#   the column height H and Δρ; the relperms from the heights; and the
+#   fine-scale saturations for reconstruction.  h = Pc/(Δρ g), the plume
+#   thickness for a sharp interface.
+# - Capillary pressure pcWG = Δρ g h for every vertical model, added to the
+#   brine (reference-phase) pressure to give the CO2 pressure.  Δρ comes from
+#   the black-oil phase densities (equal to co2lab's without dissolved CO2).
+# - PVT: co2lab's (`makeVEFluid`: densities linear in pressure, constant or
+#   linear viscosities) or JutulDarcy's CO2–brine tables.
 #
-# makeVEFluid also carries two properties that are not the fluid's; here they
-# live elsewhere (researcher, 2026-09-25): rugosity with the VE grid
-# (`ve_domain(...; rugosity)`), rock compressibility with the model
-# (`rock_compressibility.jl`).
+# Two of makeVEFluid's options are not the fluid's and live elsewhere: the
+# rugosity with the VE grid (`ve_domain(...; rugosity)`), rock compressibility
+# with the model (`setup_co2lab_model(...; rock_compressibility)`).
 #
 # The formulas are plain functions (`_plume_heights` etc.), called by the Jutul
-# variables and checked directly against co2lab evaluated under Octave
-# (scripts/mrst_dump_ve_fluid.m).
+# variables and testable directly against co2lab.
 
 # ------------------------------- Vertical models -------------------------------
 
 """
     VerticalModel
 
-How the fine-scale profile of a VE column follows from its upscaled state
-(roadmap Stage 6 item 0). A model given to [`co2lab_ve_fluid`](@ref) is a
-grid-independent specification, from which [`setup_co2lab_model`](@ref) builds
-the column-specific object (`_vertical_model`), or already built for the grid
-([`SharpInterfaceIntegrated`](@ref)). A model implements
-`_column_heights`, `_column_relperm`, `_fine_saturations` and
-`_category_saturations`; the capillary pressure is `Δρ g h` for all.
+The family of VE vertical models: how the fine-scale profile of a column
+follows from its upscaled state (saturations, column height, Δρ).  It is
+given to [`co2lab_ve_fluid`](@ref) as `vertical`.
+
+A model is either a grid-independent specification, from which
+[`setup_co2lab_model`](@ref) builds the column-specific object
+(`_vertical_model`), or already built for a grid (e.g.
+[`SharpInterfaceIntegrated`](@ref), [`LayeredFringe`](@ref)).
+
+# Subtypes
+
+- [`SharpInterface`](@ref): homogeneous column, sharp interface.
+- [`SharpInterfaceIntegrated`](@ref): sharp interface, rock varying with depth.
+- [`CapillaryFringeTable`](@ref): capillary fringe in a homogeneous column.
+- [`LayeredFringe`](@ref): capillary fringe, rock varying with depth.
+
+# Notes
+
+- A model implements `_column_heights`, `_column_relperm`,
+  `_fine_saturations` and `_category_saturations`.
+- The capillary pressure is `Δρ g h` for all models.
 """
 abstract type VerticalModel end
 
 """
     SharpInterface()
 
-co2lab's `'sharp_interface_simple'`: a sharp interface between the plume and
-the brine below it, in a vertically homogeneous column, with residual CO2
-between `h` and `h_max` and the accretion layer of the caprock rugosity.
+co2lab's `'sharp_interface_simple'` vertical model (the default): a sharp
+interface between the plume and the brine below it, in a vertically
+homogeneous column.
+
+- Heights as co2lab's `upscaledSat2height` (homogeneous case); residual CO2
+  lies between `h` and `h_max`.
+- Relperm as co2lab's `addVERelpermSharpInterface`: endpoints `krw`, `krg`,
+  and no CO2 flow in the accretion layer `min(dh, H)` under the caprock, with
+  `dh` the rugosity per column ([`ve_domain`](@ref)).
 """
 struct SharpInterface <: VerticalModel end
 
 """
     SharpInterfaceIntegrated
 
-co2lab's `'sharp_interface_integrated'`: a sharp interface in a column whose
-rock varies with depth. Heights by pore volume, relperm by permeability, both
-integrated over the column's fine cells; built with
+co2lab's `'sharp_interface_integrated'` vertical model: a sharp interface in
+a column whose rock varies with depth.  Heights follow from pore volume,
+relperm from permeability, both integrated over the column's fine cells.
+
+Built for one grid with
 [`SharpInterfaceIntegrated(mesh, columns; poro, perm_x)`](@ref
-SharpInterfaceIntegrated(::Any, ::VEColumns)). Per column, at the boundaries
-of its fine cells (top first, `pos[c]:pos[c+1]-1`), the depth below the
-caprock and the integrals from the caprock down.
+SharpInterfaceIntegrated(::Any, ::VEColumns)).
+
+# Fields
+
+Per column `c`, one entry per boundary of its fine cells, top first, at
+`pos[c]:pos[c+1]-1`: the depth below the caprock and the integrals from the
+caprock down to that boundary.
 """
 struct SharpInterfaceIntegrated <: VerticalModel
     pos::Vector{Int}    # column c: entries pos[c]:pos[c+1]-1, one per cell boundary
@@ -74,10 +93,9 @@ const _DensityFreeModel = Union{SharpInterface, SharpInterfaceIntegrated}
 """
     _vertical_model(spec, domain, fluid) -> VerticalModel
 
-The column-specific vertical model for the reservoir `domain` (a
-`DataDomain` from `ve_domain`) and `fluid`, built from the specification
-`spec`. Models without column data return `spec` itself. Arguments are only
-read.
+Build the column-specific vertical model from the specification `spec`, for
+the reservoir `domain` (a `DataDomain` from [`ve_domain`](@ref)) and `fluid`.
+Returns `spec` itself for models without column data.
 """
 _vertical_model(spec::VerticalModel, domain, fluid) = spec
 
@@ -95,47 +113,65 @@ _vertical_model(spec::VerticalModel, domain, fluid) = spec
                       dis_rate = 0.0, dis_max = nothing, dis_max_mass = nothing)
         -> CO2LabVEFluid
 
-co2lab's VE fluid, with `makeVEFluid`'s option names, so an MRST case
-translates one to one:
-- `vertical`: the [`VerticalModel`](@ref), makeVEFluid's relperm model —
-  [`SharpInterface`](@ref) for `'sharp_interface_simple'`;
-- `residual = (res_water, res_gas)`; `krmax = (krw, krg)`: `krw` the brine
-  relperm in the residual-CO2 zone (brine below it has relperm 1), `krg` the
-  CO2 relperm in the plume; a negative value means one minus the other
-  phase's residual saturation;
-- `*_rho_pvt`, `*_mu_pvt`: each phase's density and viscosity —
-  `:table` (default): JutulDarcy's CO2–brine tables in pressure and
-  temperature (see [`jutuldarcy_property_tables`](@ref), configured by
-  `tables`, e.g. `tables = (co2_source = :salo24, salt_names = ["NaCl"],
-  salt_mole_fractions = [0.01])`); a [`PhaseTable`](@ref) (e.g. co2lab's,
-  `scripts/co2lab_tables.jl`); `(c, p_ref)` for co2lab's linear
-  `ref·(1 + c·(p − p_ref))`; `nothing` for constant. Tabulated properties
-  take the temperature of each column (`ve_domain(...; temperature)`).
-  `default_pvt` is what a property not given means: `:table`, or `nothing`
-  (co2lab's constant; as before Stage 7, for ports of co2lab cases).
-- `*_rho_ref`: reference densities, the black-oil "surface" densities
-  (`b = ρ/ρ_ref`). For a linear or constant density the density at `p_ref`
-  (default co2lab's: CO2 760, brine 1100 kg/m³). For a tabulated one only the
-  scale of `b` and of the dissolved-CO2 ratio (below): default JutulDarcy's
-  surface densities (CO2 1.868, brine 998.2 kg/m³), or the table's densities
-  at `reference_conditions = (p, T)`.
-- `*_mu_ref`: constant or linear viscosities only (default co2lab's: CO2
-  6e-5, brine 8e-4 Pa·s).
-- `dissolution`, `dis_rate`, `dis_max`: CO2 dissolution into brine, with
-  `dis_max` the saturated dissolved-CO2 ratio `rs`: the volume of the
-  dissolved CO2 at `co2_rho_ref` per volume of brine at `wat_rho_ref`
-  (black-oil "surface" volumes, co2lab's convention), i.e. a mass ratio of
-  `rs · co2_rho_ref / wat_rho_ref` kg CO2 per kg brine. Or give that mass
-  ratio as `dis_max_mass`. Default: co2lab's, `dis_max = 0.03` at its
-  reference densities, ≈ 0.0207 kg/kg (whatever the reference densities).
-  `dis_rate = 0` or `Inf`: instantaneous (brine saturated wherever CO2 is
-  present); otherwise rate-driven, with co2lab's transfer rule
-  (`computeDissolutionTransfer`).
+Build co2lab's VE fluid: the vertical model, relperm endpoints, PVT and
+dissolution.  The keywords are `makeVEFluid`'s options, so an MRST case
+translates one to one.  The result goes to [`setup_co2lab_model`](@ref).
 
-With `default_pvt = :table`, a reference value given without its `*_pvt` is
-refused: state `*_pvt` (`nothing` for co2lab's constant property). Returns a
-new `CO2LabVEFluid`, with the endpoints, properties and reference values
-resolved.
+# Arguments
+
+- `vertical`: the [`VerticalModel`](@ref) (makeVEFluid's relperm model);
+  default [`SharpInterface`](@ref), co2lab's `'sharp_interface_simple'`.
+- `residual = (res_water, res_gas)`: residual brine and CO2 saturations.
+- `krmax = (krw, krg)`: relperm endpoints; `krw` the brine relperm in the
+  residual-CO2 zone (brine below it has relperm 1), `krg` the CO2 relperm in
+  the plume.  A negative value means one minus the other phase's residual
+  saturation.
+- `co2_rho_pvt`, `wat_rho_pvt`, `co2_mu_pvt`, `wat_mu_pvt`: each phase's
+  density and viscosity, one of
+  - `:table`: JutulDarcy's CO2–brine tables in pressure and temperature
+    ([`jutuldarcy_property_tables`](@ref)), configured by `tables`;
+  - a [`PhaseTable`](@ref) (e.g. co2lab's, from `scripts/co2lab_tables.jl`);
+  - `(c, p_ref)`: co2lab's linear `ref·(1 + c·(p − p_ref))`;
+  - `nothing`: constant `ref`.
+- `default_pvt`: what a property not given means: `:table` (default), or
+  `nothing` (co2lab's constant, for ports of co2lab cases).
+- `tables`: keywords for [`jutuldarcy_property_tables`](@ref), e.g.
+  `(co2_source = :salo24, salt_names = ["NaCl"], salt_mole_fractions = [0.01])`.
+- `co2_rho_ref`, `wat_rho_ref`: reference densities (kg/m³), the black-oil
+  "surface" densities (`b = ρ/ρ_ref`).
+  - Linear or constant density: the density at `p_ref`; default co2lab's,
+    CO2 760, brine 1100.
+  - Tabulated density: only the scale of `b` and of `rs`; default
+    JutulDarcy's surface densities (CO2 1.868, brine 998.2), or the table's
+    densities at `reference_conditions = (p, T)` if given.
+- `co2_mu_ref`, `wat_mu_ref`: reference viscosities (Pa·s), for constant or
+  linear viscosities only; default co2lab's, CO2 6e-5, brine 8e-4.
+- `dissolution`: whether CO2 dissolves into brine.
+- `dis_rate`: `0` or `Inf` for instantaneous dissolution (brine saturated
+  wherever CO2 is present); otherwise rate-driven, with co2lab's transfer
+  rule (`computeDissolutionTransfer`).
+- `dis_max`: saturated dissolved-CO2 ratio `rs`, in black-oil "surface"
+  volumes (co2lab's convention): volume of dissolved CO2 at `co2_rho_ref` per
+  volume of brine at `wat_rho_ref`, i.e. `rs · co2_rho_ref / wat_rho_ref` kg
+  CO2 per kg brine.
+- `dis_max_mass`: alternatively, that mass ratio (kg/kg); not with `dis_max`.
+  Default for both: co2lab's `dis_max = 0.03` at its reference densities,
+  ≈ 0.0207 kg/kg whatever the reference densities.
+
+Tabulated properties take each column's temperature
+(`ve_domain(...; temperature)`).
+
+# Returns
+
+A new [`CO2LabVEFluid`](@ref), with endpoints, properties and reference
+values resolved.
+
+# Notes
+
+- With `default_pvt = :table`, a reference value given without its `*_pvt`
+  is an error: state `*_pvt` (`nothing` for co2lab's constant property).
+- makeVEFluid's rugosity goes to [`ve_domain`](@ref), its rock
+  compressibility (`pvMult_*`) to [`setup_co2lab_model`](@ref).
 """
 function co2lab_ve_fluid(; vertical::VerticalModel = SharpInterface(),
                            residual = (0.0, 0.0), krmax = (-1.0, -1.0),
@@ -225,14 +261,21 @@ end
 """
     CO2LabVEFluid
 
-Settings of co2lab's VE fluid; build with [`co2lab_ve_fluid`](@ref). Phase
-order in all tuples: (brine, CO2). Type parameters: the vertical model, and
-the density and viscosity specifications. `rho_pvt`/`mu_pvt` hold per phase
-`(c, p_ref)` (linear; `(0.0, 0.0)` for constant) or a [`PhaseTable`](@ref).
-`dissolution`, `dis_rate`, `dis_max` as makeVEFluid's options. `fine`: the
-fine-scale fluid of a hybrid grid's fine 3D cells (a `FineScaleFluid` with
-its rock types per cell, from [`co2lab_ve_fluid`](@ref)`(::FineScaleFluid,
-…)`), or `nothing`.
+Settings of co2lab's VE fluid, with all defaults resolved; build with
+[`co2lab_ve_fluid`](@ref).  Phase order in all tuples: (brine, CO2).
+
+# Fields
+
+- `rho_pvt`, `mu_pvt`: per phase `(c, p_ref)` (linear; `(0.0, 0.0)` for
+  constant) or a [`PhaseTable`](@ref).
+- `dissolution`, `dis_rate`, `dis_max`: as the keywords of
+  [`co2lab_ve_fluid`](@ref).
+- `fine`: the fluid of a hybrid grid's fine 3D cells (a `FineScaleFluid` with
+  its rock type per cell, from [`co2lab_ve_fluid`](@ref)`(::FineScaleFluid,
+  …)`), or `nothing`.
+
+Type parameters: the vertical model, the density and the viscosity
+specifications, and the fine cells' fluid.
 """
 struct CO2LabVEFluid{M <: VerticalModel, R, U, F}
     vertical::M                  # vertical model (specification)
@@ -240,27 +283,27 @@ struct CO2LabVEFluid{M <: VerticalModel, R, U, F}
     res_gas::Float64             # residual CO2 saturation
     krw::Float64                 # brine relperm in the residual-CO2 zone
     krg::Float64                 # CO2 relperm in the plume
-    rho_ref::NTuple{2, Float64}  # reference ("surface") densities
+    rho_ref::NTuple{2, Float64}  # reference ("surface") densities (kg/m³)
     rho_pvt::R                   # densities: (c, p_ref) or PhaseTable, per phase
-    mu_ref::NTuple{2, Float64}   # reference viscosities (NaN for a table)
+    mu_ref::NTuple{2, Float64}   # reference viscosities (Pa·s; NaN for a table)
     mu_pvt::U                    # viscosities, as rho_pvt
     dissolution::Bool            # CO2 dissolves into brine
     dis_rate::Float64            # dissolution rate; 0 or Inf: instantaneous
-    dis_max::Float64             # saturated rs
+    dis_max::Float64             # saturated dissolved-CO2 ratio rs
     fine::F                      # fine cells' fluid (hybrid grids), or nothing
 end
 
 """
     instantaneous_dissolution(fluid) -> Bool
 
-Whether `fluid` has dissolution with co2lab's instantaneous mode (`dis_rate`
-0 or `Inf`).
+Returns `true` if `fluid` dissolves CO2 instantaneously (co2lab's mode for
+`dis_rate` 0 or `Inf`), `false` otherwise, including without dissolution.
 """
 instantaneous_dissolution(f::CO2LabVEFluid) =
     f.dissolution && (f.dis_rate == 0 || isinf(f.dis_rate))
 
-# `nothing` → constant; (c, p_ref) → linear; makeVEFluid's 4-entry table spec
-# is refused (its tables: a PhaseTable).
+# `nothing` → constant; (c, p_ref) → linear; makeVEFluid's 4-entry table range
+# is refused (give its tables as a PhaseTable instead).
 function _linear_pvt(spec)
     isnothing(spec) && return (0.0, 0.0)
     length(spec) == 2 ||
@@ -272,12 +315,11 @@ end
 
 # ---------------------------------- Formulas ----------------------------------
 
-# Clamps with MRST's tie rule (ADI.m, max/min): against a constant, a tie keeps
-# the variable and its derivative; between two variables, a tie keeps the
-# second. Julia's max(x, 0) and min(u, v) break ties the other way, which only
-# changes derivatives at exact ties — but a cell that has just switched to
-# saturated sits at sG = 0 exactly, and there a lost derivative makes Newton
-# overshoot (instantaneous dissolution cycled without these).
+# Clamps with MRST's tie rule for AD max/min: against a constant, a tie keeps
+# the variable and its derivative; between two variables, the second.  Julia's
+# max(x, 0) and min(u, v) break ties the other way.  That matters: a cell just
+# switched to saturated sits at sG = 0 exactly, and a lost derivative there
+# makes Newton overshoot (instantaneous dissolution cycles).
 "`max(x, c)` for a constant `c`; a tie keeps `x`."
 _max_c(x, c) = x < c ? zero(x) + c : x
 "`min(x, c)` for a constant `c`; a tie keeps `x`."
@@ -288,13 +330,15 @@ _min_v(u, v) = u < v ? u : v
 """
     _effective_max(sGmax, sG, rw, rg) -> Real
 
-`sGmax` as it stands within a step: `max(min(sGmax, 1 − rw), sG)`. With
-hysteresis (`rg > 0`) `sGmax` is an unknown projected to at least `sG` after
-every Newton update (as co2lab's), and a tie keeps `sGmax`: this is `sGmax`
-itself, with co2lab's Jacobian (otherwise Newton can cycle where a cell
-switches between drainage and imbibition). Without, `sGmax` is a parameter
-updated after converged steps, so the current `sG` counts while the plume
-grows, and a tie keeps `sG` and its derivative.
+`sGmax` as it stands within a step: `max(min(sGmax, 1 − rw), sG)`.
+
+- With hysteresis (`rg > 0`), `sGmax` is an unknown, projected to at least
+  `sG` after every Newton update (as co2lab's).  A tie keeps `sGmax`, so this
+  is `sGmax` itself with co2lab's Jacobian; otherwise Newton can cycle where
+  a cell switches between drainage and imbibition.
+- Without, `sGmax` is a parameter updated after converged steps, so the
+  current `sG` must count while the plume grows; a tie keeps `sG` and its
+  derivative.
 """
 function _effective_max(sGmax, sG, rw, rg)
     m = _min_c(sGmax, 1 - rw)
@@ -305,9 +349,9 @@ end
 """
     _plume_heights(sG, sGmax, H, rw, rg) -> (h, h_max)
 
-co2lab's `upscaledSat2height` for a vertically homogeneous column
-(`upscaledSat2height.m`, `sharp_interface_case`): `h_max = sGmax·H/(1−rw)`,
-`h = (H·sG − h_max·rg)/(1−rg−rw)`, clamped to `[0, H]`.
+co2lab's `upscaledSat2height` for a vertically homogeneous sharp-interface
+column: `h_max = sGmax·H/(1−rw)`, `h = (H·sG − h_max·rg)/(1−rg−rw)`, with `h`
+clamped to `[0, H]`.
 """
 function _plume_heights(sG, sGmax, H, rw, rg)
     h_max = sGmax * H / (1 - rw)
@@ -318,8 +362,8 @@ end
 """
     _sharp_interface_relperm(h, h_max, H, krw, krg, dh) -> (krW, krG)
 
-`addVERelpermSharpInterface.m`, `krW_simple`/`krG_simple`: CO2 flows in the
-plume above the accretion layer `krH_lost = min(dh, H)`; brine in the
+co2lab's `addVERelpermSharpInterface` (`krW_simple`, `krG_simple`): CO2 flows
+in the plume below the accretion layer `min(dh, H)`; brine flows in the
 brine-only zone below `h_max`, and with endpoint `krw` in the residual-CO2
 zone between `h` and `h_max`.
 """
@@ -371,10 +415,10 @@ _fine_saturations(::SharpInterface, i, zb, h, h_max, drho, rw, rg) =
     _untouched_brine(m, i, smax, h_max, H, drho) -> Real
 
 Fraction of column `i`'s pore volume that CO2 has never reached under vertical
-model `m`, from the maximum CO2 saturation `smax` (as it stands within the
-step), the maximum capillary height `h_max`, the column height `H` and the
-density difference `drho` (co2lab's `sW_untouched`, for the dissolution
-transfer). Default: the column below `h_max`, `(H − min(h_max, H))/H`.
+model `m` (co2lab's `sW_untouched`, for the dissolution transfer), from the
+maximum CO2 saturation `smax` as it stands within the step, the maximum
+capillary height `h_max`, the column height `H` and the density difference
+`drho`.  Default: the column below `h_max`, `(H − min(h_max, H))/H`.
 """
 _untouched_brine(::VerticalModel, i, smax, h_max, H, drho) = (H - _min_c(h_max, H)) / H
 
@@ -394,9 +438,9 @@ _shrinkage(fluid::CO2LabVEFluid, p, T) =
 """
     _density_difference(fluid, p, rs, T = nothing) -> Real
 
-Brine minus CO2 density at pressure `p`, dissolved-CO2 ratio `rs` and
-temperature `T`, as the model's black-oil densities (`update_bo_densities!`):
-the brine carries its dissolved CO2.
+Brine minus CO2 density (kg/m³) at pressure `p`, dissolved-CO2 ratio `rs` and
+temperature `T`, consistent with the model's black-oil densities: the brine
+carries its dissolved CO2.
 """
 function _density_difference(fluid::CO2LabVEFluid, p, rs, T = nothing)
     (ρW, ρG), (bW, bG) = fluid.rho_ref, _shrinkage(fluid, p, T)
@@ -416,7 +460,7 @@ end
 
 """
 Caprock rugosity `dh` per VE column (m), read from `domain[:rugosity]`
-([`ve_domain`](@ref)); zero where the domain has none. The relperm loses the
+([`ve_domain`](@ref)); zero if the domain has none.  The relperm loses the
 accretion layer `min(dh, H)` under the caprock.
 """
 struct Rugosity <: Jutul.ScalarVariable end
@@ -428,41 +472,37 @@ end
 
 # ------------------------ VE / fine-cell branch points ------------------------
 #
-# The three VE variables below branch per cell on `is_ve` (`nothing` = all VE;
-# else one Bool per cell), so that roadmap Stage 12 (hybrid: fine 3D cells)
-# adds the fine side without reshaping them
-# (analysis/ve-meshing/isve-branch-proposal.md). With `nothing` the branch is
-# compiled away. Saturation regions, when they come, are a separate `regions`
-# field in JutulDarcy's form, not part of this flag.
+# The three VE variables below branch per cell on `is_ve`: `nothing` when all
+# cells are VE columns (the branch is then compiled away), else one Bool per
+# cell, false for the fine 3D cells of a hybrid grid.  Saturation regions, if
+# added, belong in a separate `regions` field in JutulDarcy's form, not here.
 
 "Is cell `i` a VE column? Always for `is_ve = nothing`."
 _is_ve(::Nothing, i) = true
 _is_ve(is_ve::AbstractVector{Bool}, i) = is_ve[i]
 
-# Fine-cell sides of the relperm and capillary pressure (`fine_fluid.jl`,
-# roadmap Stage 12): from the fluid's `FineCellFluid`.
+# The fine cells' relperm and capillary pressure come from the fluid's
+# `FineCellFluid` (`fine_fluid.jl`).
 
 """
-Capillary heights per column (m): row 1 `h`, row 2 `h_max` — the plume
-thickness for a sharp interface, `Pc/(Δρ g)` in general — from the vertical
-model `vertical`. Zero in fine cells (`is_ve`, see above), where nothing
-reads them.
+Capillary heights per column (m), from the vertical model: row 1 `h`, row 2
+`h_max`.  For a sharp interface the plume thickness, `Pc/(Δρ g)` in general.
+Zero in fine cells (`is_ve` false), where nothing reads them.
 """
 struct PlumeHeights{M <: VerticalModel, V} <: Jutul.VectorVariables
     vertical::M         # vertical model (column-specific)
     res_water::Float64  # residual brine saturation
     res_gas::Float64    # residual CO2 saturation
-    is_ve::V            # true for VE columns, per cell
+    is_ve::V            # per cell, true for VE columns; nothing: all VE
 end
 PlumeHeights(vertical, rw, rg; is_ve = nothing) =
     PlumeHeights(vertical, Float64(rw), Float64(rg), is_ve)
 Jutul.values_per_entity(model, ::PlumeHeights) = 2
 
-# Uses sGmax_eff = max(min(sGmax, 1 − rw), sG): the stored sGmax is only
-# updated after a converged step, so within a step the current sG must count
-# too (MRST's updateState does this after every Newton update,
-# CO2VEBlackOilTypeModel.m:352-353). Otherwise h_max < h while the plume grows.
-# `drho(i)`: the density difference of cell i, or nothing.
+# Heights from sGmax as it stands within the step (`_effective_max`): the
+# stored sGmax is updated only after a converged step, so the current sG must
+# count too (as co2lab does after every Newton update); otherwise h_max < h
+# while the plume grows.  `drho(i)`: cell i's density difference, or nothing.
 # Modifies: `hh` (plume heights).
 function _update_heights!(hh, v::PlumeHeights, sG, sGmax, H, drho, ix)
     rw, rg = v.res_water, v.res_gas
@@ -497,9 +537,8 @@ end
 end
 
 """
-Upscaled relative permeabilities (brine, CO2) of the VE columns from the
-vertical model `vertical`. In fine cells (`is_ve`) the 3D relperm `fine` —
-roadmap Stage 12, `nothing` until then.
+Upscaled relative permeabilities (brine, CO2) of the VE columns, from the
+vertical model.  In fine cells (`is_ve` false), the 3D relperm `fine`.
 """
 struct VERelPerm{M <: VerticalModel, V, F} <: JutulDarcy.AbstractRelativePermeabilities
     vertical::M         # vertical model (column-specific)
@@ -507,8 +546,8 @@ struct VERelPerm{M <: VerticalModel, V, F} <: JutulDarcy.AbstractRelativePermeab
     krg::Float64        # CO2 relperm in the plume
     res_water::Float64  # residual brine saturation
     res_gas::Float64    # residual CO2 saturation
-    is_ve::V            # true for VE columns, per cell
-    fine::F             # 3D relperm of fine cells
+    is_ve::V            # per cell, true for VE columns; nothing: all VE
+    fine::F             # 3D relperm of fine cells (FineCellFluid), or nothing
 end
 VERelPerm(vertical, krw, krg, rw, rg; is_ve = nothing, fine = nothing) =
     VERelPerm(vertical, Float64.((krw, krg, rw, rg))..., is_ve, fine)
@@ -555,12 +594,12 @@ end
 end
 
 """
-`pcWG = (ρ_brine − ρ_CO2)·g·h`, added to the brine pressure for CO2. Fine cells
-(`is_ve`, roadmap Stage 12): their capillary pressure from `fine` (a
-`FineCellFluid`).
+VE capillary pressure `pcWG = (ρ_brine − ρ_CO2)·g·h` (Pa), added to the brine
+pressure to give the CO2 pressure.  In fine cells (`is_ve` false), the
+capillary pressure of `fine`.
 """
 struct VECapillaryPressure{V, F} <: JutulDarcy.AbstractCapillaryPressure
-    is_ve::V  # true for VE columns, per cell
+    is_ve::V  # per cell, true for VE columns; nothing: all VE
     fine::F   # fine cells' fluid (FineCellFluid), or nothing
 end
 VECapillaryPressure(; is_ve = nothing, fine = nothing) = VECapillaryPressure(is_ve, fine)
@@ -595,14 +634,18 @@ end
 end
 
 """
-Viscosities `μ_ref·(1 + c·(p − p_ref))` per phase (brine, CO2). With `P =
-true` at the phase pressures, as co2lab's (MRST's `Viscosity` state function
-reads `PhasePressures`; its densities do not): CO2 at `p + pcWG`; with `P =
-false` (wells, which have no capillary pressure) at `p`.
+co2lab's linear (or constant) viscosities `μ_ref·(1 + c·(p − p_ref))` per
+phase (brine, CO2).
+
+- `P = true` (reservoir): at the phase pressures, as co2lab's viscosities
+  (unlike its densities); CO2 at `p + pcWG`.
+- `P = false` (wells, which have no capillary pressure): at `p`.
+
+Built by `LinearViscosities(mu_ref, pvt; phase_pressures = true)`.
 """
 struct LinearViscosities{P} <: JutulDarcy.PhaseVariables
-    mu_ref::NTuple{2, Float64}          # reference viscosities
-    pvt::NTuple{2, NTuple{2, Float64}}  # (c, p_ref) per phase
+    mu_ref::NTuple{2, Float64}          # reference viscosities (Pa·s)
+    pvt::NTuple{2, NTuple{2, Float64}}  # (c, p_ref) per phase; c = 0: constant
 end
 LinearViscosities(mu_ref, pvt; phase_pressures::Bool = true) =
     LinearViscosities{phase_pressures}(mu_ref, pvt)
@@ -637,15 +680,16 @@ end
 """
     _set_ve_fluid!(model, fluid, m = _vertical_model(fluid.vertical, ...))
 
-Install co2lab's VE constitutive functions in the reservoir submodel `model`
-(which must be on a domain from `ve_domain`), with the column-specific vertical
-model `m` (built from `fluid` unless given).
+Install co2lab's VE constitutive functions in the reservoir submodel `model`,
+which must be on a domain from [`ve_domain`](@ref).  `m` is the
+column-specific vertical model, built from `fluid` unless given.  Returns
+`model` itself.
 
 Modifies: `model.parameters` (adds `:ColumnHeight`, `:Rugosity`),
 `model.secondary_variables` (`:PlumeHeights`, `:RelativePermeabilities`,
 `:CapillaryPressure`), `model.primary_variables` (with fine cells `:sG`
 becomes a [`FineGasSaturation`](@ref)), `model.output_variables` (adds
-`:PlumeHeights`, `:CapillaryPressure`). `fluid` and `m` are only read.
+`:PlumeHeights`, `:CapillaryPressure`).
 """
 function _set_ve_fluid!(model, fluid::CO2LabVEFluid,
                        m = _vertical_model(fluid.vertical, model.data_domain, fluid))
@@ -683,12 +727,13 @@ end
 """
     _co2lab_pvt(fluid) -> (shrinkage, viscosity, well_viscosity)
 
-The fluid's PVT as Jutul variables: with tabulated properties `PVTShrinkage`
-and `PVTViscosities` (pressure and temperature); otherwise co2lab's linear
-`b = 1 + c·(p − p_ref)` per phase (the reference density is the "surface"
-density) and linear or constant viscosities. The reservoir's viscosities at
-the phase pressures (as co2lab), the wells' at the pressure. Returns new
-variable objects; `fluid` is only read.
+The fluid's PVT as new Jutul variables: the shrinkage factors, the
+reservoir's viscosities (at the phase pressures, as co2lab's) and the wells'
+(at the pressure).
+
+- Tabulated: `PVTShrinkage`, `PVTViscosities` (pressure and temperature).
+- Otherwise co2lab's linear `b = 1 + c·(p − p_ref)` per phase (the reference
+  density is the "surface" density), and linear or constant viscosities.
 """
 function _co2lab_pvt(fluid::CO2LabVEFluid)
     rho, mu = fluid.rho_pvt, fluid.mu_pvt
@@ -708,7 +753,7 @@ end
 """
     needs_temperature(fluid) -> Bool
 
-Whether `fluid` has a tabulated property, and so needs each column's
-temperature (`ve_domain(...; temperature)`; 30 °C where none is given).
+Returns `true` if `fluid` has a tabulated property and so needs each column's
+temperature (`ve_domain(...; temperature)`; 30 °C if none is given).
 """
 needs_temperature(f::CO2LabVEFluid) = _tabulated(f.rho_pvt..., f.mu_pvt...)

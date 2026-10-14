@@ -1,17 +1,31 @@
-# Quantities derived from a trap analysis (roadmap Stage 8 item 5): trap
-# volumes, downstream traps, capacity trees, the best injection point and the
-# flattened caprock — co2lab's volumesOfTraps, downstreamTraps,
-# maximizeTrapping, findOptimalInjectionPoint, flattenTraps.
+# Quantities derived from a trap analysis: trap volumes, downstream traps,
+# capacity trees, the best injection point and the flattened caprock
+# (co2lab's volumesOfTraps, downstreamTraps, maximizeTrapping,
+# findOptimalInjectionPoint, flattenTraps).
 
 # ---------------------------------- Volumes -----------------------------------
 
 """
     trap_volumes(s, res; traps = 1:ntrap, poro = ones) -> Vector{Float64}
 
-Pore volume of each trap in `traps`: Σ area · min(spill depth − z, H) · poro
-over its columns (co2lab's `volumesOfTraps`, which also adds `eps` m³ per
-column; not here). `s` is the [`trap_surface`](@ref), `res` the
-[`trap_analysis`](@ref) result, `poro` per column. Returns a new vector.
+Pore volume of each trap (co2lab's `volumesOfTraps`): the space between the
+caprock and the trap's spill depth, cut at the formation thickness.
+
+# Arguments
+
+- `s`: the [`trap_surface`](@ref).
+- `res`: its [`trap_analysis`](@ref).
+- `traps`: the traps to measure; default all.
+- `poro`: porosity per column; default 1 (bulk volume).
+
+# Returns
+
+A new vector, one volume (m³) per trap in `traps`:
+Σ area · min(spill depth − z, H) · poro over the trap's columns.
+
+# Notes
+
+- co2lab also adds `eps` m³ per column; this does not.
 """
 function trap_volumes(s, res; traps = 1:maximum(res.traps; init = 0),
                       poro = ones(length(s.zc)))
@@ -29,8 +43,17 @@ end
     downstream_traps(res, t) -> Vector{Int}
 
 Trap `t` and every trap it spills into, directly or further on (co2lab's
-`downstreamTraps`): in order of the number of spill steps, each step in
-increasing trap number. Returns a new vector.
+`downstreamTraps`), from the [`trap_analysis`](@ref) result `res`.
+
+# Arguments
+
+- `res`: the [`trap_analysis`](@ref) result.
+- `t`: the trap number.
+
+# Returns
+
+A new vector of trap numbers, starting with `t`, then ordered by the number
+of spill steps from `t`, and within a step by increasing trap number.
 """
 function downstream_traps(res, t::Integer)
     A = res.trap_adj
@@ -50,13 +73,32 @@ end
     maximize_trapping(s, res; n = Inf, remove_overlap = true,
                       calculate_all = false) -> Vector{NamedTuple}
 
-co2lab's `maximizeTrapping`: the spill trees with the largest trapping
-capacity. A tree is a root trap (by default the traps nothing spills into;
-all traps with `calculate_all`) and everything downstream of it; its value
-is the sum of their [`trap_volumes`](@ref) (unit porosity). Trees are picked
-greedily by value, at most `n`; with `remove_overlap` a trap counts only in
-the first tree that contains it. Returns a new vector of `(root, traps,
-value)`, largest first.
+The spill trees with the largest trapping capacity (co2lab's
+`maximizeTrapping`): where injected CO2 could fill the most trap volume.
+
+A tree is a root trap and everything downstream of it; its value is the sum
+of their [`trap_volumes`](@ref) (unit porosity). Trees are picked greedily
+by value.
+
+# Arguments
+
+- `s`: the [`trap_surface`](@ref).
+- `res`: its [`trap_analysis`](@ref).
+- `n`: the maximum number of trees; default all.
+- `remove_overlap`: count a trap only in the first tree that contains it.
+- `calculate_all`: use every trap as a root; default only the traps nothing
+  spills into.
+
+# Returns
+
+A new vector of NamedTuples, largest value first:
+- `root`: the root trap;
+- `traps`: the trap numbers of the tree, sorted;
+- `value`: its volume (m³), less traps counted earlier if `remove_overlap`.
+
+# Notes
+
+- Equal values are taken in root order, as co2lab's `max`.
 """
 function maximize_trapping(s, res; n = Inf, remove_overlap::Bool = true,
                            calculate_all::Bool = false)
@@ -85,11 +127,27 @@ end
 """
     optimal_injection_point(s, res) -> NamedTuple
 
-co2lab's `findOptimalInjectionPoint`: among the interfaces between two spill
-regions (or a spill region and the outside), the one whose two sides can
-fill the most trap volume downstream, and on it the shallowest column.
-Returns `(column, volume, edges, traps)`: the column, that volume, the
-surface edges of the interface and the two regions' traps (0: outside).
+The column where injected CO2 can fill the most trap volume (co2lab's
+`findOptimalInjectionPoint`). Candidates are the interfaces between two
+spill regions, or between a spill region and the outside; CO2 injected on
+one reaches the traps downstream of both sides.
+
+# Arguments
+
+- `s`: the [`trap_surface`](@ref).
+- `res`: its [`trap_analysis`](@ref).
+
+# Returns
+
+A new NamedTuple:
+- `column`: the shallowest column on the best interface;
+- `volume`: the trap volume (m³, unit porosity) reachable from it;
+- `edges`: the surface edges of the interface (indices into `s.edges`);
+- `traps`: the traps of its two regions (0: outside).
+
+# Notes
+
+- Sealed edges are not interfaces to the outside.
 """
 function optimal_injection_point(s, res)
     v = trap_volumes(s, res)
@@ -116,9 +174,22 @@ end
     flatten_traps(s, res) -> NamedTuple
 
 The surface with every trap filled to its spill depth (co2lab's
-`flattenTraps`): trap columns and their nodes at the spill depth (a node
-shared by columns of different depth takes the last column's, as co2lab).
-Returns a new surface; `s` is only read.
+`flattenTraps`): trap columns and their nodes are moved to the spill depth.
+
+# Arguments
+
+- `s`: the [`trap_surface`](@ref).
+- `res`: its [`trap_analysis`](@ref).
+
+# Returns
+
+A new surface NamedTuple, `s` with new `zc` and `z`; the other fields are
+shared with `s`.
+
+# Notes
+
+- A node shared by trap columns of different depth takes the last column's
+  depth, as in co2lab.
 """
 function flatten_traps(s, res)
     zc, z = copy(s.zc), copy(s.z)

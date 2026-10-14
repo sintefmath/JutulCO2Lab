@@ -1,79 +1,70 @@
-# co2lab's capillary-fringe VE fluid, 'P-scaled table' and, corrected,
-# 'P-K-scaled table' (roadmap Stage 6 item 1; co2lab:
-# addVERelpermCapillaryFringe.m, makeVEFluid.m).
+# co2lab's capillary-fringe vertical models, 'P-scaled table' and (corrected)
+# 'P-K-scaled table' (co2lab: addVERelpermCapillaryFringe, makeVEFluid).
 #
-# The fine-scale capillary pressure is linear in depth below the caprock,
-# pc(z) = Pc − Δρ g z, so the column's integrals become integrals over
-# capillary pressure. One table, built once, holds them as functions of p:
+# Below the caprock the fine-scale capillary pressure is linear in depth,
+# pc(z) = Pc − Δρ g z, so a column's integrals become integrals over capillary
+# pressure. One table, built once per model, holds them as functions of p:
 #   SP(p)  = ∫₀^p sg(u) du,    krP(p) = ∫₀^p kr3D(sg(u)) du,
 # with sg(u) = 1 − invPc3D(u) the fine-scale CO2 saturation. A column with CO2
 # saturation S, height H and density difference Δρ then has
-#   S · H · Δρ g = SP(Pc) − SP(Pc − Δρ g H),
-# the second term only when the plume reaches the bottom (truncated). Pc is
-# found from S by solving this, krG = (krP(Pc) − krP(Pc − Δρ g H)) / (H Δρ g),
-# and the capillary height is h = Pc/(Δρ g).
+#   S · H · Δρ g = SP(Pc) − SP(Pc − Δρ g H)     (2nd term: plume at the bottom),
+#   krG = (krP(Pc) − krP(Pc − Δρ g H)) / (H Δρ g),   capillary height h = Pc/(Δρ g).
 #
-# The table (roadmap Stage 6 item 1c, researcher 2026-10-01): cubic Hermite
-# interpolation on exact data — node integrals by Gauss–Legendre, the exact
-# derivatives sg and kr3D(sg) at the nodes, a node at the entry pressure —
-# with the nodes placed adaptively until a midpoint estimate of the Hermite
-# error is below a relative tolerance. About 250 nodes at 1e-6 are far more
-# accurate than co2lab's 200 000 uniform samples with linear interpolation,
-# which are poor for thin plumes (co2lab-issues.org). co2lab's range (Pmax)
-# and its scaling of a numeric (C, alpha) curve are kept. Comparisons with
-# co2lab use a patched co2lab with the same table (scripts/mrst_patch).
+# The table: cubic Hermite on adaptively placed nodes with exact values and
+# derivatives (a node at the entry pressure). About 250 nodes at tolerance 1e-6
+# beat co2lab's 200 000 uniform, linearly interpolated samples, which are poor
+# for thin plumes. co2lab's range (Pmax) and its scaling of a (C, alpha) curve
+# are kept.
 #
-# The plume tip: with the exact table Pc grows like √S (no entry pressure) or
-# jumps to the entry pressure as S leaves 0, so dPc/dS is unbounded there.
-# Below a small free saturation S_r, Pc is taken linear in S, from 0 to its
-# value at S_r (researcher, 2026-10-01).
+# The plume tip: dPc/dS is unbounded as S leaves 0 (Pc grows like √S, or jumps
+# to the entry pressure), so below a small free saturation Pc is linear in S.
 #
-# Leverett scaling ('P-K-scaled table'): the fine-scale curve is a J-curve of
-# J = pc/kscale, kscale = σ·√(φ/k) per column. The table is over J; a column
-# works in J throughout with the scaled density difference Δρ/kscale (its
-# integrals over p are kscale times the table's), so the inversion, the
-# truncation and krG stay consistent, and h = Pc/(Δρ g) comes out physical.
-# co2lab's version fails on first use and mixes J with physical pressures
-# (co2lab-issues.org); this is the corrected one.
+# Leverett scaling ('P-K-scaled table'): the curve is a J-curve of
+# J = pc/kscale, kscale = σ·√(φ/k) per column. The table is over J and a column
+# works in J with the scaled density difference Δρ/kscale, so inversion,
+# truncation and krG stay consistent and h comes out physical. co2lab's own
+# version fails on first use and mixes J with pressures; this one is corrected.
 
 # ---------------------------------- Settings ----------------------------------
 
 """
-    CapillaryFringeTable(; invPc3D, kr3D = 3, tolerance = 1e-6, tip_saturation = 1e-6,
-                           touched_saturation = 1e-3, leverett = false,
-                           surface_tension = 30e-3)
+    CapillaryFringeTable(; invPc3D, kr3D = 3, tolerance = 1e-6,
+                           tip_saturation = 1e-6, touched_saturation = 1e-3,
+                           leverett = false, surface_tension = 30e-3)
 
-co2lab's `'P-scaled table'` vertical model: a capillary fringe between the
-plume and the brine, with one fine-scale capillary curve for the whole
-formation (makeVEFluid's options of the same names):
-- `invPc3D`: the fine-scale brine saturation as a function of capillary
-  pressure (Pa), or `(C, alpha)` for co2lab's
-  `sw = max((C'/(p + C'))^(1/alpha), res_water)`, where `C' = C·g·Hmax·Δρ_ref`
-  is scaled by the tallest column `Hmax` of the grid and the reference
-  density difference, as co2lab does;
-- `kr3D`: the fine-scale CO2 relperm as a function of CO2 saturation, or an
-  exponent `β` for `s^β` (co2lab's default 3);
-- `tolerance`: the table's relative accuracy (adaptive cubic Hermite nodes;
-  co2lab's uniform table with 200 000 samples is not offered);
-- `tip_saturation`: below this free CO2 saturation, Pc is linear in the
-  saturation (the plume tip, where the exact Pc has an unbounded derivative);
-- `touched_saturation`: below this maximum CO2 saturation, the depth of brine
-  touched by CO2 (dissolution) is linear in the saturation. The exact depth
-  grows like √S at the tip, far faster than the free CO2, and Newton cycles
-  there (researcher, 2026-10-02);
-- `leverett`: co2lab's `'P-K-scaled table'` (corrected): `invPc3D` is a
-  function of the J-variable `pc/kscale`, `kscale = surface_tension·√(φ/k)`
-  per column from the domain's upscaled porosity and permeability.
+co2lab's `'P-scaled table'` vertical model: a capillary fringe between plume
+and brine, with one fine-scale capillary curve for the whole formation. Give
+it to [`co2lab_ve_fluid`](@ref) as `vertical`; it is grid-independent, and
+[`setup_co2lab_model`](@ref) builds the table for the model's domain.
 
-Does not combine with the caprock's rugosity (co2lab's neither):
-[`setup_co2lab_model`](@ref) refuses a domain with a non-zero `:rugosity`.
+# Keywords (makeVEFluid's options of the same names)
 
-Hysteresis is co2lab's `'endpoint scaling'` (its default): the residual CO2
-at each depth scales with the maximum saturation reached there. co2lab's
-experimental `'fixed residual'` is not offered (researcher, 2026-10-01).
+- `invPc3D`: fine-scale brine saturation as a function of capillary pressure
+  (Pa); or `(C, alpha)` for co2lab's
+  `sw = max((C'/(p + C'))^(1/alpha), res_water)` with `C' = C·g·Hmax·Δρ_ref`,
+  scaled as in co2lab by the grid's tallest column `Hmax` and the reference
+  density difference.
+- `kr3D`: fine-scale CO2 relperm as a function of CO2 saturation, or an
+  exponent `β` for `s^β` (co2lab's default 3).
+- `tolerance`: the table's relative accuracy. co2lab's uniform table of
+  200 000 samples is not offered.
+- `tip_saturation`: below this free CO2 saturation Pc is linear in it (at the
+  plume tip the exact Pc has an unbounded derivative).
+- `touched_saturation`: below this maximum CO2 saturation the depth of brine
+  touched by CO2 (dissolution) is linear in it. The exact depth grows like √S
+  at the tip, far faster than the free CO2, and Newton cycles there.
+- `leverett`: co2lab's `'P-K-scaled table'`, corrected: `invPc3D` is a
+  function of `J = pc/kscale`, `kscale = surface_tension·√(φ/k)` per column
+  from the domain's upscaled porosity and permeability.
+- `surface_tension`: `σ` of the Leverett scaling (N/m).
 
-A grid-independent specification; [`setup_co2lab_model`](@ref) builds the
-table for the model's domain.
+# Notes
+
+- Does not combine with caprock rugosity (nor does co2lab's):
+  [`setup_co2lab_model`](@ref) refuses a domain with non-zero `:rugosity`.
+- Hysteresis is co2lab's `'endpoint scaling'` (its default): the residual
+  CO2 at each depth scales with the maximum saturation reached there.
+  co2lab's experimental `'fixed residual'` is not offered.
 """
 struct CapillaryFringeTable{F, K} <: VerticalModel
     invPc3D::F                   # brine saturation of capillary pressure, or (C, alpha)
@@ -94,10 +85,9 @@ CapillaryFringeTable(; invPc3D, kr3D = 3, tolerance = 1e-6, tip_saturation = 1e-
 """
     PScaledTable
 
-The built form of [`CapillaryFringeTable`](@ref): the column integrals over
-capillary pressure as a cubic Hermite table on adaptive nodes, shared by all
-columns; with Leverett scaling over the J-variable, with each column's
-`kscale`.
+The built form of [`CapillaryFringeTable`](@ref) for one domain: the column
+integrals over capillary pressure as a cubic Hermite table, shared by all
+columns (over `J`, with each column's `kscale`, under Leverett scaling).
 """
 struct PScaledTable{F} <: VerticalModel
     p::Vector{Float64}       # nodes (capillary pressure, Pa; or J), 0 to Pmax
@@ -114,16 +104,14 @@ end
 
 # ------------------------------- Building tables ------------------------------
 
-# co2lab's fringe for `domain` and `fluid`: its table (below), without
-# caprock rugosity
+# co2lab's fringe for `domain` and `fluid`: its table; refuses caprock rugosity
 function _vertical_model(spec::CapillaryFringeTable, domain, fluid)
     _refuse_rugosity(domain, "CapillaryFringeTable")
     return _fringe_table(spec, domain, fluid)
 end
 
-# The table for `domain` and `fluid`: co2lab's fine-scale functions
-# (setup_fine_scale_functions) and upper limit, the adaptive Hermite table.
-# Returns a new PScaledTable; the arguments are only read.
+# The table for `domain` and `fluid`, with co2lab's fine-scale functions
+# (setup_fine_scale_functions) and upper limit. Returns a new PScaledTable.
 function _fringe_table(spec::CapillaryFringeTable, domain, fluid)
     H = domain[:column_height]
     g = Jutul.gravity_constant
@@ -145,9 +133,9 @@ function _fringe_table(spec::CapillaryFringeTable, domain, fluid)
                         _entry_pressure(sg, pmax), spec.touched_saturation)
 end
 
-# The fringe models do not combine with the caprock's rugosity (co2lab's
-# neither): its flow would ignore it while the trapping inventory split off
-# subscale-trapped CO2 (researcher, 2026-10-04). Throws if the domain has any.
+# Throws if the domain has caprock rugosity: the fringe models (like co2lab's)
+# ignore it in the flow, while the trapping inventory would split off
+# subscale-trapped CO2.
 function _refuse_rugosity(domain, model)
     haskey(domain, :rugosity) && any(>(0), domain[:rugosity]) &&
         throw(ArgumentError("$model does not combine with caprock rugosity; " *
@@ -159,12 +147,11 @@ end
 # Leverett scaling), so that column integrals over p are those over J
 _table_drho(m::PScaledTable, i, drho) = drho / m.kscale[i]
 
-# Brine is touched down to where the maximum profile's CO2 saturation is
-# positive: h_max less the entry height, which tends to 0 with the saturation
-# (h_max itself stays ≥ the entry height for any CO2, so a trace of CO2 would
-# touch metres of brine). Below the touched saturation the depth is linear in
-# smax, matching there: the exact depth grows like √smax at the tip, and the
-# brine it would keep saturated outgrows the free CO2 (Newton cycles).
+# Fraction of column i's brine untouched by CO2. Brine is touched down to
+# where the maximum profile's CO2 saturation is positive: h_max less the entry
+# height (h_max alone would let a trace of CO2 touch metres of brine). Below
+# the touched saturation the depth is linear in smax (the exact one grows like
+# √smax, outgrowing the free CO2, and Newton cycles).
 function _untouched_brine(m::PScaledTable, i, smax, h_max, H, drho)
     drho_g = _table_drho(m, i, drho) * Jutul.gravity_constant
     if Jutul.value(smax) < m.touched
@@ -417,7 +404,7 @@ function _column_relperm(m::PScaledTable, i, sG, sGmax, h, h_max, H, drho, dh,
     return (_max_c(sw_eff, 0.0), krG)
 end
 
-# co2lab's cap_fringe_h2s (height2finescaleSat.m), endpoint scaling: each fine
+# co2lab's cap_fringe_h2s, endpoint scaling: each fine
 # cell's average of the current (free) and the maximum fringe profile, mixed
 # as s = (1 − C)·s_free + C·s_max with C = rg/(1 − rw)
 function _fine_saturations(m::PScaledTable, i, zb, h, h_max, drho, rw, rg)
@@ -444,8 +431,8 @@ function _cell_fringe_saturation(m::PScaledTable, a, b, h, drho)
 end
 
 # The inventory's split of a fringe column: the mobile part by the current
-# saturation profile, the immobile part by the maximum one (researcher,
-# 2026-10-01); co2lab_compatible: co2lab's split by height (co2lab-issues.org)
+# saturation profile, the immobile part by the maximum one; co2lab_compatible:
+# co2lab's split by height
 function _category_saturations(m::PScaledTable, S, Smax, h, h_max, col, drho, rw, rg;
                                co2lab_compatible::Bool = false)
     co2lab_compatible && return _height_split(S, Smax, h, h_max, col, rw, rg)

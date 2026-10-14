@@ -1,17 +1,18 @@
 # Structural traps from column depths and column adjacency: co2lab-spillpoint's
-# cell-based method, trapAnalysis(Gt, true) — findTrappingStructure,
-# findTrapConnections, maxTPFAGravityMatrix (roadmap Stage 8 item 2).
+# cell-based method, trapAnalysis(Gt, true) (findTrappingStructure,
+# findTrapConnections, maxTPFAGravityMatrix).
 #
-# Depths are positive down: CO2 rises to smaller z. A "top" column has no
-# shallower neighbour; a trap is the set of columns reached downhill from a top
-# that lie above the shallowest column on the rim of the reached set (the
-# spill point). Traps are filled to their spill depth level by level, so that
-# traps spilling into each other merge.
+# Depths are positive down: CO2 rises to smaller z.
+# - A "top" column has no shallower neighbour.
+# - A trap is the set of columns reached downhill from a top that lie above
+#   the shallowest column on the rim of the reached set (the spill point).
+# - Traps are filled to their spill depth level by level, so that traps
+#   spilling into each other merge.
 
 # --------------------------------- Adjacency ----------------------------------
 
-# Neighbour lists of the columns (sorted), and whether each column touches the
-# open domain boundary (sealed edges are closed), from the surface's edges
+# From the surface's edges: each column's sorted neighbour list, and whether it
+# touches the open domain boundary (sealed edges count as closed)
 function _column_neighbours(s)
     n = length(s.zc)
     nbrs = [Int[] for _ in 1:n]
@@ -179,9 +180,9 @@ end
 
 # ------------------------------- Spill regions --------------------------------
 
-# Each column's steepest-ascent neighbour (0 if none is shallower), and the
-# level neighbours (co2lab's maxTPFAGravityMatrix: slope over the distance
-# between centroids; ties to the lowest column index)
+# Each column's steepest-ascent neighbour, 0 if none is shallower (co2lab's
+# maxTPFAGravityMatrix: slope over the distance between centroids; ties go to
+# the lowest column index)
 function _steepest_ascent(s, nbrs)
     z, up = s.zc, zeros(Int, length(s.zc))
     for c in eachindex(z)
@@ -227,12 +228,20 @@ end
 """
     _cell_trap_analysis(s) -> NamedTuple
 
-co2lab's `trapAnalysis(Gt, true)` on a [`trap_surface`](@ref) `s`: traps
-(trap index per column, 0 outside traps), their spill depths `trap_z`, the
-spill region of each column (`trap_regions`: the trap it drains into, 0 if
-none), which trap spills into which (`trap_adj`, a sparse `Bool` matrix),
-the rivers out of each trap (`rivers[t]`: vectors of columns) and the top
-columns of the traps (`top`). `s` is only read. Returns a new NamedTuple.
+co2lab's cell-based `trapAnalysis(Gt, true)` on a [`trap_surface`](@ref) `s`.
+
+# Returns
+
+A new NamedTuple:
+
+- `traps`: trap index per column, 0 outside traps.
+- `trap_z`: spill depth (m) per trap.
+- `trap_regions`: per column, the trap it drains into (its spill region);
+  0 if none.
+- `trap_adj`: sparse `Bool` matrix, `trap_adj[a, b]` if trap `a` spills
+  into trap `b`.
+- `rivers[t]`: the rivers out of trap `t`, each a vector of columns.
+- `top`: the top column of each trap.
 """
 function _cell_trap_analysis(s)
     nbrs, on_boundary = _column_neighbours(s)

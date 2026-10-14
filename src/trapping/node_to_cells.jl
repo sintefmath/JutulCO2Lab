@@ -1,8 +1,9 @@
-# The node-based traps projected to columns: co2lab-spillpoint's n2cTraps,
-# nodeFieldToCellField, shortestPath, subregionConnectivityMatrix (roadmap
-# Stage 8 item 3). A column takes the value of its shallowest corner; a trap
-# whose columns all lie at or below its spill depth disappears, its region
-# and rivers passing on to the next remaining trap downstream.
+# The node-based traps projected to columns: co2lab-spillpoint's n2cTraps
+# (nodeFieldToCellField, shortestPath, subregionConnectivityMatrix).
+#
+# - A column takes the value of its shallowest corner.
+# - A trap whose columns all lie at or below its spill depth disappears; its
+#   region and rivers pass on to the next remaining trap downstream.
 
 # ------------------------------- Columns --------------------------------------
 
@@ -59,9 +60,13 @@ end
 """
     _node_to_cell_traps(s, nt) -> NamedTuple
 
-co2lab's `n2cTraps`: the node-based result `nt` ([`_node_traps`](@ref))
-on the columns of the trap surface `s`. Returns a new NamedTuple as
-[`trap_analysis`](@ref). `s` and `nt` are only read.
+co2lab's `n2cTraps`: the node-based traps `nt` ([`_node_traps`](@ref))
+projected to the columns of the trap surface `s` ([`trap_surface`](@ref)).
+
+Returns a new NamedTuple `(traps, trap_z, trap_regions, trap_adj, rivers,
+top)` per column and trap, with the same fields and meaning as
+[`trap_analysis`](@ref)'s result; traps left without columns are removed and
+the rest renumbered.
 """
 function _node_to_cell_traps(s, nt)
     rep = _column_rep_nodes(s)
@@ -178,8 +183,8 @@ function _shortest_path(g, start, target)
     return reverse!(path)
 end
 
-# The edge of each node pair and the column of each quad diagonal (node pairs
-# as given, diagonals as minmax), for _river_columns: a NamedTuple of two Dicts
+# Lookup tables for _river_columns: a NamedTuple of two Dicts, `edge` (node
+# pair as stored -> edge) and `diag` (quad diagonal as minmax -> column)
 function _river_lookup(s)
     edge = Dict((s.edges[1, k], s.edges[2, k]) => k for k in axes(s.edges, 2))
     diag = Dict{Tuple{Int, Int}, Int}()

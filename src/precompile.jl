@@ -1,7 +1,7 @@
 # Precompiled workload: the trap analysis's steps on a small synthetic caprock
-# (mrst_dump_traps.m's sine surface, 12 x 8 columns), so that their first use
-# in a session — e.g. the trap viewer's first formation — does not wait for
-# compilation. No data files are read.
+# (a sine surface, 12 x 8 columns), so that their first use in a session (e.g.
+# the trap viewer's first formation) does not wait for compilation. No data
+# files are read.
 
 @setup_workload begin
     nx, ny = 12, 8

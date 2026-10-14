@@ -1,18 +1,25 @@
 """
     JutulCO2Lab
 
-Reimplementation of MRST-co2lab's vertical-equilibrium (VE) CO2 storage
-simulator on top of Jutul/JutulDarcy.
+MRST-co2lab's tools for CO2 storage, reimplemented on Jutul/JutulDarcy.
 
-Exploratory. See `../analysis/roadmap.org` for the staged plan and
-`../analysis/ve-meshing/hybrid-ve-feasibility.md` for the evidence base.
+# Parts
 
-Contents: the oracle harness (`JutulCO2Lab.Oracle`) — every acceptance gate
-in the roadmap is a numerical comparison against MRST-co2lab on identical
-input; the VE grid and domain (Stage 1); co2lab's fluid system (black-oil
-with a `:co2lab` formulation, Stage 2 item 0); co2lab's VE relperm, `pcWG`
-and PVT (items 1, 3); VE wells (item 4); VE boundary conditions (item 5);
-reconstruction of 3D states (item 6).
+- **VE simulation**: vertical-equilibrium (VE) grids and domains from 3D
+  meshes ([`ve_columns`](@ref), [`ve_domain`](@ref)), also hybrid VE/3D
+  grids; co2lab's fluid, relperm, capillary fringe, hysteresis and
+  dissolution ([`co2lab_ve_fluid`](@ref), [`setup_co2lab_model`](@ref));
+  wells, boundary conditions, and reconstruction of 3D states.
+- **CO2 Storage Atlas**: the Norwegian Atlas formations, the Sleipner and
+  Johansen models as meshes and VE domains ([`atlas_ve_domain`](@ref)).
+- **Trapping analysis**: structural traps and spill paths of a caprock
+  ([`trap_analysis`](@ref)) and storage capacity estimates.
+- **Trapping inventory**: where the CO2 of a simulation is, by trapping
+  mechanism ([`trapping_inventory`](@ref)).
+- **Plotting**: maps, traps and inventories; implemented in the Makie
+  extension, loaded with any Makie backend.
+- **MRST comparison**: the `JutulCO2Lab.Oracle` harness, which checks
+  results against MRST-co2lab on identical input with explicit tolerances.
 """
 module JutulCO2Lab
 
@@ -27,9 +34,13 @@ using Graphs
 using MAT
 using PrecompileTools
 
+# ------------------------------ MRST comparison -------------------------------
+
 include("oracle.jl")
 using .Oracle
 export Oracle
+
+# ---------------------------- VE grids and domains ----------------------------
 
 include("ve/vegrid.jl")
 export VEColumns, ve_mesh_from_mrst, ve_columns, ve_trim, ve_column_geometry
@@ -43,6 +54,8 @@ include("ve/vehybrid.jl")
 include("ve/vedomain.jl")
 export ve_average_rock, ve_domain, VEBoundarySides, ve_boundary_sides
 export ve_hydrostatic_pressure, ve_hydrostatic_profile, geothermal_gradient
+
+# ----------------------------- VE fluid and model -----------------------------
 
 include("ve/rock_compressibility.jl")
 export set_co2lab_rock_compressibility!
@@ -73,6 +86,8 @@ export HysteresisEquation
 include("ve/instant_dissolution.jl")
 export DissolvedOrFreeCO2
 
+# -------------------- Wells, boundaries, 3D states, cases ---------------------
+
 include("ve/vewells.jl")
 export ve_well_index, setup_ve_well, co2_injector_control
 
@@ -90,6 +105,8 @@ export sloping_aquifer_grid, sloping_aquifer, rampup_timesteps
 
 include("ve/ve_top_surface.jl")
 export ve_top_surface, ve_contour_lines
+
+# ----------------------------- CO2 Storage Atlas ------------------------------
 
 include("atlas/projection.jl")
 include("atlas/atlas.jl")
@@ -109,6 +126,8 @@ include("atlas/johansen.jl")
 export johansen_data_directory, johansen_mesh, johansen_well_point
 export johansen_grid_section, johansen_ve_domain
 
+# ----------------------------- Trapping analysis ------------------------------
+
 include("trapping/trap_surface.jl")
 include("trapping/sheets.jl")
 include("trapping/cell_traps.jl")
@@ -124,8 +143,12 @@ export maximize_trapping, optimal_injection_point, flatten_traps
 export read_irap_surface, igems_surface_path, igems_mesh, surface_mesh
 export trapping_capacity, reachable_capacity
 
+# ----------------------------- Trapping inventory -----------------------------
+
 include("inventory/trapping_inventory.jl")
 export TRAPPING_CATEGORIES, trapping_inventory, trapping_history
+
+# ------------------------- Plotting (Makie extension) -------------------------
 
 include("plotting.jl")
 export plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!
@@ -133,6 +156,8 @@ export plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure
 export plot_traps, plot_traps!, ve_axis3
 export plot_trapping_history, plot_trapping_history!
 export interactive_traps, interactive_traps!, show_column_values!
+
+# ------------------------------- Precompilation -------------------------------
 
 include("precompile.jl")
 

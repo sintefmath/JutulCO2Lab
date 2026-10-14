@@ -1,7 +1,7 @@
-# co2lab-demo's exploreSimulation scenario (roadmap Stage 11 item 4): CO2
-# injected from several wells into a VE formation, then left to migrate, each
-# boundary side closed, semi-open or open; and a run that hands over each
-# finished report step (for a live display).
+# co2lab-demo's exploreSimulation scenario: CO2 injected from several wells
+# into a VE formation, then left to migrate, each boundary side closed,
+# semi-open or open; and a run that hands over each finished report step
+# (for a live display).
 
 # MRST's year (365.2425 days), in which exploreSimulation gives its times
 const MRST_YEAR = 365.2425 * 86400
@@ -15,45 +15,66 @@ const MRST_YEAR = 365.2425 * 86400
                          well_volume = 1.0) -> NamedTuple
 
 co2lab-demo's `exploreSimulation` launch, without its GUI: CO2 injected into
-a VE formation, then left to migrate. `a` is a formation as
-[`atlas_ve_domain`](@ref) returns it (`mesh`, `columns`, `ve`); `wells` a
-vector of `(column, rate)` pairs, the CO2 mass rate in kg/s; `fluid` from
-[`co2lab_ve_fluid`](@ref).
+a VE formation from several wells, then left to migrate. Run it with
+[`simulate_injection_case`](@ref) or `simulate_reservoir`.
 
-- Each outer side of the formation is `:closed`, `:open` or `:semi_open`
-  (`boundary`: one for all, or one per side of [`ve_boundary_sides`](@ref)'s
-  `sides`); sealed fault sides (`across_fault`) are closed whatever is given.
-  Open sides are held at hydrostatic brine pressure at the side's depth,
-  brine flowing in: by default the fluid's brine at rest
-  ([`ve_hydrostatic_profile`](@ref), in the formation's temperatures);
-  `rho_w` (kg/m³) gives co2lab's `rho_w·g·z` instead. A semi-open side is
-  an open one behind an imagined stretch of formation `outside_distance`
-  long: its transmissibility is scaled by `d/(d + outside_distance)`, `d`
-  the map distance from the centroid of the column's top face to the side
-  (co2lab's). `dissolved`: how
-  brine crossing them books its dissolved CO2 (see
-  [`ve_boundary_conditions`](@ref); `:co2lab` for comparisons with co2lab).
-- The wells: co2lab's VE wells (`addWellVE`: [`setup_ve_well`](@ref) with
-  `well_radius`), injecting `rate` for `inj_time` (s) in `inj_steps` equal
-  report steps, then shut for `mig_time` in `mig_steps` steps. Their
-  wellbore holds `well_volume` times JutulDarcy's default volume (co2lab's
-  wells have none: `1e-3` comes close, for comparisons). A well whose
-  pressure crosses CO2's boiling curve (a shallow, cold caprock) converges
-  slowly: JutulDarcy's well injects at the density of its own pressure, which
-  jumps there (co2lab converts at the cell's).
-- The initial state: the same hydrostatic brine pressure at the caprock, no
-  CO2. The pore volume grows by
-  `pore_compressibility` (1/Pa) about the mean initial pressure (co2lab's
-  `pvMult`).
+# Arguments
+
+- `a`: a formation as [`atlas_ve_domain`](@ref) returns it (`mesh`,
+  `columns`, `ve`).
+- `wells`: a vector of `(column, rate)` pairs, `rate` the CO2 mass rate
+  (kg/s).
+- `fluid`: the fluid, from [`co2lab_ve_fluid`](@ref).
+- `boundary`: `:closed`, `:open` or `:semi_open`, one for all sides or one
+  per side of [`ve_boundary_sides`](@ref)'s `sides` (below).
+- `inj_time`, `inj_steps`: injection time (s; default 50 years) in equal
+  report steps.
+- `mig_time`, `mig_steps`: migration time (s; default 3000 years) with the
+  wells shut, in equal report steps.
 - `temperature` (K; a number, one per column or a function of depth, as
-  [`ve_domain`](@ref)) and `rugosity` (m) replace the domain's.
+  [`ve_domain`](@ref)) and `rugosity` (m): replace the domain's.
+- `rho_w`: brine density (kg/m³) for co2lab's hydrostatic pressure
+  `rho_w·g·z`; default `nothing`, the fluid's brine at rest
+  ([`ve_hydrostatic_profile`](@ref), at the formation's temperatures).
+- `well_radius`: radius (m) of co2lab's VE wells ([`setup_ve_well`](@ref)).
+- `outside_distance`: length (m) of the imagined formation behind a
+  semi-open side.
+- `pore_compressibility`: (1/Pa) about the mean initial pressure (co2lab's
+  `pvMult`).
+- `dissolved`: how brine crossing an open side books its dissolved CO2
+  ([`ve_boundary_conditions`](@ref); `:co2lab` for comparisons).
+- `well_volume`: wellbore volume as a multiple of JutulDarcy's default.
+  co2lab's wells have none; `1e-3` comes close, for comparisons.
 
-Returns a new NamedTuple `(case, model, ve, sides, side_types, bc, wells,
-dt, pressure0)`: the `JutulCase` (for [`simulate_injection_case`](@ref) or
-`simulate_reservoir`), its model, the formation `ve` with its domain copied
-and modified, the boundary sides and their types (`Symbol`s), the boundary
-conditions, the well columns, the report steps (s) and the initial pressure.
-`a` is only read.
+# Returns
+
+A new NamedTuple:
+
+- `case`: the `JutulCase`;
+- `model`: its model;
+- `ve`: the formation `ve`, its domain copied and modified;
+- `sides`, `side_types`: the boundary sides and their types (`Symbol`s);
+- `bc`: the boundary conditions;
+- `wells`: the well columns;
+- `dt`: the report steps (s);
+- `pressure0`: the initial pressure (Pa).
+
+# Boundary
+
+- Sealed fault sides (`across_fault`) are closed whatever is given.
+- Open sides are held at hydrostatic brine pressure at the side's depth,
+  with brine flowing in.
+- A semi-open side is an open one behind an imagined stretch of formation
+  `outside_distance` long: its transmissibility is scaled by
+  `d/(d + outside_distance)`, `d` the map distance from the centroid of the
+  column's top face to the side (co2lab's rule).
+
+# Notes
+
+- The initial state is hydrostatic brine pressure at the caprock, no CO2.
+- A well whose pressure crosses CO2's boiling curve (a shallow, cold
+  caprock) converges slowly: JutulDarcy's well injects at the density of its
+  own pressure, which jumps there (co2lab converts at the cell's).
 """
 function setup_injection_case(a, wells; fluid, boundary = :open,
                               inj_time = 50MRST_YEAR, inj_steps::Integer = 10,
@@ -124,7 +145,7 @@ end
 # The conditions of the open and semi-open sides: hydrostatic pressure at the
 # side's depth (`p_of_z`), a semi-open side's transmissibility scaled
 # by d/(d + L), d the map distance from the centroid of its column's top face
-# (co2lab's Gt.cells.centroids) to the side
+# to the side
 function _injection_bc(a, ve, sides, types, p_of_z, L, dissolved)
     ix = findall(!=(:closed), types)
     cx, cy = _top_face_centroids(a.mesh, a.columns)
@@ -156,16 +177,22 @@ end
 """
     simulate_injection_case(c; on_report = nothing, kwarg...) -> result
 
-Simulates `c.case` ([`setup_injection_case`](@ref)) with co2lab's simulator
-settings ([`setup_co2lab_simulator`](@ref), given `kwarg...`, e.g.
-`info_level`), handing over each finished report step: `on_report(k,
-state)` is called with the report step's number and its output state (a
-`Dict` per model, as `simulate_reservoir`'s states) as soon as it is
-reached — one run, so the results are those of `simulate_reservoir`.
-`on_report` returning `false` stops the run there. `c` is only read.
+Simulate an injection case with co2lab's simulator settings, handing over
+each report step as soon as it is finished (e.g. for a live display). The
+results are those of one `simulate_reservoir` run.
 
-Returns `simulate_reservoir`'s result (`ReservoirSimResult`), or `nothing`
-if `on_report` stopped the run.
+# Arguments
+
+- `c`: the case from [`setup_injection_case`](@ref).
+- `on_report`: `nothing`, or a function `on_report(k, state)` called with
+  the report step's number and its output state (a `Dict` per model, as
+  `simulate_reservoir`'s states). Returning `false` stops the run.
+- `kwarg...`: passed to [`setup_co2lab_simulator`](@ref) (e.g. `info_level`).
+
+# Returns
+
+`simulate_reservoir`'s result (`ReservoirSimResult`), or `nothing` if
+`on_report` stopped the run.
 """
 function simulate_injection_case(c; on_report = nothing, kwarg...)
     sim, cfg = setup_co2lab_simulator(c.case; kwarg...)
@@ -187,8 +214,9 @@ end
 struct _StopRun <: Exception end
 
 # The hook after a ministep: a converged one advances the time; at the end of
-# report step k, on_report(k, state) (false: stop the run). Returns (done,
-# report) for Jutul. Modifies: `progress` (time and next report step).
+# report step k, calls on_report(k, state) (false: stop the run). Returns
+# (done, report) for Jutul.
+# Modifies: `progress` (time and next report step).
 function _report_hook!(progress, ends, on_report, done, report, sim, dt)
     done || return (done, report)
     progress.t[] += dt
@@ -204,14 +232,21 @@ end
 """
     ve_boundary_loops(s, sides) -> Vector{Vector{Int}}
 
-The outer sides of a formation in order around each boundary loop (the outer
-edge, each hole): `sides` from [`ve_boundary_sides`](@ref), `s` the surface
-(`trap_surface` or `ve_top_surface`, whose `outline` edges the sides lie
-on, matched by their midpoints). Each loop is a vector of indices into
-`sides`, consecutive sides sharing a corner (co2lab's exploreSimulation:
-`find_boundary_loops`), so that a stretch of boundary is a range of a loop.
-Sides that match no outline edge are left out. Returns a new vector; its
-arguments are only read.
+The outer sides of a formation in order around each boundary loop (the
+outer edge and each hole), so that a stretch of boundary is a range of a
+loop; co2lab's `find_boundary_loops` (exploreSimulation).
+
+# Arguments
+
+- `s`: the surface ([`trap_surface`](@ref) or [`ve_top_surface`](@ref)) whose
+  `outline` edges the sides lie on; sides are matched to edges by their
+  midpoints.
+- `sides`: the boundary sides ([`ve_boundary_sides`](@ref)).
+
+# Returns
+
+A new vector of loops, each a vector of indices into `sides`, consecutive
+sides sharing a corner. Sides that match no outline edge are left out.
 """
 function ve_boundary_loops(s, sides)
     # each side's outline edge, by the edge's midpoint

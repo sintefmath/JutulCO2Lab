@@ -1,33 +1,31 @@
 # Face directions and column sides — topology only, no geometric thresholds.
 #
 # Every fine face has a direction as seen from its cell, in Jutul's naming
-# (GeoEnergyIO's corner-point processing, entity tag group `:direction` on
-# `BoundaryFaces()`): `:left`/`:right` (logical i−/i+), `:lower`/`:upper`
-# (j−/j+), `:top`/`:bottom` (k−/k+). Numbered 1..6 in that order, which is
-# also MRST's face-tag order (`G.cells.faces(:, 2)`: W, E, S, N, T, B).
+# (entity tag group `:direction` on `BoundaryFaces()`): `:left`/`:right`
+# (logical i−/i+), `:lower`/`:upper` (j−/j+), `:top`/`:bottom` (k−/k+).
+# Numbered 1..6 in that order, which is also MRST's face-tag order
+# (`G.cells.faces(:, 2)`: W, E, S, N, T, B).
 #
 # - Interior faces: the direction follows from the logical (i, j, k) of the
-#   two cells (`_logical_direction`); the package tests check this against
-#   MRST's tags for every interior cell-face of Johansen.
-# - Boundary faces have only one cell. Their direction is read from the
-#   mesh's `:direction` entity tags: Jutul sets them when it builds a
-#   corner-point grid itself; `ve_mesh_from_mrst` sets them from MRST's face
-#   tags; `ve_trim` carries them over. Connectivity alone cannot provide it:
-#   at a fault, pieces of one side of a cell share edges just like two
-#   different sides do.
+#   two cells (`_logical_direction`).
+# - Boundary faces have only one cell, so their direction is read from the
+#   mesh's `:direction` tags: Jutul sets them for its corner-point grids,
+#   `ve_mesh_from_mrst` from MRST's face tags, and `ve_trim` carries them
+#   over. Connectivity alone cannot tell: at a fault, pieces of one side of a
+#   cell share edges just like two different sides do.
 #
-# A column side is the upscaled counterpart of a column: all fine faces of
-# the column's cells with the same lateral direction, split by the column on
-# the other side. With stacked columns (ve_columns' `below_holes = :stack`) a
-# side can face several columns at different depths; each (column, direction,
-# neighbour) is one coarse face of the CoarseMesh, seen from one side.
+# A column side is the upscaled counterpart of a column: all fine faces of the
+# column's cells with the same lateral direction, split by the column on the
+# other side. With stacked columns a side can face several columns at
+# different depths; each (column, direction, neighbour) is one coarse face of
+# the CoarseMesh, seen from one side.
 
 # ------------------------------ Face directions -------------------------------
 
 "Face directions, Jutul's names; the numbering 1..6 is MRST's face-tag order."
 const _DIRECTIONS = (:left, :right, :lower, :upper, :top, :bottom)
-const _TOP = Int8(5)
-const _BOTTOM = Int8(6)
+const _TOP = Int8(5)     # direction number of a top face (k−)
+const _BOTTOM = Int8(6)  # direction number of a bottom face (k+)
 
 """
     _logical_direction(a, b) -> Int8
@@ -66,9 +64,9 @@ end
 """
     _boundary_directions(mesh) -> Vector{Int8}
 
-Direction of every boundary face, from the mesh's `:direction` entity tags
-(set by Jutul's corner-point processing, [`ve_mesh_from_mrst`](@ref) or
-[`ve_trim`](@ref)).
+Direction (1..6) of every boundary face, from the mesh's `:direction` entity
+tags (set by Jutul's corner-point processing, [`ve_mesh_from_mrst`](@ref) or
+[`ve_trim`](@ref)). Returns a new vector; throws if any face has no tag.
 """
 function _boundary_directions(mesh)
     dirs = zeros(Int8, length(mesh.boundary_faces.neighbors))
@@ -91,7 +89,6 @@ Store one direction per boundary face as entity tags, replacing any there.
 Returns `mesh` itself.
 
 Modifies: `mesh` (its entity tags, group `:direction` on `BoundaryFaces()`).
-`dirs` is only read.
 """
 function _set_boundary_directions!(mesh, dirs)
     length(dirs) == length(mesh.boundary_faces.neighbors) ||
@@ -111,9 +108,9 @@ end
     _mrst_boundary_directions(G, mesh) -> Vector{Int8}
 
 MRST's tag of every boundary face of `mesh`, which must be the direct
-conversion of the MRST grid `G`. Jutul keeps MRST's face order when it
-separates boundary faces (`UnstructuredMesh`'s raw constructor); that is
-checked here exactly — same cell, same node set — for every face.
+conversion of the MRST grid `G`. Relies on Jutul keeping MRST's face order
+when it separates boundary faces; this is checked exactly (same cell, same
+node set) for every face, with an error otherwise.
 """
 function _mrst_boundary_directions(G, mesh)
     N = Int.(G["faces"]["neighbors"])
@@ -147,8 +144,9 @@ end
 Directions of the boundary faces of `new = extract_submesh(old, keep)`.
 Jutul lists them as: interior faces of `old` with exactly one kept cell (in
 `old`'s face order), then `old`'s boundary faces with a kept cell. The first
-kind get their direction from the logical indices of the two cells; the second
-keep theirs. Checked exactly: same cell and same node coordinates per face.
+kind get their direction from the logical indices of the two cells; the
+second keep theirs. Checked exactly (same cell, same node coordinates per
+face), with an error otherwise.
 """
 function _trimmed_boundary_directions(old, keep, new)
     active = falses(number_of_cells(old)); active[keep] .= true
@@ -192,27 +190,32 @@ end
 """
     VEColumnSides
 
-The lateral sides of every column, split by neighbour: one entry per
-(column, direction, neighbouring column) that shares fine faces, and one
-outer-side entry (neighbour 0) per (column, direction) that has fine faces
-but no neighbour at all.
+The lateral sides of every column, split by neighbour: the upscaled faces
+between columns, and the outer sides where boundary conditions can go. Made
+by [`ve_column_sides`](@ref).
 
-- `column`, `direction` (1..4 = left, right, lower, upper: logical i−, i+, j−, j+)
-- `neighbour`: the column on the other side, or 0 — an outer boundary side
-- `interior_faces`: fine interior faces shared with `neighbour` (together they
-  are the `CoarseMesh`'s coarse face between the two columns); empty for an
-  outer side
-- `boundary_faces`: an outer side's fine boundary faces; empty otherwise
-- `exposed_faces` (one list for all entries): fine boundary faces on sides
-  that *do* have a neighbour — e.g. above a lower neighbour, or at the depth
-  of a shale missing from the grid between stacked columns. They stay no-flow.
+One entry per (column, direction, neighbouring column) that shares fine
+faces, and one outer-side entry (neighbour 0) per (column, direction) that
+has fine faces but no neighbour at all.
+
+# Fields
+
+- `direction`: 1..4 = left, right, lower, upper (logical i−, i+, j−, j+).
+- `interior_faces`: fine interior faces shared with `neighbour`; together
+  they are the `CoarseMesh`'s coarse face between the two columns. Empty for
+  an outer side.
+- `boundary_faces`: an outer side's fine boundary faces; empty otherwise.
+- `exposed_faces`: one list for all entries, not one per entry: fine boundary
+  faces on sides that *do* have a neighbour, e.g. above a lower neighbour, or
+  at the depth of a shale missing from the grid between stacked columns.
+  They stay no-flow.
 """
 struct VEColumnSides
-    column::Vector{Int}                  # VE column
+    column::Vector{Int}                  # the column (coarse cell)
     direction::Vector{Int8}              # 1..4: left, right, lower, upper
     neighbour::Vector{Int}               # column beyond, 0 if outer side
-    interior_faces::Vector{Vector{Int}}  # shared fine faces
-    boundary_faces::Vector{Vector{Int}}  # outer side's fine faces
+    interior_faces::Vector{Vector{Int}}  # fine faces shared with neighbour
+    boundary_faces::Vector{Vector{Int}}  # outer side's fine boundary faces
     exposed_faces::Vector{Int}           # boundary faces on sides with a neighbour
 end
 
@@ -222,15 +225,26 @@ Base.length(s::VEColumnSides) = length(s.column)
     ve_column_sides(mesh, columns) -> VEColumnSides
 
 Group the lateral fine faces of every column into sides by direction, and
-split each side by the column on the other side of its faces. `mesh` must
-carry face directions ([`ve_mesh_from_mrst`](@ref), [`ve_trim`](@ref)) and
-every cell must belong to a column. Faces between stacked columns of one
-pillar are skipped: such columns are disconnected there by construction
-([`ve_columns`](@ref)). `mesh` and `columns` are only read.
+split each side by the column on the other side of its faces. The basis of
+[`ve_boundary_sides`](@ref).
 
-Returns a new [`VEColumnSides`](@ref): entries ordered by column, direction
-(left, right, lower, upper) and neighbour; `exposed_faces` in the same
-column and direction order; face indices refer to `mesh`.
+# Arguments
+
+- `mesh`: the 3D mesh, carrying boundary face directions
+  ([`ve_mesh_from_mrst`](@ref), [`ve_trim`](@ref)).
+- `columns`: its column partition ([`ve_columns`](@ref)); every cell must
+  belong to a column (trim the mesh first).
+
+# Returns
+
+A new [`VEColumnSides`](@ref), entries ordered by column, direction (left,
+right, lower, upper) and neighbour; `exposed_faces` in the same column and
+direction order. Face indices refer to `mesh`.
+
+# Notes
+
+- Vertical faces between stacked columns of one pillar are skipped: those
+  columns are disconnected there by construction.
 """
 function ve_column_sides(mesh, columns::VEColumns)
     bdir = _boundary_directions(mesh)
@@ -255,9 +269,9 @@ end
     _push_sides!(out, col, d, a)
 
 Add column `col`'s side in direction `d`, from its accumulated faces `a`: one
-entry per neighbour, or one outer side if there is none.
+entry per neighbour, or one outer side if there is none. Returns `out`.
 
-Modifies: `out` (all its vectors). `a` is only read.
+Modifies: `out` (all its vectors).
 """
 function _push_sides!(out, col, d, a)
     isempty(a.int) && isempty(a.bnd) && return out
@@ -278,10 +292,11 @@ end
 """
     _collect_side_faces!(acc, mesh, columns, ijk, bdir, c)
 
-Add cell `c`'s lateral faces to the per-direction accumulators of its column.
+Add cell `c`'s lateral faces to the per-direction accumulators of its column:
+interior faces with their neighbouring column, and boundary faces. Returns
+`acc`; throws if a neighbouring cell is in no column.
 
-Modifies: `acc` (its `nbrs`, `int`, `bnd` lists). The other arguments are only
-read.
+Modifies: `acc` (its `nbrs`, `int`, `bnd` lists).
 """
 function _collect_side_faces!(acc, mesh, columns, ijk, bdir, c)
     col = columns.partition[c]

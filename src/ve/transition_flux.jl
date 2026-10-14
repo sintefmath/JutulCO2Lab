@@ -1,37 +1,35 @@
-# The flux across transition faces (roadmap Stage 12 items 3–4; design:
-# analysis/stage12-transition-flux-design.md §3.1).
+# The flux across transition faces of a VE or hybrid grid.
 #
-# Every face of a grid with transitions is a `VEFace`, handed to the flux
-# through the conservation law's flux type (`VEFlux`; Stage 0's route 3 in
-# spirit — per-face data controlling potential and mobility — without
-# leaving JutulDarcy's fused two-point assembly). Ordinary faces (fine–fine,
-# continuous VE–VE) take the stock two-point flux. A transition face (VE–VE
-# discontinuous or vertical, VE–fine) treats both sides as virtual cells over
-# the face's depth interval: each side's phase pressures are carried
-# hydrostatically, with the face's mean phase densities, to one common depth
-# and compared there (no separate gravity term, no mixing of datums), and each
-# phase takes the upwind side's mobility over its interval — a VE block's
-# relperms integrated over the interval by its vertical model, a fine cell's
-# its own.
+# Ordinary faces (fine–fine, continuous VE–VE) take JutulDarcy's stock
+# two-point flux. A transition face (discontinuous or vertical VE–VE, VE–fine)
+# treats both sides as virtual cells over the face's depth interval:
 #
-# Phase pressures at depth x of cell c (reference depth z_c: a VE block's
-# caprock, a fine cell's centroid; P its brine pressure there, Pc its
-# capillary pressure): brine P + ρ_W g (x − z_c), CO2 P + Pc + ρ_G g (x − z_c),
-# ρ the face's mean of the two sides' densities.
-# For a VE block that is the brine continuous through the column and the CO2
-# at P + Δρ g h at the caprock; for a fine cell, x is its centroid.
+# - each side's phase pressures are carried hydrostatically, with the face's
+#   mean phase densities, to one common depth and compared there (no separate
+#   gravity term, no mixing of datums);
+# - each phase takes the upwind side's mobility over its interval: a VE block's
+#   relperms integrated over the interval by its vertical model, a fine cell's
+#   own.
+#
+# The faces reach the flux through the conservation law's flux type (`VEFlux`),
+# so JutulDarcy's fused two-point assembly is kept as it is.
+#
+# Phase pressures at depth x of cell c, with z_c its reference depth (a VE
+# block's caprock, a fine cell's centroid), P its brine pressure there and Pc
+# its capillary pressure: brine P + ρ_W g (x − z_c), CO2 P + Pc + ρ_G g (x − z_c),
+# ρ the face's mean of the two sides' densities. For a VE block that is the
+# brine continuous through the column and the CO2 at P + Δρ g h at the caprock.
 
 """
     VEFace{T}
 
-One face of a VE or hybrid grid: its cells, category (`vehybrid.jl`) and,
-for a transition, the common depth, each side's interval below its block's
-top, each side's reference depth and whether it is a VE block.
+One face of a VE or hybrid grid, with what a transition face's flux needs.
+Built from a [`ve_domain`](@ref)'s face data; `VEFlux` holds one per face.
 """
 struct VEFace{T}
     left::Int                # left cell
     right::Int               # right cell
-    category::Int            # face category (0–5, vehybrid.jl)
+    category::Int            # face category (0–5, see `ve_domain`)
     depth::T                 # common depth of a transition (NaN otherwise)
     interval::NTuple{4, T}   # (t_L, b_L, t_R, b_R) below each block's top
     zref::NTuple{2, T}       # reference depths (caprock, or fine centroid)
@@ -43,9 +41,11 @@ _is_transition(f::VEFace) = f.category in _TRANSITIONS
 """
     _ve_faces(domain) -> Union{Vector{VEFace{Float64}}, Nothing}
 
-The faces of a `ve_domain` with transition faces as `VEFace`s, in the order
-of `domain[:neighbors]`; `nothing` without transitions (the stock fused
-two-point flux then applies). Returns a new vector; `domain` is only read.
+The faces of a [`ve_domain`](@ref) as `VEFace`s, in the order of
+`domain[:neighbors]`.
+
+Returns a new vector, or `nothing` if the domain has no transition face (the
+stock two-point flux then applies throughout).
 """
 function _ve_faces(domain)
     haskey(domain, :face_category) || return nothing
@@ -63,11 +63,12 @@ end
 """
     VEFlux(faces)
 
-The conservation law's flux type on a grid with transition faces: the faces
-as `VEFace`s. JutulDarcy's fused two-point assembly hands it to
-`component_mass_fluxes!` with each half-face, so that the transition faces
-take their own flux and every other face the stock one — the assembly, its
-speed and the equations' common sparsity pattern unchanged.
+The conservation law's flux type on a grid with transition faces.
+
+JutulDarcy's fused two-point assembly passes it to `component_mass_fluxes!`
+for each half-face, so transition faces get their own flux and all others
+the stock one. The assembly, its speed and the sparsity pattern are
+unchanged.
 """
 struct VEFlux{T} <: Jutul.FluxType
     faces::Vector{VEFace{T}}  # every face of the grid, in the domain's order
@@ -76,10 +77,11 @@ end
 """
     _set_transition_flux!(rmodel, faces)
 
-Install the transition flux in the reservoir model `rmodel`: its mass
-conservation law rebuilt with the flux type `VEFlux(faces)`.
+Install the transition flux in the reservoir model `rmodel`, by rebuilding
+its mass conservation law with the flux type `VEFlux(faces)`. Returns
+`rmodel`.
 
-Modifies: `rmodel.equations[:mass_conservation]`. `faces` is only read.
+Modifies: `rmodel.equations[:mass_conservation]`.
 """
 function _set_transition_flux!(rmodel, faces)
     law = rmodel.equations[:mass_conservation]
@@ -91,13 +93,12 @@ function _set_transition_flux!(rmodel, faces)
 end
 
 """
-Jutul hook: the component mass fluxes (brine; CO2 free and dissolved) of a
-half-face of a grid with transitions, out of the cell `kgrad.left`. Ordinary
-faces as JutulDarcy's black-oil flux; transitions with the potentials at the
-common depth and each phase's upwind mobility over the face's interval
-([`_transition_mobility`](@ref)).
+JutulDarcy hook: the component mass fluxes (brine; CO2 free and dissolved)
+of one half-face, out of the cell `kgrad.left`. Ordinary faces use the stock
+black-oil flux; transition faces compare potentials at the common depth and
+take each phase's upwind mobility over the face's interval.
 
-Modifies: nothing (returns the fluxes, as JutulDarcy's `q`).
+Returns the updated flux tuple `q` (a new value; nothing is modified).
 """
 function JutulDarcy.component_mass_fluxes!(q, face, state,
                                            model::JutulDarcy.StandardBlackOilModel,
@@ -149,10 +150,9 @@ end
 """
     _transition_mobility(state, model, f, side, ph) -> Real
 
-Phase `ph`'s mobility `b·kr/μ` of side `side` (1 left, 2 right) of the
-transition face `f`: a fine cell's own; a VE block's with its relperms
-integrated over the face's interval by the vertical model
-([`_interval_relperm`](@ref)).
+Phase `ph`'s mobility `b·kr/μ` on side `side` (1 left, 2 right) of the
+transition face `f`. A fine cell gives its own; a VE block gives its relperms
+integrated over the face's interval ([`_interval_relperm`](@ref)).
 """
 function _transition_mobility(state, model, f::VEFace, side, ph)
     c = side == 1 ? f.left : f.right
@@ -175,10 +175,10 @@ end
     _interval_relperm(m, i, T, B, sG, smax, h, h_max, drho, dh, krw, krg, rw, rg)
         -> (krW, krG)
 
-Column `i`'s relperms over the depths `[T, B]` below its top, averaged by
-permeability over the interval, under vertical model `m` (the column's own
-relperms are the interval `[0, H]`). The subscale relief `[0, dh]` takes no
-part in lateral flow. Arguments may carry AD derivatives.
+Column `i`'s relperms over the depths `[T, B]` (m below its top), averaged
+by permeability, under the vertical model `m`. The interval `[0, H]` gives
+the column's own relperms. The subscale relief `[0, dh]` takes no part in
+lateral flow. Arguments may carry AD derivatives.
 """
 function _interval_relperm(::SharpInterface, i, T, B, sG, smax, h, h_max, drho, dh,
                            krw, krg, rw, rg)

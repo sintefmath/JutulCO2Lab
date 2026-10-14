@@ -1,6 +1,8 @@
 # Map view of a trapping analysis (co2lab's trap plots in its spill-point
-# examples, without the interactive viewer).
+# examples, without the interactive viewer). Public functions are documented
+# in src/plotting.jl.
 
+# A new figure with one map axis and, for trap values, a colour bar
 function plot_traps(s, res; title = "", colorbar = true, kwarg...)
     fig, ax = _map_figure(title)
     plot_traps!(ax, s, res; kwarg...)
@@ -9,6 +11,7 @@ function plot_traps(s, res; title = "", colorbar = true, kwarg...)
     return fig
 end
 
+# Map view (2D axis); the Axis3 method is in surface_3d.jl
 function plot_traps!(ax, s, res; regions = true, trap_values = nothing,
                      colormap = :viridis, rivers = true, labels = false,
                      outline = true, faults = true)

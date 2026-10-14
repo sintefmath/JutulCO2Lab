@@ -1,15 +1,14 @@
-# The Norwegian CO2 Storage Atlas: reading the data sets (roadmap Stage 5,
-# step 1) — co2lab-common/atlasgrid (getAtlasGrid.m, helpers/readAAIGrid.m,
-# helpers/get*SeaNames.m).
+# The Norwegian CO2 Storage Atlas, part 1: reading the data sets (co2lab's
+# getAtlasGrid, readAAIGrid, get*SeaNames). The grid is built in
+# atlas_grid.jl, the VE domain in atlas_domain.jl.
 #
 # The data sets are MRST's co2atlas, co2atlasnorwegiansea and
-# co2atlasbarentssea (NPD data converted to ESRI ASCII grids). The package only
-# reads a local copy — it does not download or redistribute them — from
-# `atlas_data_directory()`, laid out as MRST's dataset manager expects.
+# co2atlasbarentssea (NPD data as ESRI ASCII grids). They are only read from a
+# local copy in `atlas_data_directory()`, laid out as MRST's dataset manager
+# expects; nothing is downloaded or redistributed.
 #
-# Maps are stored as co2lab stores them: `data[i, j]` with `i` along x (east)
-# and `j` along y (north, south first); missing values, infinities and zeros
-# are NaN.
+# Map convention, as co2lab: `data[i, j]` with `i` along x (east) and `j`
+# along y (south first); missing values, infinities and zeros are NaN.
 
 # --------------------------------- Data sets ----------------------------------
 
@@ -20,8 +19,10 @@ const _ATLAS_DATASETS = ("CO2Atlas", "CO2AtlasNorwegianSea", "CO2AtlasBarentsSea
     atlas_data_directory() -> String
 
 Directory holding the Atlas data sets (`CO2Atlas`, `CO2AtlasNorwegianSea`,
-`CO2AtlasBarentsSea`): the environment variable `CO2LAB_ATLAS_DATA` if set,
-otherwise `mrst-data` next to the project directory.
+`CO2AtlasBarentsSea`), and the Sleipner and Johansen data.
+
+Returns the environment variable `CO2LAB_ATLAS_DATA` if set, otherwise
+`mrst-data` next to the project directory.
 """
 atlas_data_directory() =
     get(ENV, "CO2LAB_ATLAS_DATA", normpath(joinpath(@__DIR__, "..", "..", "..", "..",
@@ -30,9 +31,17 @@ atlas_data_directory() =
 """
     atlas_formation_names(region = :all) -> Vector{String}
 
-co2lab's formation lists (`getNorthSeaNames`, `getNorwegianSeaNames`,
-`getBarentsSeaNames`): `region` is `:north_sea`, `:norwegian_sea`,
-`:barents_sea` or `:all` (in that order). Returns a new vector.
+The Atlas formation names of a region, as co2lab's `getNorthSeaNames`,
+`getNorwegianSeaNames` and `getBarentsSeaNames`.
+
+# Arguments
+
+- `region`: `:north_sea`, `:norwegian_sea`, `:barents_sea` or `:all` (the
+  three in that order). Any other value throws an `ArgumentError`.
+
+# Returns
+
+A new vector of formation names (e.g. `"Utsirafm"`).
 """
 function atlas_formation_names(region::Symbol = :all)
     north = ["Brentgrp", "Brynefm", "Sleipnerfm", "Sognefjordfm", "Fensfjordfm",
@@ -54,20 +63,28 @@ end
 """
     read_aai_grid(path; co2lab_rows = false) -> NamedTuple
 
-Read an ESRI ASCII grid, as co2lab's `readAAIGrid`: header `ncols`, `nrows`,
-`xllcorner`, `yllcorner`, `cellsize`, `NODATA_value`, then the rows north to
-south; decimal commas are accepted. NODATA, infinite and zero values become
-NaN; rows are flipped to south first and the matrix transposed.
+Read one ESRI ASCII grid file (an Atlas map), as co2lab's `readAAIGrid`.
 
-co2lab's reader loses the first data row (its header loop consumes it) and
-reads only `nrows − 1` further rows, so its map lies one row north of the
-position the header states, with its southernmost row empty.
-`co2lab_rows = true` reproduces that, for comparisons with co2lab; in the
-Atlas files the first row is always empty, so no values are lost either way.
+The file has a header (`ncols`, `nrows`, `xllcorner`, `yllcorner`,
+`cellsize`, `NODATA_value`), then the rows north to south; decimal commas
+are accepted.
 
-Returns the NamedTuple `(meta, data)`: `meta = (ncols, nrows, xllcorner,
-yllcorner, cellsize, nodata)` as in the header, `data` a new
-`Matrix{Float64}` of size `ncols × nrows` (x, then y from the south).
+# Arguments
+
+- `path`: the file.
+- `co2lab_rows`: reproduce co2lab's reader, which drops the first data row
+  and so places the map one row north, its southernmost row empty (for
+  comparisons with co2lab). Default `false`. In the Atlas files the first
+  row is always empty, so no values are lost either way.
+
+# Returns
+
+The NamedTuple `(meta, data)`:
+
+- `meta`: the header, `(ncols, nrows, xllcorner, yllcorner, cellsize,
+  nodata)`.
+- `data`: a new `Matrix{Float64}`, `ncols × nrows` (x, then y from the
+  south); NODATA, infinite and zero values are `NaN`.
 """
 function read_aai_grid(path::AbstractString; co2lab_rows::Bool = false)
     lines = readlines(path)
@@ -113,15 +130,20 @@ end
 """
     atlas_map_files() -> Vector{NamedTuple}
 
-All map files of the three data sets, with co2lab's naming (`readAtlasGrids`
-in `getAtlasGrid.m`): the name is the file name without its `top` and
-`thickness` parts, joined (`Huginfm_east_thickness` → `Huginfmeast`), and the
-variant is `:thickness` if the file name has that part, `:top` otherwise
-(this includes rock maps such as `Stofm_poro`, as in co2lab). `.mat`, `.prj`
-and README files are skipped.
+All map files of the three Atlas data sets, named as co2lab's
+`readAtlasGrids` names them. Throws an error if a data set is missing.
 
-Returns a new vector of `(name, variant, path)`, data set by data set, files
-sorted by name as `dir` lists them.
+# Returns
+
+A new vector of NamedTuples, data set by data set, sorted by file name:
+
+- `name`: the file name without its `top` and `thickness` parts, joined
+  (`Huginfm_east_thickness` → `"Huginfmeast"`).
+- `variant`: `:thickness` if the file name has that part, otherwise `:top`
+  (also for rock maps such as `Stofm_poro`, as in co2lab).
+- `path`: the file's path.
+
+`.mat`, `.prj` and README files are skipped.
 """
 function atlas_map_files()
     out = NamedTuple{(:name, :variant, :path), Tuple{String, Symbol, String}}[]
@@ -149,22 +171,37 @@ _is_atlas_map(f) = !(lowercase(f) in ("readme.txt", "readme")) &&
     read_atlas_maps(names = nothing; coarsening = 1, co2lab_compatible = false)
         -> Vector{NamedTuple}
 
-The Atlas maps of the formations `names` (all maps for `nothing`), as
-co2lab's `readAtlasGrids`: each read with [`read_aai_grid`](@ref); top maps
-with any negative value are negated (depth positive down); every
-`coarsening`-th value is kept in each direction, from the first, and the cell
-size multiplied accordingly. Names compare case-insensitively.
+Read the Atlas maps of some formations, as co2lab's `readAtlasGrids`.
+Top maps are returned as depths (positive down): a top map with any
+negative value is negated.
 
-Each value is placed where the file puts it: at the centre of its cell, so
-`data[1, 1]` lies at `(xllcorner, yllcorner)` plus half the file's cell size.
-`co2lab_compatible = true` places the maps as co2lab does instead, for
-comparisons: read with co2lab's row shift (`co2lab_rows`), and `data[1, 1]`
-at the corner `(xllcorner, yllcorner)` itself (`co2lab-issues.org`).
+# Arguments
 
-Returns a new vector of `(name, variant, meta, data)`, in the order of
-[`atlas_map_files`](@ref); `meta` is the header's with `cellsize` scaled
-(the spacing of the values) and `dims = size(data)` and `x0`, `y0` (the
-position of `data[1, 1]`) added.
+- `names`: formation names, compared case-insensitively; `nothing` (the
+  default) for all maps.
+- `coarsening`: keep every `coarsening`-th value in each direction, from the
+  first. Default 1.
+- `co2lab_compatible`: place the maps as co2lab does, for comparisons (see
+  Notes). Default `false`.
+
+# Returns
+
+A new vector of NamedTuples `(name, variant, meta, data)`, in the order of
+[`atlas_map_files`](@ref):
+
+- `name`, `variant`: as [`atlas_map_files`](@ref).
+- `meta`: the file header ([`read_aai_grid`](@ref)) with `cellsize` the
+  spacing of the values (scaled by `coarsening`), plus `dims = size(data)`
+  and `x0`, `y0`, the position (m) of `data[1, 1]`.
+- `data`: the values, `Matrix{Float64}` (x, then y from the south).
+
+# Notes
+
+- By default each value sits at the centre of its file cell, so
+  `data[1, 1]` is at `(xllcorner, yllcorner)` plus half the file's cell
+  size. co2lab instead puts it at the corner `(xllcorner, yllcorner)` and
+  reads with its row shift (`co2lab_rows`); `co2lab_compatible = true`
+  reproduces both.
 """
 function read_atlas_maps(names = nothing; coarsening::Integer = 1,
                          co2lab_compatible::Bool = false)
@@ -182,8 +219,8 @@ function read_atlas_maps(names = nothing; coarsening::Integer = 1,
     return out
 end
 
-# (meta, data) of a map read by read_aai_grid, coarsened, with the positions
-# x0, y0 of its first value (see read_atlas_maps)
+# A map read by read_aai_grid, coarsened, as (meta, data) with x0, y0 the
+# position of its first value (see read_atlas_maps)
 function _coarsen_map(meta, data, coarsening, co2lab_compatible)
     data = data[1:coarsening:end, 1:coarsening:end]
     # a value sits at its cell's centre (co2lab: at the corner)
@@ -198,10 +235,17 @@ end
 """
     atlas_average_rock(name) -> NamedTuple
 
-The Atlas's average rock values for formation `name` (co2lab's `getAvgRock`,
-from the Atlas reports; a trailing `fm` is ignored): `(perm, poro, ntg)` with
-permeability in m², `NaN` where the Atlas gives none (sealing formations,
-unknown names), and `ntg` `nothing` unless the Atlas gives it.
+The Atlas reports' average rock values for formation `name`, as co2lab's
+`getAvgRock`. A trailing `fm` in `name` is ignored, case is not significant.
+
+# Returns
+
+The NamedTuple `(perm, poro, ntg)`:
+
+- `perm`: permeability (m²); `NaN` where the Atlas gives none (sealing
+  formations, unknown names).
+- `poro`: porosity; `NaN` likewise.
+- `ntg`: net-to-gross, or `nothing` unless the Atlas gives it.
 """
 function atlas_average_rock(name::AbstractString)
     # the table's names drop the "fm"
@@ -213,8 +257,8 @@ function atlas_average_rock(name::AbstractString)
             ntg = length(v) == 3 ? v[3] : nothing)
 end
 
-# MRST's darcy (core/utils/units/darcy.m), evaluated in its order so that
-# permeabilities agree to the last bit: 1 cP, 1 cm³/s through 1 cm² at 1 atm/cm.
+# MRST's darcy (m²), evaluated in MRST's order so that permeabilities agree
+# to the last bit: 1 cP, 1 cm³/s through 1 cm² at 1 atm/cm.
 function _mrst_darcy()
     # computed as MRST's darcy is, for identical rounding
     mu, cm = 1e-2 * (0.1 * 1.0 * 1.0), 1e-2 * 1.0
@@ -242,11 +286,18 @@ const _ATLAS_AVERAGE_ROCK = Dict(
     atlas_coastline() -> Vector{Matrix{Float64}}
 
 The coastline of Norway shipped with the North Sea data set (`norway.mat`,
-from the Norwegian Mapping Authority), for orientation on Atlas maps: one
-`n × 2` matrix of `(x, y)` per polyline (`NaN` rows separate pieces). The
-file is in UTM zone 33; it is converted here to the Atlas's zone 31
-(`projection.jl`). co2lab's `showCO2atlas` instead shifts x by 680 km, which
-misplaces the coast by up to tens of kilometres. Returns new matrices.
+from the Norwegian Mapping Authority), for orientation on Atlas maps.
+
+# Returns
+
+New matrices, one `n × 2` matrix of `(x, y)` (m) per polyline; `NaN` rows
+separate pieces. Coordinates are in the Atlas's UTM zone 31.
+
+# Notes
+
+- The file is in UTM zone 33 and is reprojected here. co2lab's
+  `showCO2atlas` instead shifts x by 680 km, which misplaces the coast by
+  up to tens of kilometres.
 """
 function atlas_coastline()
     lines = matread(joinpath(atlas_data_directory(), "CO2Atlas", "norway.mat"))["norway"]
@@ -259,9 +310,10 @@ end
 """
     atlas_wells() -> NamedTuple
 
-Positions of the wells on the Norwegian continental shelf shipped with the
-North Sea data set (`welldata.mat`, from the NPD fact pages). Returns
-`(x, y)`, new vectors.
+Positions of the wells on the Norwegian continental shelf, shipped with
+the North Sea data set (`welldata.mat`, from the NPD fact pages).
+
+Returns the NamedTuple `(x, y)` of new vectors (m, as the file gives them).
 """
 function atlas_wells()
     w = matread(joinpath(atlas_data_directory(), "CO2Atlas", "welldata.mat"))["welldata"]

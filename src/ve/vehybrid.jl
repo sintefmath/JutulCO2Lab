@@ -1,45 +1,46 @@
-# The faces of a hybrid VE grid (roadmap Stage 12 items 1–2; design:
-# analysis/stage12-transition-flux-design.md §3.3).
+# The faces of a hybrid VE grid: each coarse face's category, which decides
+# how flux across it is computed, and the data that flux needs.
 #
-# Every coarse face gets a category:
-#   0 sealed — all its fine faces sealed: no flow;
-#   1 fine–fine — the ordinary 3D flux;
-#   2 VE–VE, continuous — the two blocks' top cells share a face (the caprock
-#     continues) and every cell of both touches the face (the columns face
-#     each other over their whole height): the ordinary whole-column VE flux;
-#   3 VE–VE, discontinuous — lateral, top cells not connected (a fault offset
-#     larger than the top cell, a pinch-out, stacked blocks), or a block
-#     facing only part of the other (a short column above a layer beside a
-#     full one): the virtual cell, each side over its interval at the face;
-#   4 VE–VE, vertical — stacked blocks through a leaky layer: the virtual cell
-#     over the blocks' adjacent cells;
-#   5 VE–fine, lateral or vertical — the virtual cell over the fine cell's
-#     extent.
-# Categories 3–5 (transitions) carry, per side, the depth interval of that
-# side's cells at the face (below its block's top) and a common depth (the
-# fine cell's centroid for 5, the faces' mean depth for 3 and 4), and the
+# Categories:
+#   0 sealed: all its fine faces sealed; no flow.
+#   1 fine–fine: the ordinary 3D flux.
+#   2 VE–VE, continuous: the two blocks' top cells share a face (the caprock
+#     continues) and the columns face each other over their whole height;
+#     the ordinary whole-column VE flux.
+#   3 VE–VE, discontinuous: lateral, but the top cells are not connected (a
+#     fault offset larger than the top cell, a pinch-out, stacked blocks), or
+#     a block faces only part of the other (a short column above a layer
+#     beside a full one). Virtual cell, each side over its interval at the
+#     face.
+#   4 VE–VE, vertical: stacked blocks through a leaky layer. Virtual cell over
+#     the blocks' adjacent cells.
+#   5 VE–fine, lateral or vertical: virtual cell over the fine cell's extent.
+#
+# Categories 3–5 are the transitions. They carry, per side, the depth interval
+# of that side's cells at the face (below its block's top), a common depth
+# (the fine cell's centroid for 5, the faces' mean depth for 3 and 4), and the
 # transmissibility summed from the fine grid's. Category 2 keeps the coarse
-# mesh's transmissibility (as the pure VE gates), 1 takes the fine grid's.
+# mesh's transmissibility (as pure VE), 1 takes the fine grid's.
 #
-# `fault_flux = :virtual` (default; researcher, 2026-10-05) follows the
-# topology; `:co2lab` makes lateral VE–VE faces between pillars with one VE
-# block each continuous (co2lab's smooth flux across faults, for the gates
-# against MRST; stacked blocks follow the topology in any case).
+# `fault_flux = :virtual` (default) follows the topology. `:co2lab` makes
+# lateral VE–VE faces between pillars with one VE block each continuous
+# (co2lab's smooth flux across faults, for comparisons with co2lab); stacked
+# blocks follow the topology in any case.
 
-const _FACE_SEALED = 0
-const _FACE_FINE = 1
-const _FACE_VE = 2
-const _FACE_VE_DISCONTINUOUS = 3
-const _FACE_VE_VERTICAL = 4
-const _FACE_VE_FINE = 5
+const _FACE_SEALED = 0                 # all fine faces sealed: no flow
+const _FACE_FINE = 1                   # fine–fine: 3D flux
+const _FACE_VE = 2                     # continuous VE–VE: whole-column VE flux
+const _FACE_VE_DISCONTINUOUS = 3       # lateral VE–VE, caprock not continuous
+const _FACE_VE_VERTICAL = 4            # stacked VE–VE through a leaky layer
+const _FACE_VE_FINE = 5                # VE–fine
 const _TRANSITIONS = (_FACE_VE_DISCONTINUOUS, _FACE_VE_VERTICAL, _FACE_VE_FINE)
 
 """
     _face_categories(mesh, columns, coarse, fault_flux) -> Vector{Int}
 
 The category (0–5, see the file's header) of every face of the `CoarseMesh`
-`coarse` built on `mesh` from `columns`. Returns a new vector; the arguments
-are only read.
+`coarse` built on `mesh` from `columns`; `fault_flux` is `:virtual` or
+`:co2lab`. Returns a new vector.
 """
 function _face_categories(mesh, columns::VEColumns, coarse, fault_flux::Symbol)
     fault_flux in (:co2lab, :virtual) ||
@@ -71,11 +72,10 @@ function _face_categories(mesh, columns::VEColumns, coarse, fault_flux::Symbol)
     end
 end
 
-# Whether the fine faces F touch every cell of blocks L and R: the two columns
-# face each other over their whole height. Otherwise part of one faces
-# nothing of the other, and the whole-column flux would spread a plume's
-# mobility over a height the face does not have (a 20 m column beside a
-# 100 m one: its plume flowing as through a fifth of its thickness).
+# Whether the fine faces F touch every cell of blocks L and R, i.e. the columns
+# face each other over their whole height. If not, the whole-column flux would
+# spread a plume's mobility over a height the face does not have (a 20 m
+# column beside a 100 m one: its plume flowing as through a fifth of it).
 function _faces_whole_columns(mesh, columns, F, L, R)
     touched = Set(c for ff in F for c in mesh.faces.neighbors[ff])
     return all(in(touched), column_cells(columns, L)) &&
@@ -85,12 +85,13 @@ end
 """
     _face_intervals(mesh, columns, coarse, category, geometry) -> (intervals, depth)
 
-For each transition face (categories 3–5): `intervals[:, f]` the depth
-interval `(t_L, b_L, t_R, b_R)` of each side's cells at the face, below that
-side's block top (`geometry.z_top`), and `depth[f]` the common depth
-(absolute): the fine cell's centroid for a VE–fine face, the area-weighted
-mean depth of the fine faces otherwise. `NaN` for other faces. Returns a new
-`4 × nf` matrix and a new vector; the arguments are only read.
+The data of each transition face (categories 3–5) for its virtual-cell flux.
+Returns a new `4 × nf` matrix and a new vector, `NaN` for other faces:
+
+- `intervals[:, f]`: the depth interval `(t_L, b_L, t_R, b_R)` of each
+  side's cells at the face, below that side's block top (`geometry.z_top`).
+- `depth[f]`: the common (absolute) depth: the fine cell's centroid for a
+  VE–fine face, the area-weighted mean depth of the fine faces otherwise.
 """
 function _face_intervals(mesh, columns::VEColumns, coarse, category, geometry)
     nf = number_of_faces(coarse)
@@ -131,10 +132,11 @@ end
         -> Union{Vector{Float64}, Nothing}
 
 The coarse faces' transmissibilities by category: 0 for sealed faces, the
-coarse mesh's for continuous VE–VE faces, the sum of the fine grid's over
-the face's fine faces for the others (`perm` 3 × cells of `mesh`). `nothing`
-when every face is continuous VE–VE (the coarse mesh's apply unchanged).
-Returns a new vector; the arguments are only read.
+coarse mesh's for continuous VE–VE faces, and for the others the sum of the
+fine grid's over the face's fine faces (`perm`: 3 × cells of `mesh`).
+
+Returns a new vector, or `nothing` when every face is continuous VE–VE (the
+coarse mesh's transmissibilities then apply unchanged).
 """
 function _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro, ntg)
     all(==(_FACE_VE), category) && return nothing

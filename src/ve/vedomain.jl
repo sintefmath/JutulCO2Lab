@@ -1,7 +1,7 @@
-# VE reservoir domain on a CoarseMesh, and its lateral boundary sides.
-#
-# See roadmap Stage 1 and analysis/ve-meshing/grid-representation-comparison.md.
-# Everything is derived from the 3D mesh and the VEColumns partition.
+# The VE reservoir domain: a CoarseMesh with one block per column, carrying the
+# column-averaged rock and the data the VE model needs; also the initial
+# pressure and the domain's outer lateral boundary sides. Everything is derived
+# from the 3D mesh and its VEColumns partition.
 
 # ------------------------- Rock and initial pressure --------------------------
 
@@ -9,21 +9,31 @@
     ve_average_rock(columns, dz; perm_x, perm_y = nothing, poro, ntg = nothing,
                     anisotropy_rtol = 1e-6) -> NamedTuple
 
-Thickness-weighted column averages, exactly as MRST's `averageRock`:
-`sum(x .* dz) / sum(dz)` per column, for permeability, porosity and (if
-given) net-to-gross. `dz` is per fine cell in `columns.cells` order (from
-[`ve_column_geometry`](@ref)); `perm_x`, `perm_y`, `poro`, `ntg` are per fine
-cell of the 3D mesh.
+Thickness-weighted column averages of the rock, `sum(x .* dz) / sum(dz)` per
+column, exactly as co2lab's `averageRock`. Used by [`ve_domain`](@ref).
 
-VE permeability is a **scalar computed from lateral permeability only**
-(researcher's decision, 2026-09-25); vertical permeability is never used.
-It is the thickness-weighted x-permeability, as co2lab. If `perm_y` is given
-and differs from `perm_x` by more than `anisotropy_rtol` (relative) in any
-cell, a warning reports how many cells and the largest ratio, and x is used
-anyway.
+# Arguments
 
-Returns the NamedTuple `(perm, poro, ntg)` of new per-column vectors;
-`ntg` is `nothing` if not given. The arguments are only read.
+- `columns`: the column partition ([`ve_columns`](@ref)).
+- `dz`: thickness (m) per fine cell, in `columns.cells` order
+  ([`ve_column_geometry`](@ref)).
+- `perm_x`, `perm_y`: lateral permeability (m²) per fine cell of the 3D mesh;
+  `perm_y` is only checked against `perm_x`.
+- `poro`, `ntg`: porosity and net-to-gross per fine cell; `ntg` optional.
+- `anisotropy_rtol`: relative tolerance for `perm_y` differing from `perm_x`.
+
+# Returns
+
+The NamedTuple `(perm, poro, ntg)` of new per-column vectors; `ntg` is
+`nothing` if not given.
+
+# Notes
+
+- VE permeability is a **scalar from lateral permeability only**: the
+  thickness-weighted x-permeability, as in co2lab. Vertical permeability is
+  never used.
+- If `perm_y` differs from `perm_x` beyond `anisotropy_rtol` in any cell, a
+  warning reports how many cells and the largest ratio; x is used anyway.
 """
 function ve_average_rock(columns::VEColumns, dz::AbstractVector;
                          perm_x, perm_y = nothing, poro, ntg = nothing,
@@ -42,17 +52,29 @@ end
     ve_hydrostatic_pressure(geometry; rho_w, g = Jutul.gravity_constant)
         -> Vector{Float64}
 
-Initial VE pressure per column: hydrostatic brine pressure at the **caprock**,
-`rho_w · g · z_top`, with `z_top` from [`ve_column_geometry`](@ref) (depth,
-positive down) and a constant brine density `rho_w`. This is co2lab's
-initial state (`exampleVEJohansen.m:83`, `sloping_aquifer.m:317`): no surface
-pressure offset, no JutulDarcy equilibration. It is the brine (reference
-phase) pressure; with no CO2 present the CO2 pressure equals it.
+Initial VE pressure per column: the hydrostatic brine pressure at the
+**caprock** for a constant brine density, as co2lab's examples initialise
+(no surface pressure offset, no JutulDarcy equilibration).
 
-Use this rather than the domain's cell centroids, which are mid-column on
-the `CoarseMesh` and would give a wrong pressure without any error.
+# Arguments
 
-Returns a new vector, one value per column; `geometry` is only read.
+- `geometry`: column geometry ([`ve_column_geometry`](@ref)); uses `z_top`,
+  the caprock depth (m, positive down).
+- `rho_w`: brine density (kg/m³).
+- `g`: gravity (m/s²).
+
+# Returns
+
+A new `Vector{Float64}`, `rho_w · g · z_top` (Pa), one value per column. It
+is the brine (reference phase) pressure; with no CO2 present the CO2 pressure
+equals it.
+
+# Notes
+
+- Do not compute it from the domain's cell centroids: they are mid-column on
+  the `CoarseMesh` and would give a wrong pressure without any error.
+- For a pressure-dependent brine density use
+  [`ve_hydrostatic_profile`](@ref).
 """
 ve_hydrostatic_pressure(geometry; rho_w, g = Jutul.gravity_constant) =
     rho_w * g .* geometry.z_top
@@ -61,20 +83,33 @@ ve_hydrostatic_pressure(geometry; rho_w, g = Jutul.gravity_constant) =
     ve_hydrostatic_profile(fluid, ve; g = Jutul.gravity_constant, dz = 1.0)
         -> Function
 
-Hydrostatic brine pressure as a function of depth, `z -> p`, for the brine
-of `fluid` ([`co2lab_ve_fluid`](@ref)) in the formation `ve`
-([`ve_domain`](@ref)): `dp/dz = g ρ_w(p, T(z))` integrated from `p = 0` at
-`z = 0` (co2lab's convention, no surface pressure) in steps of `dz` (Heun's
-method), with `T(z)` the columns' temperatures interpolated linearly in
-caprock depth (constant beyond the shallowest and deepest; JutulDarcy's 30 °C
-if the domain has none). With a constant brine density this is
-`ρ_w g z`, as [`ve_hydrostatic_pressure`](@ref); with a tabulated or linear
-one, brine at these pressures (at the caprocks, and on open sides at their
-depths) is at rest, which a constant `ρ_w` other than the fluid's would not
-be.
+Hydrostatic brine pressure as a function of depth, consistent with the
+fluid's own (possibly pressure- and temperature-dependent) brine density.
+Brine at these pressures — at the caprocks, and on open sides at their
+depths — is at rest, which a constant `ρ_w` other than the fluid's would not
+give. With a constant density it equals [`ve_hydrostatic_pressure`](@ref).
 
-Returns a new closure, linear between the steps and extrapolated with the
-last step's gradient below them. `fluid` and `ve` are only read.
+# Arguments
+
+- `fluid`: the fluid ([`co2lab_ve_fluid`](@ref)); its brine density is used.
+- `ve`: the formation ([`ve_domain`](@ref)); its caprock depths and column
+  temperatures are used.
+- `g`: gravity (m/s²).
+- `dz`: integration step (m).
+
+# Returns
+
+A new function `z -> p` (depth in m, positive down; pressure in Pa): linear
+between the steps, extrapolated with the last step's gradient below them.
+
+# Notes
+
+- Integrates `dp/dz = g ρ_w(p, T(z))` from `p = 0` at `z = 0` (co2lab's
+  convention, no surface pressure) with Heun's method, down to below the
+  deepest column.
+- `T(z)` interpolates the columns' temperatures linearly in caprock depth,
+  constant beyond the shallowest and deepest; JutulDarcy's default 30 °C if
+  the domain has none.
 """
 function ve_hydrostatic_profile(fluid, ve; g = Jutul.gravity_constant, dz = 1.0)
     z_top, d = ve.geometry.z_top, ve.domain
@@ -93,8 +128,8 @@ function ve_hydrostatic_profile(fluid, ve; g = Jutul.gravity_constant, dz = 1.0)
     return _depth_interpolant(zs, ps; extrapolate = true)
 end
 
-# A function z -> value, linear in z between the points (z, v) (equal z
-# averaged); beyond them constant, or (`extrapolate`) continued linearly
+# A new function z -> value, linear between the points (z, v) (values at equal
+# z averaged); beyond them constant, or continued linearly if `extrapolate`
 function _depth_interpolant(z, v; extrapolate = false)
     zu, vu, nu = Float64[], Float64[], Int[]
     for i in sortperm(z)
@@ -114,8 +149,8 @@ function _depth_interpolant(z, v; extrapolate = false)
     return f
 end
 
-# Warn if kx and ky differ; `what` (VE permeability, or the integrated relperm)
-# then uses kx (see ve_average_rock).
+# Warn if kx and ky differ beyond rtol in any cell; `what` (VE permeability,
+# or the integrated relperm) then uses kx (see ve_average_rock)
 function _warn_lateral_anisotropy(kx, ky, rtol; what = "VE permeability")
     rel = abs.(kx .- ky) ./ max.(abs.(kx), abs.(ky), floatmin())
     n = count(>(rtol), rel)
@@ -165,8 +200,7 @@ and fine 3D cells (hybrid grids); both are handled in full.
 
 # Returns
 
-The NamedTuple `(domain, coarse, geometry, rock)`, all new (`mesh` and
-`columns` are only read):
+The NamedTuple `(domain, coarse, geometry, rock)`, all new:
 
 - `domain`: the `DataDomain` on the `CoarseMesh`, with
   - per block: the averaged `:permeability`, `:porosity` and `:net_to_gross`
@@ -232,7 +266,7 @@ function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing,
     isnothing(temperature) ||
         (domain[:temperature, Cells()] = _column_temperature(temperature, geometry))
 
-    # the faces: categories, virtual cells, transmissibilities (vehybrid.jl)
+    # the faces: categories, virtual-cell intervals, transmissibilities
     perm = [perm_x'; something(perm_y, perm_x)'; something(perm_z, perm_x)']
     _set_face_data!(domain, mesh, columns, coarse, geometry, perm, poro, ntg,
                     fault_flux)
@@ -248,10 +282,19 @@ _column_temperature(T::Function, geometry) = Float64.(T.(geometry.z_top))
 """
     geothermal_gradient(; T_ref, z_ref = 0.0, gradient) -> Function
 
-The temperature of a geothermal gradient as a function of depth `z` (m,
-positive down): `T_ref + gradient · (z − z_ref)`, with `T_ref` (K) at depth
-`z_ref` and `gradient` in K/m (e.g. 0.03 for 30 °C/km). For
-[`ve_domain`](@ref)'s `temperature`. Returns a new function.
+A linear geothermal temperature profile, for [`ve_domain`](@ref)'s
+`temperature`.
+
+# Arguments
+
+- `T_ref`: temperature (K) at depth `z_ref`.
+- `z_ref`: reference depth (m, positive down).
+- `gradient`: temperature gradient (K/m), e.g. 0.03 for 30 °C/km.
+
+# Returns
+
+A new function `z -> T_ref + gradient · (z − z_ref)` of depth `z` (m,
+positive down), giving temperature in K.
 """
 geothermal_gradient(; T_ref, z_ref = 0.0, gradient) =
     z -> T_ref + gradient * (z - z_ref)
@@ -267,13 +310,13 @@ end
     _set_face_data!(domain, mesh, columns, coarse, geometry, perm, poro, ntg,
                     fault_flux)
 
-Each coarse face's category, virtual-cell intervals and common depth, and
-the transmissibilities by category (`vehybrid.jl`), with a warning if the
-blocks fall apart.
+Store each coarse face's category, virtual-cell intervals, common depth and
+transmissibility (see `vehybrid.jl`), and warn if the blocks fall apart.
+Returns `domain`.
 
 Modifies: `domain` (sets `:face_category`, `:face_intervals`, `:face_depth`
 on `Faces()`, and `:transmissibilities` unless every face is continuous
-VE–VE). The other arguments are only read.
+VE–VE).
 """
 function _set_face_data!(domain, mesh, columns, coarse, geometry, perm, poro, ntg,
                          fault_flux)
@@ -298,42 +341,41 @@ end
 """
     VEBoundarySides
 
-Lateral boundary sides of the VE columns — the counterpart of the boundary
-edges of MRST's top-surface grid. One entry per (column, side):
+The outer lateral boundary sides of the VE columns, one entry per (column,
+side) — the counterpart of the boundary edges of co2lab's top-surface grid.
+Made by [`ve_boundary_sides`](@ref); boundary conditions are set on them
+([`ve_boundary_conditions`](@ref)).
 
-- `column`: the column (coarse cell)
-- `direction`: lateral direction of the side, 1..4 = `:left`, `:right`,
-  `:lower`, `:upper` (Jutul's direction tags: i−, i+, j−, j+)
-- `edge_depth`: caprock depth along the side — mean depth of the two top-face
-  nodes bounding it (MRST's `Gt.faces.z`, but without MRST's averaging of
-  nodes across pillar offsets); for a fine cell of a hybrid grid, the depth
-  of the side's centroid
-- `edge_midpoint`: (x, y) midpoint of that top edge (a fine cell: of the
-  side's centroid)
-- `area`, `centroid`, `normal`: aggregate of the column's lateral boundary
-  fine faces on this side (outward unit normal)
+# Fields
+
+- `direction`: 1..4 = `:left`, `:right`, `:lower`, `:upper` (Jutul's
+  direction tags: logical i−, i+, j−, j+).
+- `edge_depth`: caprock depth along the side, the mean depth of the two
+  top-face nodes bounding it (co2lab's `Gt.faces.z`, without co2lab's
+  averaging of nodes across pillar offsets). For a fine cell of a hybrid
+  grid: the depth of the side's centroid.
+- `edge_midpoint`: (x, y) midpoint of that top edge (fine cell: of the side's
+  centroid).
+- `area`, `centroid`, `normal`: aggregate of the side's fine boundary faces.
 - `half_trans`: two-point half transmissibility from the column's centroid to
-  the side, `k·A·(c·n)/|c|²` — the same formula family as the `CoarseMesh`'s
-  interior transmissibilities
-- `fine_faces`: boundary-face indices in the 3D mesh
+  the side, `k·A·(c·n)/|c|²`, the same formula family as the `CoarseMesh`'s
+  interior transmissibilities.
 - `across_fault`: a column exists at the logical neighbour position (at any
-  depth), but no fine face connects to it — a fault with complete offset
-  (Johansen: 88 sides, along its main fault and one more). Such a side is an
-  outer side, as in
-  MRST's top-surface grid, but physically sealed: give it a boundary
-  condition only deliberately (MRST's Johansen example keeps its main fault
-  sealing, `makeJohansenVEgrid.m:143-147`).
+  depth), but no fine face connects to it: a fault with complete offset. Such
+  a side is an outer side, as in co2lab's top-surface grid, but physically
+  sealed: give it a boundary condition only deliberately (co2lab's Johansen
+  example keeps its main fault sealed).
 """
 struct VEBoundarySides
-    column::Vector{Int}                        # VE column
+    column::Vector{Int}                        # the column (coarse cell)
     direction::Vector{Int}                     # 1..4: left, right, lower, upper
     edge_depth::Vector{Float64}                # caprock (fine: centroid) depth of side
     edge_midpoint::Vector{NTuple{2, Float64}}  # (x, y) midpoint of the top edge
-    area::Vector{Float64}                      # side area
+    area::Vector{Float64}                      # side area (m²)
     centroid::Vector{NTuple{3, Float64}}       # side centroid
     normal::Vector{NTuple{3, Float64}}         # outward unit normal
     half_trans::Vector{Float64}                # half transmissibility to the side
-    fine_faces::Vector{Vector{Int}}            # 3D boundary faces
+    fine_faces::Vector{Vector{Int}}            # boundary-face indices in the 3D mesh
     across_fault::Vector{Bool}                 # sealed full-offset fault side
 end
 
@@ -343,31 +385,40 @@ Base.length(s::VEBoundarySides) = length(s.column)
     ve_boundary_sides(mesh, columns, domain) -> (sides, unassigned)
 
 The outer boundary sides of the columns: the column sides
-([`ve_column_sides`](@ref)) with no neighbouring column. Everything is
-decided by topology — face directions and cell connectivity — and geometry
-only supplies the quantities.
+([`ve_column_sides`](@ref)) with no neighbouring column, where open
+boundary conditions can be placed. Which sides are outer is decided by
+topology alone (face directions and cell connectivity); geometry only
+supplies the quantities.
 
-Where a column has a neighbour on some side but stands higher (an internal
-caprock step), the exposed part of that side consists of boundary faces of
-the 3D grid, but the side is not an outer boundary: MRST's top-surface grid
-has an interior edge there (on Johansen: 173 such cases; the remaining 456
-sides are exactly MRST's 456 boundary edges). Such faces are returned in
-`unassigned`; they stay no-flow, as in MRST. The same holds for a stacked
-column's side at the depth of a shale missing from the grid.
+# Arguments
 
-`across_fault` is set where the logical neighbour pillar holds any column,
-at any depth: across a fault with complete offset the columns usually do not
-overlap in depth.
+- `mesh`, `columns`: the 3D mesh and its column partition
+  ([`ve_columns`](@ref)).
+- `domain`: the VE `DataDomain` ([`ve_domain`](@ref)); its permeability and
+  block centroids give the half transmissibilities.
 
-The edge of a side is where the column's top face meets the top cell's
-boundary faces on that side: exactly two shared nodes. `mesh`, `columns` and
-`domain` are only read.
+# Returns
 
-Returns `(sides, unassigned)`:
+The tuple `(sides, unassigned)`:
+
 - `sides`: a new [`VEBoundarySides`](@ref), one entry per outer side, ordered
-  by column and, within a column, by direction (left, right, lower, upper);
-- `unassigned`: `Vector{Int}` of boundary-face indices of `mesh` on sides that
-  do have a neighbour (exposed fragments; no-flow), in the same order.
+  by column and, within a column, by direction (left, right, lower, upper).
+- `unassigned`: a new `Vector{Int}` of boundary-face indices of `mesh` on
+  sides that *do* have a neighbour, in the same order. They stay no-flow.
+
+# Notes
+
+- A column that has a neighbour on some side but stands higher (an internal
+  caprock step) exposes boundary faces of the 3D grid there, yet the side is
+  not outer: co2lab's top-surface grid has an interior edge there. Such faces
+  go to `unassigned`, no-flow as in co2lab. Likewise a stacked column's side
+  at the depth of a shale missing from the grid.
+- `across_fault` is set where the logical neighbour pillar holds any column,
+  at any depth: across a fault with complete offset the columns usually do
+  not overlap in depth.
+- A side's top edge is where the column's top face meets the top cell's
+  boundary faces on that side; it must have exactly two nodes (an error is
+  thrown otherwise).
 """
 function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
     cs = ve_column_sides(mesh, columns)
@@ -427,9 +478,10 @@ end
     _side_top_edge(g, bdir, top_nodes, top, d, col) -> (depth, midpoint)
 
 Caprock edge of column `col`'s side in direction `d`: the two nodes shared by
-the top cell's top face (`top_nodes`: a boundary face, or for a column under
-another block the interior face to the cell above) and its boundary faces on
-that side. Returns their mean depth and (x, y) midpoint.
+the top cell `top`'s top face (`top_nodes`: a boundary face, or for a column
+under another block the interior face to the cell above) and its boundary
+faces on that side. Returns their mean depth and (x, y) midpoint; throws if
+there are not exactly two such nodes.
 """
 function _side_top_edge(g, bdir, top_nodes, top, d, col)
     side_nodes = Set{Int}()
@@ -446,8 +498,8 @@ function _side_top_edge(g, bdir, top_nodes, top, d, col)
     return ((Xa[3] + Xb[3]) / 2, ((Xa[1] + Xb[1]) / 2, (Xa[2] + Xb[2]) / 2))
 end
 
-# Aggregate one side's fine faces fs: area, centroid, outward unit normal, and
-# the two-point half transmissibility k·A·(c·n)/|c|² from the column centroid.
+# One side's fine faces fs aggregated: (area, centroid, outward unit normal,
+# two-point half transmissibility k·A·(c·n)/|c|² from the column centroid)
 function _side_aggregate(g, fs, perm, col_centroid)
     A = sum(g.ba[f] for f in fs)
     # area-weighted centroid and normal of the fine faces
