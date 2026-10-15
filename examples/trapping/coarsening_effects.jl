@@ -5,7 +5,7 @@
 # the caprock; the small ridges and domes that divert CO2 and trap it are the
 # first to go.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/coarsening_effects.jl
+#   julia --project=examples examples/trapping/coarsening_effects.jl
 #
 # Plotting backend: GLMakie (a window per figure, 3D views rotatable with the
 # mouse; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie

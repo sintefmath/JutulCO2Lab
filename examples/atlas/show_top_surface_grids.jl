@@ -4,7 +4,7 @@
 # (Gt) for this; JutulCO2Lab keeps the 3D mesh and groups its cells into
 # columns (VEColumns), from which the VE domain and the top surface follow.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/atlas/show_top_surface_grids.jl
+#   julia --project=examples examples/atlas/show_top_surface_grids.jl
 #
 # Plotting backend: GLMakie (a window per figure; close it to continue) by
 # default; JUTULCO2LAB_BACKEND=CairoMakie writes the figures to files instead.
@@ -69,7 +69,7 @@ println("after ve_trim: ", number_of_cells(mesh), " cells in ",
         number_of_columns(columns), " columns")
 
 # Alternatively the part below a hole becomes a column of its own, in the same
-# pillar ("stacked"); such domains need the hybrid model of roadmap Stage 12.
+# pillar ("stacked"), connected to its neighbours by the transition flux.
 untrimmed = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(section(.!cut))
 stacked, _ = ve_columns(untrimmed; below_holes = :stack)
 println("with below_holes = :stack: ", number_of_columns(stacked), " columns")

@@ -1,8 +1,7 @@
-# Comparisons of the trapping inventory with co2lab-ve (roadmap Stage 9 item 2),
-# used by the package tests (runtests.jl) and the Stage 9 gate. The states of
-# a JutulCO2Lab run (scripts/inventory_case.jl, inventory_case.mat) are given to
-# co2lab's massTrappingDistributionVE (scripts/mrst_dump_inventory.m,
-# inventory_mrst.mat) and to trapping_inventory here: identical input.
+# Comparisons of the trapping inventory with co2lab-ve, used by the package
+# tests (runtests.jl). The states of a JutulCO2Lab run (inventory_case.mat) are
+# given to co2lab's massTrappingDistributionVE (inventory_mrst.mat) and to
+# trapping_inventory here: identical input.
 
 # The model, fluid and traps of the exported case, rebuilt from its settings
 # (the inventory needs no wells or forces)
@@ -62,12 +61,11 @@ function _inventory_consistency(c)
 end
 
 # End to end: co2lab's own run of the case on Julia's geometry
-# (scripts/mrst_ref_inventory.m, inventory_mrst_run.mat) and its inventory of
-# its own states, against the Julia run and its inventory. Tolerances as the
-# Stage 4 gate's for runs on identical input (agreed 2026-09-26): 1e-8 —
-# relative for pressures, absolute for saturations and rs, relative to the
-# injected mass for masses. The injector's BHP is a known well-model
-# difference (researcher, 2026-09-28): JutulDarcy converts the injected
+# (inventory_mrst_run.mat) and its inventory of its own states, against the
+# Julia run and its inventory. Tolerances as for other runs on identical input:
+# 1e-8 — relative for pressures, absolute for saturations and rs, relative to
+# the injected mass for masses. The injector's BHP is a known well-model
+# difference: JutulDarcy converts the injected
 # CO2's surface rate to reservoir volume at the wellbore pressure, co2lab at
 # the cell pressure, so with compressible CO2 the drawdown differs by c_G
 # times the drawdown; the check is that the difference stays within that.

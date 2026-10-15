@@ -3,7 +3,7 @@
 # small synthetic one, the Johansen formation of the CO2 Storage Atlas and an
 # IGEMS surface.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/show_traps_interactively.jl
+#   julia --project=examples examples/trapping/show_traps_interactively.jl
 #
 # In the viewer (GLMakie, the default; close a window to go on to the next):
 # - left click on the caprock: the trap CO2 injected there rises to, and the
@@ -18,14 +18,13 @@
 #   above (the picking works best from above), the starting view, and the
 #   selected trap alone (its fill red, its ceiling blue).
 # JUTULCO2LAB_BACKEND=CairoMakie writes the viewers' first views to files.
-# co2lab's "Setup VE simulation" button is roadmap Stage 11 item 3.
 
 using JutulCO2Lab
 backend = Symbol(get(ENV, "JUTULCO2LAB_BACKEND", "GLMakie"))
 @eval using $backend
 
 # co2lab's choice (useCell = true); its viewer runs the node-based method
-# whatever it is asked (co2lab-issues.org), ours the one asked for
+# whatever it is asked, ours the one asked for
 method = :cell
 
 # ------------------------------ 1. A synthetic grid ---------------------------

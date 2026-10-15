@@ -1,15 +1,14 @@
-# The capillary fringe in layered rock (LayeredFringe, roadmap Stage 6): CO2
+# The capillary fringe in layered rock (LayeredFringe): CO2
 # injected into a sloping aquifer whose permeability changes from layer to
 # layer, and whose rock holds CO2 in a capillary fringe above the brine.
 # co2lab can model the fringe or the layers, but not both at once; here the
 # combined model runs next to the two single-effect ones and a 3D reference.
 #
-#   julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/layered_fringe.jl
+#   julia --project=examples examples/layered_fringe.jl
 #
 # Self-contained (the grid is built here). The fluid is described once at the
 # fine scale (FineScaleFluid); the VE fluid is built from it, and so is the 3D
-# reference (every cell fine, JutulCO2Lab's hybrid machinery). Background:
-# analysis/stage6-upscaling-proposal.md, analysis/stage6-layered-vs-3d-2026-10-04.txt.
+# reference (every cell fine, JutulCO2Lab's hybrid machinery).
 #
 # Plotting backend: GLMakie (a window per figure) by default;
 # JUTULCO2LAB_BACKEND=CairoMakie writes the figures to files instead.

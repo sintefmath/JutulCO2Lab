@@ -22,11 +22,18 @@ Directory holding the Atlas data sets (`CO2Atlas`, `CO2AtlasNorwegianSea`,
 `CO2AtlasBarentsSea`), and the Sleipner and Johansen data.
 
 Returns the environment variable `CO2LAB_ATLAS_DATA` if set, otherwise
-`mrst-data` next to the project directory.
+`mrst-data` next to the package's directory, or next to the directory
+containing it (the package inside another project) if only that exists.
 """
-atlas_data_directory() =
-    get(ENV, "CO2LAB_ATLAS_DATA", normpath(joinpath(@__DIR__, "..", "..", "..", "..",
-                                                    "mrst-data")))
+function atlas_data_directory()
+    haskey(ENV, "CO2LAB_ATLAS_DATA") && return ENV["CO2LAB_ATLAS_DATA"]
+    # the package's directory is two levels up from src/atlas
+    pkg = joinpath(@__DIR__, "..", "..")
+    candidates = [normpath(joinpath(pkg, "..", "mrst-data")),
+                  normpath(joinpath(pkg, "..", "..", "mrst-data"))]
+    found = findfirst(isdir, candidates)
+    return candidates[something(found, 1)]
+end
 
 """
     atlas_formation_names(region = :all) -> Vector{String}

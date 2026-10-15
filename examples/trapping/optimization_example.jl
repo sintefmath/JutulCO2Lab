@@ -4,7 +4,7 @@
 # whole tree as CO2 spills onwards. The trees are ranked by volume, and the
 # best single injection point is found.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/optimization_example.jl
+#   julia --project=examples examples/trapping/optimization_example.jl
 #
 # Plotting backend: GLMakie (a window per figure, 3D views rotatable with the
 # mouse; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie

@@ -2,7 +2,7 @@
 # the raw maps, the formations' outlines on a map of Norway with the shelf's
 # wells, and the formations in 3D.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/atlas/show_co2_atlas.jl
+#   julia --project=examples examples/atlas/show_co2_atlas.jl
 #
 # Plotting backend: GLMakie (interactive windows) by default; set
 # JUTULCO2LAB_BACKEND=CairoMakie to write the figures to files instead (no

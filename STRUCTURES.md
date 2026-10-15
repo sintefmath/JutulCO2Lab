@@ -7,18 +7,16 @@ them). Jutul/JutulDarcy supertypes are in brackets. Exported names are in
 **bold**; the others are internal.
 
 Keep this file current: update it in the same commit as any change that adds,
-removes, renames or changes the meaning of a structure (see `../CLAUDE.md`).
+removes, renames or changes the meaning of a structure (see `CLAUDE.md`).
 
 The *File* column gives file names only: sections A–E are in `src/ve/`,
 G in `src/atlas/`, H in `src/trapping/`, F in `src/`.
-
-*Last updated: 2026-09-30.*
 
 ## A. Grid and domain
 
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
-| 1 | **`VEColumns`** | `vegrid.jl` | Column partition of the 3D mesh: `cells` (per column, top to bottom), `pos`, `partition` (fine cell → column), `column_ij` (per column, its pillar's logical `(i, j)`; repeated for a pillar holding several columns), `is_ve` (per column: a VE block, or `false` for one fine 3D cell of a hybrid grid, Stage 12), `sealed` and `leaky` (the interior faces given as sealed, and as leaky: cut into blocks, flow kept). A column is a vertically connected stretch of one pillar — in pure VE usually the whole pillar; pillars are cut where consecutive cells share no face other than sealed or leaky ones, and VE stretches where fine cells interrupt them | the 3D mesh (`ve_columns`, with `below_holes = :discard` or `:stack`, `sealed_faces`, `leaky_faces`, `is_ve`) |
+| 1 | **`VEColumns`** | `vegrid.jl` | Column partition of the 3D mesh: `cells` (per column, top to bottom), `pos`, `partition` (fine cell → column), `column_ij` (per column, its pillar's logical `(i, j)`; repeated for a pillar holding several columns), `is_ve` (per column: a VE block, or `false` for one fine 3D cell of a hybrid grid), `sealed` and `leaky` (the interior faces given as sealed, and as leaky: cut into blocks, flow kept). A column is a vertically connected stretch of one pillar — in pure VE usually the whole pillar; pillars are cut where consecutive cells share no face other than sealed or leaky ones, and VE stretches where fine cells interrupt them | the 3D mesh (`ve_columns`, with `below_holes = :discard` or `:stack`, `sealed_faces`, `leaky_faces`, `is_ve`) |
 | 2 | *column geometry* (NamedTuple) | `vegrid.jl` | `(z_top, H, dz, z, dx, dy, z_cell)`: caprock depth, height, lateral extent per column; thickness, cumulative depth, centroid depth per fine cell | mesh, `VEColumns` (`ve_column_geometry`) |
 | 3 | *averaged rock* (NamedTuple) | `vedomain.jl` | `(perm, poro, ntg)` per column, thickness-weighted; perm from x only | `VEColumns`, `dz` of 2 (`ve_average_rock`) |
 | 4 | *VE domain* (NamedTuple) | `vedomain.jl` | `(domain, coarse, geometry, rock)`: the `DataDomain` on a `CoarseMesh` (with `:column_height`, `:rugosity`, optional `:temperature` (K, per column at the caprock; `geothermal_gradient` gives a function of depth for it), `:is_ve` (1's `is_ve`), `:pillar_columns` (columns in the pillar), `:reference_depth` (the gravity and pressure datum: a VE block's caprock, a fine cell's centroid) per column; on faces `:gdz` (VE blocks from their caprock, fine cells from their centroid), `:face_category` (0–5, constants below), `:face_intervals` (4 × faces: each side's cells at a transition face, below its block's top; `NaN` otherwise), `:face_depth` (a transition's common depth; `NaN` otherwise); `:transmissibilities` when some face is not continuous VE–VE: 0 sealed, the coarse mesh's for continuous VE–VE, else summed from the fine grid's), that `CoarseMesh`, 2 and 3 | mesh, `VEColumns`, 2, 3, caprock rugosity, `fault_flux` (`ve_domain`) |
@@ -45,21 +43,21 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
-| 7b | **`VerticalModel`** (abstract) | `ve_fluid.jl` | how a column's fine-scale profile follows from its upscaled state (Stage 6 item 0): heights `(h, h_max)`, relperm, fine-scale saturations and the inventory's split, by dispatch (`_column_heights`, `_column_relperm`, `_fine_saturations`, `_category_saturations`); `Pc = Δρ·g·h` for all. Given to the fluid as a specification (grid-independent, or built for the grid: 7f); `_vertical_model(spec, domain)` builds the column-specific object (the specification itself when there is no column data, or when it is already built for the grid) | — |
+| 7b | **`VerticalModel`** (abstract) | `ve_fluid.jl` | how a column's fine-scale profile follows from its upscaled state: heights `(h, h_max)`, relperm, fine-scale saturations and the inventory's split, by dispatch (`_column_heights`, `_column_relperm`, `_fine_saturations`, `_category_saturations`); `Pc = Δρ·g·h` for all. Given to the fluid as a specification (grid-independent, or built for the grid: 7f); `_vertical_model(spec, domain)` builds the column-specific object (the specification itself when there is no column data, or when it is already built for the grid) | — |
 | 7c | **`SharpInterface`** [7b] | `ve_fluid.jl` | co2lab's `'sharp_interface_simple'`: sharp interface in a homogeneous column, residual zone between `h` and `h_max`, accretion layer from the rugosity; no fields | — |
 | 7c2 | `_DensityFreeModel` (type alias) | `ve_fluid.jl` | `Union{SharpInterface, SharpInterfaceIntegrated}`: vertical models whose heights and relperm read no densities; their `PlumeHeights` and `VERelPerm` updates have no density dependency | 7c, 7f |
 | 7d | **`CapillaryFringeTable{F, K}`** [7b] | `capillary_fringe.jl` | co2lab's `'P-scaled table'` specification: fine-scale `invPc3D` (function, or co2lab's `(C, alpha)`, scaled by the tallest column), `kr3D` (function or Corey exponent), `tolerance` (the adaptive table's relative accuracy), `tip_saturation` (below it Pc is linear in the free saturation), `touched_saturation` (S_t, default 1e-3: below this maximum CO2 saturation the depth of brine touched by CO2, which rate-driven dissolution keeps saturated, is linear in the saturation; the exact depth grows like √S at the plume tip, and Newton then cycled between dissolving all free CO2 and none), `leverett` (co2lab's `'P-K-scaled table'`, corrected: `invPc3D` a J-curve of `pc/kscale`), `surface_tension`; hysteresis co2lab's `'endpoint scaling'` | — |
 | 7e | `PScaledTable` [7b] | `capillary_fringe.jl` | 7d built for a domain and fluid: a cubic Hermite table on adaptive nodes `p` (0 to co2lab's `Pmax`), integrals `SP` (CO2 saturation) and `krP` (CO2 relperm) with their derivatives `s` and `kr` at the nodes; the fine-scale curve `invpc` (reconstruction); `kscale` per column (Leverett factor σ√(φ/k), ones without; the axis is then J); `tip` (the tip saturation); `entry` (the entry pressure or J, 0 without; brine is touched only down to `h_max` less the entry height); `touched` (7d's `touched_saturation`, carried into the table) | 7d, the domain's column heights (and upscaled porosity and permeability with Leverett scaling), the fluid's residual brine and reference densities (`_vertical_model`) |
 | 7f | **`SharpInterfaceIntegrated`** [7b] | `sharp_interface_integrated.jl` | co2lab's `'sharp_interface_integrated'`: sharp interface in a column whose rock varies with depth. Per column (`pos`), at its fine-cell boundaries top first: depth below the caprock `z`, pore volume above it `V`, x-permeability integral `K`. Heights by exact inversion of `V`; CO2 relperm by `K` (x only, as co2lab); brine relperm zoned by `K`; touched brine and inventory split by pore volume. Built for one grid (`SharpInterfaceIntegrated(mesh, columns; poro, perm_x)`) | the 3D mesh, columns (1), column geometry (3), fine porosity and x-permeability |
 | 7h | **`HysteresisLaw`** (abstract), **`EndpointScaling`**, **`FixedResidual`** [7h] | `hysteresis_law.jl` | how residual CO2 depends on the saturation history, VE blocks (`LayeredFringe`) and fine cells alike: `EndpointScaling` co2lab's default (residual `r_g·s_max/(1 − r_w)` at each depth, linear in `(s, s_max)`); `FixedResidual` a fixed residual capped by the history (each depth follows the drainage curve down to `min(r_g, s_max)` and stays there; co2lab's `'fixed residual'` uncapped, `co2lab-issues.org`). Fine cells: `_fine_kr_saturation`, `_fine_pc_saturation` | — |
-| 7f2 | **`LayeredFringe{W, L}`** [7b] | `layered_fringe.jl` | the capillary fringe in a column whose rock varies with depth (Stage 6, the combined model; not in co2lab): `cells` (7f: the columns' cell boundaries and cumulative pore volume and x-permeability), `fringes` (7d per rock type: curves and table settings; physical `invPc3D`, `nothing` for no capillarity), `krw3D` (per rock type: brine relperm, a function or `:linear`), `cell_type` (rock type of each cell of `cells`), `law` (7h, the hysteresis law), `tip_height` (the plume tip as a fraction of the column height: below the saturation of a profile reaching that far below the entry height, the height is linear in the saturation). Built for a grid (`LayeredFringe(mesh, columns; ..., rock_type, hysteresis)`); with the caprock's rugosity `dh`, the relief's CO2 immobile and both relperms integrated from `dh` | 7f, 7d, 7h |
+| 7f2 | **`LayeredFringe{W, L}`** [7b] | `layered_fringe.jl` | the capillary fringe in a column whose rock varies with depth (the fringe and the layers together; not in co2lab): `cells` (7f: the columns' cell boundaries and cumulative pore volume and x-permeability), `fringes` (7d per rock type: curves and table settings; physical `invPc3D`, `nothing` for no capillarity), `krw3D` (per rock type: brine relperm, a function or `:linear`), `cell_type` (rock type of each cell of `cells`), `law` (7h, the hysteresis law), `tip_height` (the plume tip as a fraction of the column height: below the saturation of a profile reaching that far below the entry height, the height is linear in the saturation). Built for a grid (`LayeredFringe(mesh, columns; ..., rock_type, hysteresis)`); with the caprock's rugosity `dh`, the relief's CO2 immobile and both relperms integrated from `dh` | 7f, 7d, 7h |
 | 7f3 | `LayeredFringeModel{T, W, L}` [7b] | `layered_fringe.jl` | 7f2 built for a domain and fluid: `cells` (7f), `tables` (7e per rock type, kscale ones), `krw3D`, `cell_type`, the residual saturations `res_water`, `res_gas`, `law` (7h), `p_res` (per rock type: the capillary pressure where the drainage saturation reaches `r_g`, the fixed residual's breakpoints), `tip_height` (from 7f2; the tip `(h_t, S_t)` per column by direct evaluation, `_tip`). Heights and relperms by the per-cell sum over the column's cells, each cell with its rock type's table, at the current Δρ | 7f, 7e, 7h |
-| 7f4 | *Interval integrals* (NamedTuple) | `layered_fringe.jl` | `_interval_integrals`'s `(free, max, co2, kfree, kmax, krG, krW, pv, kz)`: over a depth interval of a column, the free, maximum and actual (by the law, 7h) profiles' CO2 saturation times pore volume, the free and maximum profiles' CO2 saturation times `k_x dz`, the CO2 and brine relperms times `k_x dz`, the interval's pore volume and `∫ k_x dz`; the column's quantities over `[0, H]` (and Stage 12's transition flux over parts) | 7f3 |
+| 7f4 | *Interval integrals* (NamedTuple) | `layered_fringe.jl` | `_interval_integrals`'s `(free, max, co2, kfree, kmax, krG, krW, pv, kz)`: over a depth interval of a column, the free, maximum and actual (by the law, 7h) profiles' CO2 saturation times pore volume, the free and maximum profiles' CO2 saturation times `k_x dz`, the CO2 and brine relperms times `k_x dz`, the interval's pore volume and `∫ k_x dz`; the column's quantities over `[0, H]` (and the transition flux's over parts) | 7f3 |
 | 7g | **`PhaseTable{F}`** | `pvt_tables.jl` | a tabulated phase property `(p, T) -> value` (`f`) with its `source` (`:jutuldarcy`: JutulDarcy's CO2–brine tables, `jutuldarcy_property_tables`, CSP11 by default, Salo 2024 for salinity; any function of p and T, e.g. co2lab's sampled tables in `scripts/co2lab_tables.jl` for the comparisons with co2lab) | JutulDarcy's tables, or any (p, T) function |
 | 7i | **`RockCurves{P, K, W}`** | `fine_fluid.jl` | one rock type's fine-scale curves: `invPc3D` (brine saturation of capillary pressure, or `nothing`), `kr3D` (CO2 relperm, or Corey exponent), `krw3D` (brine relperm, or `:linear`) | — |
-| 7j | **`FineScaleFluid{L}`** | `fine_fluid.jl` | the fluid at the fine scale (Stage 12): `rock_types` (7i), `residual`, `hysteresis` (7h), `fine_hysteresis` (`:law` or `:killough` for fine cells), `options` (co2lab_ve_fluid's PVT and dissolution options). `co2lab_ve_fluid(fluid, mesh, columns; ..., rock_type, dis_rate)` builds the VE fluid (8, vertical model 7f2, or 7f without capillarity) carrying it as `fine` | 7h, 7i |
+| 7j | **`FineScaleFluid{L}`** | `fine_fluid.jl` | the fluid at the fine scale (hybrid grids, 3D references): `rock_types` (7i), `residual`, `hysteresis` (7h), `fine_hysteresis` (`:law` or `:killough` for fine cells), `options` (co2lab_ve_fluid's PVT and dissolution options). `co2lab_ve_fluid(fluid, mesh, columns; ..., rock_type, dis_rate)` builds the VE fluid (8, vertical model 7f2, or 7f without capillarity) carrying it as `fine` | 7h, 7i |
 | 7k | `FineCellFluid{K, I, L}` | `fine_fluid.jl` | a hybrid grid's fine cells' functions: per rock type the CO2 relperm (drainage, imbibition from 1 − r_w), brine relperm and capillary pressure (of the CO2 saturation, the entry pressure at none) as tables; the rock type per domain cell (0: VE block); the law, `killough`, `res_water`, `res_gas` | 7j, 4's domain |
-| 8 | **`CO2LabVEFluid{M, R, U, F}`** | `ve_fluid.jl` | co2lab's VE fluid settings (makeVEFluid's fluid options; `fine`: a hybrid grid's fine-scale fluid `(fluid, rock_type)`, 7j, or `nothing`): the vertical model (7b, type parameter `M`; makeVEFluid's relperm model), residual saturations, endpoints, reference densities (the scale of `b`; for tabulated densities JutulDarcy's surface values by default), densities and viscosities per phase (`rho_pvt`, `mu_pvt`, types `R`, `U`: `(c, p_ref)` linear/constant or a `PhaseTable` 7g; tables by default, Stage 7), dissolution (`dissolution`, `dis_rate`, `dis_max` the saturated `rs` in reference volumes, i.e. a mass ratio `dis_max·ρ_ref,CO2/ρ_ref,brine`; `dis_rate` 0 or `Inf` is instantaneous). Rugosity is in 4, rock compressibility in the model (20) | nothing (`co2lab_ve_fluid`); supplies the constants of the variables in C |
+| 8 | **`CO2LabVEFluid{M, R, U, F}`** | `ve_fluid.jl` | co2lab's VE fluid settings (makeVEFluid's fluid options; `fine`: a hybrid grid's fine-scale fluid `(fluid, rock_type)`, 7j, or `nothing`): the vertical model (7b, type parameter `M`; makeVEFluid's relperm model), residual saturations, endpoints, reference densities (the scale of `b`; for tabulated densities JutulDarcy's surface values by default), densities and viscosities per phase (`rho_pvt`, `mu_pvt`, types `R`, `U`: `(c, p_ref)` linear/constant or a `PhaseTable` 7g; tables by default), dissolution (`dissolution`, `dis_rate`, `dis_max` the saturated `rs` in reference volumes, i.e. a mass ratio `dis_max·ρ_ref,CO2/ρ_ref,brine`; `dis_rate` 0 or `Inf` is instantaneous). Rugosity is in 4, rock compressibility in the model (20) | nothing (`co2lab_ve_fluid`); supplies the constants of the variables in C |
 
 ## C. Jutul variables and equations, in the order they are computed
 
@@ -74,11 +72,11 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 | 12b | **`DissolvedOrFreeCO2`** [ScalarVariable, values JutulDarcy's `BlackOilX`] | `instant_dissolution.jl` | co2lab's switching unknown `:CO2X` for instantaneous dissolution: `rs` where brine is undersaturated, `sG` where saturated; co2lab's update rule | — |
 | 12c | `InstantGasSaturation`, `InstantDissolvedGasRatio` [ScalarVariable] | `instant_dissolution.jl` | secondary `sG`, `Rs` from 12b (instantaneous dissolution) | 12b |
 | 13 | `PlumeHeights{M, V}` [VectorVariables] | `ve_fluid.jl` | secondary: row 1 `h`, row 2 `h_max` — capillary heights `Pc/(Δρ·g)`, the plume thickness for a sharp interface — from the column-specific vertical model (field `vertical`); field `is_ve` (`nothing` = all VE; 0 in fine cells) | 11, 10, 9; also 16 except for the sharp interfaces (7c2) |
-| 14 | `VERelPerm{M, V, F}` [AbstractRelativePermeabilities] | `ve_fluid.jl` | relative permeabilities from the vertical model (field `vertical`); endpoints `krw`, `krg`; residual saturations `res_water`, `res_gas`; fields `is_ve` and `fine` (7k: fine cells' relperm at their saturations, Stage 12). Formerly `VESharpInterfaceRelPerm` | 13, 9, 9b, 7k; also 11, 10 and 16 except for the sharp interfaces (7c2) without fine cells |
+| 14 | `VERelPerm{M, V, F}` [AbstractRelativePermeabilities] | `ve_fluid.jl` | relative permeabilities from the vertical model (field `vertical`); endpoints `krw`, `krg`; residual saturations `res_water`, `res_gas`; fields `is_ve` and `fine` (7k: fine cells' relperm at their saturations). Formerly `VESharpInterfaceRelPerm` | 13, 9, 9b, 7k; also 11, 10 and 16 except for the sharp interfaces (7c2) without fine cells |
 | 15 | **`LinearShrinkage`** [PhaseVariables] | `co2lab_fluid.jl` | shrinkage factors `b` (linear or constant densities) | pressure |
 | 15b | `PVTShrinkage{R}` [PhaseVariables] | `pvt_tables.jl` | shrinkage factors `b = ρ(p, T)/ρ_ref` with any tabulated density (7g) | pressure, the `Temperature` parameter (JutulDarcy's; from `domain[:temperature]`, in wells their perforated column's, 30 °C default) |
 | 16 | `BlackOilDensities` [PhaseVariables] | `co2lab_fluid.jl` | phase mass densities | 15 (and 12) |
-| 17 | `VECapillaryPressure{V, F}` [AbstractCapillaryPressure] | `ve_fluid.jl` | `pcWG = Δρ·g·h`; fields `is_ve`, `fine` (7k: fine cells' capillary pressure at their saturations, Stage 12) | 13, 16, 7k |
+| 17 | `VECapillaryPressure{V, F}` [AbstractCapillaryPressure] | `ve_fluid.jl` | `pcWG = Δρ·g·h`; fields `is_ve`, `fine` (7k: fine cells' capillary pressure at their saturations) | 13, 16, 7k |
 | 18 | `LinearViscosities{P}` [PhaseVariables] | `ve_fluid.jl` | linear or constant viscosities (used by `setup_co2lab_model`); `P = true` (reservoir): at the phase pressures as co2lab, CO2 at `p + pcWG`; `P = false` (wells): at `p` | pressure; with `P = true` also 17 |
 | 18b | `PVTViscosities{U, P}` [PhaseVariables] | `pvt_tables.jl` | viscosities with any tabulated one (7g); `P` as 18 | pressure, `Temperature`; with `P = true` also 17 |
 | 19 | **`ConstantViscosities`** [PhaseVariables] | `co2lab_fluid.jl` | placeholder default, replaced by 18 in `setup_co2lab_model` | — |
@@ -89,7 +87,7 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 | 22c | **`HysteresisEquation`** [JutulEquation] | `co2lab_fluid.jl` | co2lab's `sGmax − max(sGmax0 − depletion, sG) = 0` per cell (hysteresis on); `dissolution`: `nothing`, 22 (depletion = its transfer) or 22b; `faces` as 22 | 10, 11, 22 or 22b |
 | 22d | `DissolutionWellSupplyCT` [AdditiveCrossTerm] | `co2lab_fluid.jl` | well → reservoir cross term on 22 (and 22c): the well's CO2 inflow counted as dissolution supply in its perforated cells | 22, 22c, the well's state |
 
-| 22e | **`EndpointScalingHysteresis`** [JutulDarcy `AbstractHysteresis`] | `fine_hysteresis.jl` | co2lab's endpoint-scaling hysteresis for fine 3D cells (JutulDarcy's `hysteresis_g`): the CO2 relperm is the drainage curve at the free saturation; `res_water`, `res_gas` (Stage 6, 3D references; Stage 12's fine cells) | `_free_saturation` (7d's) |
+| 22e | **`EndpointScalingHysteresis`** [JutulDarcy `AbstractHysteresis`] | `fine_hysteresis.jl` | co2lab's endpoint-scaling hysteresis for fine 3D cells (JutulDarcy's `hysteresis_g`): the CO2 relperm is the drainage curve at the free saturation; `res_water`, `res_gas` (3D references, hybrid grids' fine cells) | `_free_saturation` (7d's) |
 | 22f | **`FreeSaturationCapillaryPressure{F}`** [JutulDarcy `AbstractCapillaryPressure`] | `fine_hysteresis.jl` | fine 3D cells' capillary pressure at the free CO2 saturation (`pc` of the CO2 saturation; `res_water`, `res_gas`), zero for residual CO2 only, as the VE models; reads JutulDarcy's `MaxSaturations` | 22e |
 
 ## D. System and model types
@@ -114,7 +112,7 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 Constants: `_WELL_CONSTANT_RATIO`, `_WELL_CONSTANT_VALUE` (MRST's
 `wellConstant` table, `vewells.jl`).
 
-## G. CO2 Storage Atlas (roadmap Stage 5), independent of A–E
+## G. CO2 Storage Atlas, independent of A–E
 
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
@@ -143,7 +141,7 @@ layers and download address of the two NPD models, `johansen.jl`),
 `_JOHANSEN_VE_FILES` (the sector-model files `johansen_grid_section` reads)
 and `_JOHANSEN_ZIP` (download address of the whole Johansen data set).
 
-## H. Trapping analysis (roadmap Stage 8), on A
+## H. Trapping analysis, on A
 
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
@@ -164,7 +162,7 @@ Sheets (several VE blocks per pillar):
 | 64 | *Sheets* (NamedTuple) | `trapping/sheets.jl` | `(sheet, nsheets, top)`: per column its sheet (0: fine cell) — a contiguous surface of connected top faces of VE columns (top cells sharing a face, different pillars) — the number of sheets, per sheet whether all its columns are the first block of their pillar (the formation's top) | mesh, 1 (`ve_sheets`) |
 | 65 | *Sheet spill targets* (`Vector` of NamedTuples) | `trapping/sheets.jl` | per open boundary edge of a trap surface (47): `(edge, polygon, block, target, target_sheet)` — the edge, its polygon and column, the column CO2 reaches across it and up the neighbouring pillar (0: leaves the domain), that column's sheet (0: none) | mesh, 1, 47, 64 (`sheet_spill_targets`) |
 
-## I. Trapping inventory (roadmap Stage 9 item 2), on A–E and H
+## I. Trapping inventory, on A–E and H
 
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
@@ -173,7 +171,7 @@ Sheets (several VE blocks per pillar):
 
 Constants: **`TRAPPING_CATEGORIES`** (the names of 55, in order; exported).
 
-## J. Interactive demos (roadmap Stage 11), on H; Makie extension
+## J. Interactive demos, on H; Makie extension
 
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
@@ -182,7 +180,7 @@ Constants: **`TRAPPING_CATEGORIES`** (the names of 55, in order; exported).
 Constants (extension, internal): `_TAB20` (Makie's `tab20` palette, the
 traps' colours), `_PIE_COLOURS` (the pie's three colours, co2lab's).
 
-## K. Injection scenarios (roadmap Stage 11 item 4), on A–E
+## K. Injection scenarios, on A–E
 
 | # | Name | File | What it is | Built from / depends on |
 |---|---|---|---|---|
@@ -202,5 +200,5 @@ Constants: `MRST_YEAR` (MRST's year, 365.2425 days, in seconds; internal).
 | 35 | `CheckResult` | `oracle.jl` | outcome of one comparison | 34 |
 | 36 | **`OracleReport`** | `oracle.jl` | titled list of results plus provenance | 35, 33; records the MRST commit from 32 |
 
-Constants: **`STAGE1_TOL`** (Stage 1 gate tolerances, 34), `TRACKED_PACKAGES`
+Constants: **`STAGE1_TOL`** (tolerances of the grid comparisons with MRST, 34), `TRACKED_PACKAGES`
 (Jutul and JutulDarcy, for provenance).

@@ -1,16 +1,15 @@
-# A hybrid grid (roadmap Stage 12): fine 3D cells around the injector, where
+# A hybrid grid: fine 3D cells around the injector, where
 # the CO2 is not yet in vertical equilibrium, VE columns everywhere else. The
 # same sloping, layered aquifer with a capillary fringe as
 # layered_fringe.jl, run three ways: pure VE, hybrid, and 3D (every cell
 # fine) as the reference.
 #
-#   julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/hybrid_grid.jl
+#   julia --project=examples examples/hybrid_grid.jl
 #
 # Self-contained (the grid is built here). One fine-scale fluid
 # (FineScaleFluid) serves the VE columns (LayeredFringe, its upscaling) and
 # the fine cells alike. Where a VE column meets a fine cell, the flux compares
-# both sides' phase pressures at a common depth (a "virtual cell"; design note
-# analysis/stage12-transition-flux-design.md).
+# both sides' phase pressures at a common depth (a "virtual cell").
 #
 # Fine cells must resolve the plume vertically: a fine cell taller than the
 # CO2 layer smears it, and its low CO2 relperm then holds the plume back

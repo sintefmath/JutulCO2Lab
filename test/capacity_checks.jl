@@ -1,6 +1,5 @@
-# The capacity estimate against co2lab-demo's exploreCapacity (roadmap Stage
-# 11 item 2), shared by the package tests and scripts/stage11_capacity_gate.jl.
-# Input: analysis/reference-data/capacity.mat (scripts/mrst_capacity.m).
+# The capacity estimate against co2lab-demo's exploreCapacity, used by the
+# package tests (runtests.jl). Input: the MRST export capacity.mat.
 
 using SparseArrays
 

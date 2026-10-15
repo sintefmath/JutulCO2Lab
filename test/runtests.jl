@@ -39,7 +39,7 @@ function _cp_mesh_pillars(nx, nz, top)
     return JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
 end
 
-# ----------------- Helpers: a stand-in vertical model (Stage 6) -----------------
+# --------------------- Helpers: a stand-in vertical model ---------------------
 
 # The sharp interface's formulas as a model of its own, so that it runs through
 # the generic path that later vertical models use (densities as an input)
@@ -69,7 +69,7 @@ function _ve_case(d)
     return ve, cols, sides
 end
 
-# capfringe_si.mat (scripts/mrst_dump_capfringe_si.m): the sharp-interface half
+# capfringe_si.mat: the sharp-interface half
 # of co2lab's capfringeFigures.m — relperm and pcWG over sG without and with
 # hysteresis, and the reconstructed profile of one state, on its single column.
 function _capfringe_si_vs_mrst(d)
@@ -108,11 +108,11 @@ function _capfringe_si_vs_mrst(d)
     return rep
 end
 
-# mrst_ref_{rate,bhp,src}.mat (scripts/stage2_mrst_comparison.jl): co2lab's
-# sloping aquifer run by MRST on Julia's geometry, same report steps, tight
-# tolerances. With a source term instead of the well, Julia matches to solver
-# precision (measured 5e-10); with the well, to the wellbore-storage
-# difference (measured BHP 1e-5, rate 3e-4, pressure 5e-6, sG 1.3e-5).
+# mrst_ref_{rate,bhp,src}.mat: co2lab's sloping aquifer run by MRST on Julia's
+# geometry, same report steps, tight tolerances. With a source term instead of
+# the well, Julia matches to solver precision (measured 5e-10); with the well,
+# to the wellbore-storage difference (measured BHP 1e-5, rate 3e-4, pressure
+# 5e-6, sG 1.3e-5).
 function _ve_well_vs_mrst_runs(d, ref_rate, ref_bhp, ref_src)
     ve, cols, sides = _ve_case(d)
     g, rho_w = d["gravity"], d["rhow"]
@@ -260,7 +260,7 @@ function _ve_bc_vs_mrst(d)
     check!(rep, "boundary pressure", [b.pressure for b in bcs], d["bc_value"];
            perm = perm, tol = Tolerance(1e-12, 1e-6))
 
-    # our half transmissibility, from the 3D grid (Stage 1 geometry)
+    # our half transmissibility, from the 3D grid
     check!(rep, "half transmissibility", [b.trans for b in own], d["T"];
            perm = perm, tol = Tolerance(5e-3, 0.0))
 
@@ -341,7 +341,7 @@ function _ve_bc_runs(d)
     @test exited[1] > 0
     @test (total + exited[2]) / injected ≈ 1 rtol = 1e-5
 
-    # with dissolution (Stage 4 item 5): CO2 is conserved when brine carries
+    # with dissolution: CO2 is conserved when brine carries
     # its dissolved CO2 across (the default); co2lab's booking has no
     # dissolved part in the exiting CO2
     fl_dis = co2lab_ve_fluid(default_pvt = nothing,
@@ -536,17 +536,18 @@ end
             @test info.dirty === missing
         end
 
-        @testset "Stage 1 tolerances are defined for every gate quantity" begin
+        @testset "grid tolerances (STAGE1_TOL) are defined for every quantity" begin
             for k in (:height, :pore_volume, :transmissibility, :trans_mult, :well_index)
                 @test haskey(STAGE1_TOL, k)
             end
         end
     end
 
-    # VE columns and column geometry against MRST reference data. The .mat
-    # files are generated (scripts/run_mrst_dump_octave.sh, mrst_dump_grids.m,
-    # mrst_dump_holes_case.m) and not versioned, so these skip if absent.
-    refdir = joinpath(@__DIR__, "..", "..", "analysis", "reference-data")
+    # Comparisons with MRST reference dumps (.mat), from the directory in
+    # JUTULCO2LAB_REFERENCE_DATA (default: analysis/reference-data next to the
+    # package's directory); each skips when its dump is missing.
+    refdir = get(ENV, "JUTULCO2LAB_REFERENCE_DATA",
+                 joinpath(@__DIR__, "..", "..", "analysis", "reference-data"))
     iv(x) = x isa Number ? [Int(x)] : Int.(vec(x))
     exact = Tolerance(0.0, 0.0)
     geomtol = Tolerance(1e-12, 1e-9)
@@ -875,7 +876,7 @@ end
         @test dir((3, 4, 5), (4, 4, 9)) == 2                    # i+, across a fault
     end
 
-    @testset "stacked columns and connectivity (Stage 2 item 8)" begin
+    @testset "stacked columns and connectivity" begin
         layered(i, k) = 1000.0 + 10.0 * (k - 1)
         nc(m) = number_of_cells(m)
         pillar_ks(m, cols) = [[cell_ijk(m, c)[3] for c in column_cells(cols, col)]
@@ -933,7 +934,7 @@ end
 
         sides, unassigned = ve_boundary_sides(m, cols, ve.domain)
         @test unassigned == cs.exposed_faces && !any(sides.across_fault)
-        # stacked blocks: their faces take the transition flux (Stage 12)
+        # stacked blocks: their faces take the transition flux
         law = setup_co2lab_model(ve.domain)[:Reservoir].equations[:mass_conservation]
         @test Jutul.flux_type(law) isa JutulCO2Lab.VEFlux
 
@@ -954,7 +955,7 @@ end
         @test_logs (:warn, r"2 unconnected pieces") ve_domain(
             cut, cols; perm_x = fill(1e-13, 4), poro = fill(0.2, 4))
 
-        # fine 3D cells (Stage 12) are blocks of their own; below_holes must be
+        # fine 3D cells are blocks of their own; below_holes must be
         # a known mode
         hyb, _ = ve_columns(m; is_ve = [true; fill(false, nc(m) - 1)])
         @test count(hyb.is_ve) == 1 &&
@@ -967,7 +968,7 @@ end
         @test !JutulCO2Lab._is_ve([true, false], 2)
     end
 
-    @testset "hybrid grid: blocks and face categories (Stage 12 step 1)" begin
+    @testset "hybrid grid: blocks and face categories" begin
         J = JutulCO2Lab
         nc(m) = number_of_cells(m)
         dom(m, cols; ff = :virtual) = ve_domain(m, cols; perm_x = fill(1e-13, nc(m)),
@@ -1087,7 +1088,7 @@ end
         @test all(isfinite, result.states[end][:Pressure])
     end
 
-    @testset "co2lab fluid system (Stage 2 item 0)" begin
+    @testset "co2lab fluid system" begin
         Darcy, day = si_units(:darcy, :day)
         # 1D sloping aquifer, injection then shut-in (the prototype's case, shortened)
         nx = 20
@@ -1135,7 +1136,7 @@ end
         co2_mass(s) = sum(s[:TotalMasses][2, :])
 
         @testset "configuration errors" begin
-            # unknowns by configuration (Stage 4): hysteresis with rate-driven
+            # unknowns by configuration: hysteresis with rate-driven
             # dissolution couples the two equations; instantaneous dissolution
             # (dis_rate 0 or Inf) has co2lab's switching unknown instead of sG, Rs
             hd = co2lab_ve_fluid(default_pvt = nothing,
@@ -1194,7 +1195,7 @@ end
             @test S[:CapillaryPressure].is_ve === nothing
         end
 
-        @testset "hysteresis (Stage 3): sGmax an unknown with co2lab's equation" begin
+        @testset "hysteresis: sGmax an unknown with co2lab's equation" begin
             hfl = co2lab_ve_fluid(default_pvt = nothing, wat_rho_pvt = (4.3e-10, 100e5),
                                   co2_rho_pvt = (4.3e-9, 100e5), residual = (0.2, 0.2))
             model, states = run(fluid = hfl)
@@ -1219,7 +1220,7 @@ end
             @test co2_mass(states[end]) ≈ injected rtol = 1e-3
         end
 
-        @testset "vertical-model interface (Stage 6 item 0)" begin
+        @testset "vertical-model interface" begin
             # the sharp interface reads no densities; a model through the generic
             # path does, and a stand-in with the same formulas gives the same run
             kw = (wat_rho_pvt = (4.3e-10, 100e5), co2_rho_pvt = (4.3e-9, 100e5),
@@ -1241,7 +1242,7 @@ end
             end
         end
 
-        @testset "capillary fringe (Stage 6 item 1): runs, conserves CO2" begin
+        @testset "capillary fringe: runs, conserves CO2" begin
             ff = co2lab_ve_fluid(; default_pvt = nothing,
                                  vertical = CapillaryFringeTable(; invPc3D = (0.4, 0.5),
                                                                    kr3D = 2),
@@ -1286,7 +1287,7 @@ end
             @test all(all(s[:sGmax] .>= m .- 1e-12) for (s, m) in zip(st, runmax))
             @test all(all(b[:sGmax] .>= a[:sGmax]) for (a, b) in zip(st, st[2:end]))
 
-            # the model's VE variables are the co2lab formulas (Stage 2 items 1, 3)
+            # the model's VE variables are the co2lab formulas
             fs = st[end]
             hh = JutulCO2Lab._plume_heights.(fs[:sG], fs[:sGmax], 20.0, 0.0, 0.0)
             @test fs[:PlumeHeights][1, :] ≈ first.(hh)
@@ -1335,7 +1336,7 @@ end
         end
     end
 
-    @testset "VE wells (Stage 2 item 4)" begin
+    @testset "VE wells" begin
         wc = JutulCO2Lab._mrst_well_constant
         @test wc(10.0, 10.0, :ip_tpf) == 0.14
         @test wc(10.0, 10.0, :ip_simple) == 0.292
@@ -1357,39 +1358,39 @@ end
 
         f = joinpath(refdir, "sloping_aquifer.mat")
         if !isfile(f)
-            @info "Skipping: $f not generated (scripts/mrst_dump_sloping_aquifer.m)"
+            @info "Skipping: MRST reference dump $f not found"
         else
             _ve_wells_vs_mrst(matread(f))
         end
     end
 
-    @testset "VE boundary conditions (Stage 2 item 5)" begin
+    @testset "VE boundary conditions" begin
         f = joinpath(refdir, "ve_bc.mat")
         if !isfile(f)
-            @info "Skipping: $f not generated (scripts/mrst_dump_ve_bc.m)"
+            @info "Skipping: MRST reference dump $f not found"
         else
             _ve_bc_vs_mrst(matread(f))
         end
 
         f = joinpath(refdir, "sloping_aquifer.mat")
         if !isfile(f)
-            @info "Skipping: $f not generated (scripts/mrst_dump_sloping_aquifer.m)"
+            @info "Skipping: MRST reference dump $f not found"
         else
             _ve_bc_runs(matread(f))
         end
     end
 
-    @testset "flow and well model vs MRST runs (Stage 2 item 7)" begin
+    @testset "flow and well model vs MRST runs" begin
         fs = [joinpath(refdir, f) for f in ("sloping_aquifer.mat", "mrst_ref_rate.mat",
                                             "mrst_ref_bhp.mat", "mrst_ref_src.mat")]
         if !all(isfile, fs)
-            @info "Skipping: MRST runs not generated (scripts/stage2_mrst_comparison.jl)"
+            @info "Skipping: MRST reference runs not found"
         else
             _ve_well_vs_mrst_runs(matread.(fs)...)
         end
     end
 
-    @testset "VE reconstruction (Stage 2 item 6)" begin
+    @testset "VE reconstruction" begin
         # one column of three cells, bottoms at 2, 5, 10 m below the caprock
         zb = [2.0, 5.0, 10.0]
         @test JutulCO2Lab._fill_degree(3.5, zb) == (1, 0.5)
@@ -1404,16 +1405,16 @@ end
 
         f = joinpath(refdir, "ve_reconstruction.mat")
         if !isfile(f)
-            @info "Skipping: $f not generated (scripts/mrst_dump_ve_reconstruction.m)"
+            @info "Skipping: MRST reference dump $f not found"
         else
             _ve_reconstruction_vs_mrst(matread(f))
         end
     end
 
-    @testset "capfringeFigures.m, sharp interface, vs MRST (Stage 3 gate)" begin
+    @testset "capfringeFigures.m, sharp interface, vs MRST" begin
         f = joinpath(refdir, "capfringe_si.mat")
         if !isfile(f)
-            @info "Skipping: $f not generated (scripts/mrst_dump_capfringe_si.m)"
+            @info "Skipping: MRST reference dump $f not found"
         else
             rep = _capfringe_si_vs_mrst(matread(f))
             passed(rep) || display(rep)
@@ -1421,10 +1422,10 @@ end
         end
     end
 
-    @testset "capfringeFigures.m, capillary fringe, vs MRST (Stage 6 gate)" begin
+    @testset "capfringeFigures.m, capillary fringe, vs MRST" begin
         f = joinpath(refdir, "capfringe_cp.mat")
         if !isfile(f)
-            @info "Skipping: $f not generated (scripts/mrst_dump_capfringe_cp.m)"
+            @info "Skipping: MRST reference dump $f not found"
         else
             rep = _capfringe_cp_vs_mrst(matread(f))
             passed(rep) || display(rep)
@@ -1432,10 +1433,10 @@ end
         end
     end
 
-    @testset "capillary fringe ('P-scaled table') vs co2lab (Stage 6 item 1)" begin
+    @testset "capillary fringe ('P-scaled table') vs co2lab" begin
         f = joinpath(refdir, "fringe_fluid.mat")
         if !isfile(f)
-            @info "Skipping: $f not generated (scripts/mrst_dump_fringe_fluid.m)"
+            @info "Skipping: MRST reference dump $f not found"
         else
             rep = _fringe_fluid_vs_mrst(matread(f))
             passed(rep) || display(rep)
@@ -1493,7 +1494,7 @@ end
         @test J._untouched_brine(SharpInterface(), 1, 0.1, 5.0, 50.0, 300.0) ≈ 0.9
     end
 
-    @testset "integrated sharp interface (Stage 6 item 3)" begin
+    @testset "integrated sharp interface" begin
         J = JutulCO2Lab
         # a small sloping aquifer, 4 columns of 10 layers of 2 m
         mesh = _cp_mesh(4, 10, (i, k) -> 1000.0 + 2.0 * i + 2.0 * (k - 1))
@@ -1595,7 +1596,7 @@ end
             fluid = co2lab_ve_fluid(; default_pvt = nothing, vertical = other))
     end
 
-    @testset "layered fringe (Stage 6, combined model)" begin
+    @testset "layered fringe" begin
         J = JutulCO2Lab
         # 4 columns of 10 layers of 2 m; Δρ, residuals; fringes with and
         # without entry pressure
@@ -1798,7 +1799,7 @@ end
               J.LayeredFringeModel
     end
 
-    @testset "fine-scale fluid and fine cells (Stage 12 step 2)" begin
+    @testset "fine-scale fluid and fine cells" begin
         J = JutulCO2Lab
         mesh = _cp_mesh_pillars(4, 6, (p, k) -> 1000.0 - 2.0 * p + 1.0 * (k - 1))
         nc = number_of_cells(mesh)
@@ -1948,7 +1949,7 @@ end
         @test !isempty(co2) && all(abs.(sd[:Rs][co2] .- 0.03) .< 1e-6)
     end
 
-    @testset "transition flux (Stage 12 step 3)" begin
+    @testset "transition flux" begin
         J = JutulCO2Lab
         g = Jutul.gravity_constant
         rw, RHOW, RHOC = 0.2, 1050.0, 700.0
@@ -2116,7 +2117,7 @@ end
         @test mfine < mhyb < mve && mhyb > 0.2 * mve
     end
 
-    @testset "exact checks P0, P2, P3 (Stage 12 step 4)" begin
+    @testset "exact checks P0, P2, P3" begin
         J = JutulCO2Lab
         g = Jutul.gravity_constant
         rw, rg = 0.2, 0.2
@@ -2425,7 +2426,7 @@ end
         @test st[:sG][1:4] ≈ [0.1, 0.15, 0.25, 0.15] && all(==(0.5), st[:sG][5:end])
     end
 
-    @testset "endpoint-scaling hysteresis in fine 3D cells (Stage 6)" begin
+    @testset "endpoint-scaling hysteresis in fine 3D cells" begin
         J = JutulCO2Lab
         rw, rg = 0.2, 0.25
         krg(s) = min(s, 1 - rw)^2
@@ -2480,12 +2481,11 @@ end
         @test all(abs.(st[:CapillaryPressure][1, trapped]) .< 1e-3)
     end
 
-    @testset "tabulated PVT (Stage 7)" begin
+    @testset "tabulated PVT" begin
         J = JutulCO2Lab
         # JutulDarcy's CSP11 CO2 viscosity is NIST-consistent, as co2lab's
-        # (co2lab's values evaluated under Octave, mrst_dump_co2_tables.m)
-        dump = joinpath(@__DIR__, "..", "..", "analysis", "reference-data",
-                        "co2lab_co2_tables.mat")
+        # (co2lab's values evaluated under Octave)
+        dump = joinpath(refdir, "co2lab_co2_tables.mat")
         if isfile(dump)
             d = matread(dump)
             i, j = findfirst(==(20e6), vec(d["p"])), findfirst(==(343.0), vec(d["T"]))
@@ -2493,7 +2493,7 @@ end
             @test abs(jd.viscosity[2](20e6, 343.0) / d["mu"][i, j] - 1) < 0.02
             @test abs(jd.density[2](20e6, 343.0) / d["rho"][i, j] - 1) < 1e-3
         else
-            @warn "co2lab's table dump not found (scripts/mrst_dump_co2_tables.m)"
+            @warn "co2lab's table dump not found"
         end
 
         # the fluid's defaults: JutulDarcy's tables, surface densities, and
@@ -2549,7 +2549,7 @@ end
         @test b(320.0) > b(360.0)
     end
 
-    @testset "inventory split of a fringe column (Stage 6 item 1)" begin
+    @testset "inventory split of a fringe column" begin
         J = JutulCO2Lab
         fl = co2lab_ve_fluid(; default_pvt = nothing,
                              vertical = CapillaryFringeTable(; invPc3D = (0.4, 0.5),
@@ -2574,10 +2574,10 @@ end
         @test all(0 .<= p.res .<= p.immob_free)
     end
 
-    @testset "CO2 Storage Atlas maps vs co2lab (Stage 5 step 1)" begin
+    @testset "CO2 Storage Atlas maps vs co2lab" begin
         f = joinpath(refdir, "atlas_maps.mat")
         if !isfile(f) || !isdir(atlas_data_directory())
-            @info "Skipping: Atlas data or $f (scripts/mrst_dump_atlas_maps.m) missing"
+            @info "Skipping: Atlas data or MRST reference dump $f missing"
         else
             rep = _atlas_vs_mrst(matread(f))
             passed(rep) || display(rep)
@@ -2604,10 +2604,10 @@ end
         @test_throws ArgumentError atlas_formation_names(:arctic)
     end
 
-    @testset "CO2 Storage Atlas grid sections (Stage 5 step 2)" begin
+    @testset "CO2 Storage Atlas grid sections" begin
         f = joinpath(refdir, "atlas_grids.mat")
         if !isfile(f) || !isdir(atlas_data_directory())
-            @info "Skipping: Atlas data or $f (scripts/mrst_dump_atlas_grids.m) missing"
+            @info "Skipping: Atlas data or MRST reference dump $f missing"
         else
             rep = _atlas_grids_vs_mrst(matread(f))
             passed(rep) || display(rep)
@@ -2645,10 +2645,10 @@ end
         end
     end
 
-    @testset "CO2 Storage Atlas VE domains (Stage 5 step 3)" begin
+    @testset "CO2 Storage Atlas VE domains" begin
         f = joinpath(refdir, "atlas_formations.mat")
         if !isfile(f) || !isdir(atlas_data_directory())
-            @info "Skipping: Atlas data or $f (scripts/mrst_dump_atlas_formations.m) missing"
+            @info "Skipping: Atlas data or MRST reference dump $f missing"
         else
             rep = _atlas_domains_vs_mrst(matread(f))
             passed(rep) || display(rep)
@@ -2667,10 +2667,10 @@ end
         end
     end
 
-    @testset "All CO2 Storage Atlas formations (Stage 5 item 3)" begin
+    @testset "All CO2 Storage Atlas formations" begin
         f = joinpath(refdir, "atlas_all.mat")
         if !isfile(f) || !isdir(atlas_data_directory())
-            @info "Skipping: Atlas data or $f (scripts/mrst_dump_atlas_all.m) missing"
+            @info "Skipping: Atlas data or MRST reference dump $f missing"
         else
             rep = _atlas_all_vs_mrst(matread(f))
             passed(rep) || display(rep)
@@ -2683,14 +2683,14 @@ end
         end
     end
 
-    @testset "Sleipner benchmark (Stage 5 item 4)" begin
+    @testset "Sleipner benchmark" begin
         # without the data: an error naming the directory, not a failure later
         withenv("CO2LAB_ATLAS_DATA" => mktempdir()) do
             err = try sleipner_grid_section(); nothing catch e; e end
             @test err isa ArgumentError && occursin("no longer publicly", err.msg)
         end
-        # with the data: the grid section only (43 layers; the VE model is gated
-        # in scripts/stage5_gate.jl)
+        # with the data: the grid section only (the 43-layer VE model is
+        # compared outside the test suite)
         if isdir(sleipner_data_directory())
             g = sleipner_grid_section()
             @test g["cartDims"] == (65, 119, 43)
@@ -2700,7 +2700,7 @@ end
         end
     end
 
-    @testset "top surface and contour lines (Stage 5 item 5)" begin
+    @testset "top surface and contour lines" begin
         # sloping aquifer, 5 layers: one quadrilateral per column
         f = joinpath(refdir, "sloping_aquifer.mat")
         if isfile(f)
@@ -2834,10 +2834,10 @@ end
         @test zt == JutulCO2Lab._trap_heights(H, [s2, s1], [trap_analysis(s2), r1])
     end
 
-    @testset "trapping analysis vs co2lab-spillpoint (Stage 8)" begin
+    @testset "trapping analysis vs co2lab-spillpoint" begin
         f = joinpath(refdir, "traps.mat")
         if !isfile(f) || !isdir(atlas_data_directory())
-            @info "Skipping: Atlas data or $f (scripts/mrst_dump_traps.m) missing"
+            @info "Skipping: Atlas data or MRST reference dump $f missing"
         else
             d = matread(f)
             for rep in (_trap_surface_vs_mrst(d), _traps_vs_mrst(d, :cell),
@@ -2874,14 +2874,14 @@ end
         end
     end
 
-    @testset "capacity estimate (Stage 11 item 2)" begin
+    @testset "capacity estimate" begin
         f = joinpath(refdir, "capacity.mat")
         if isfile(f)
             rep = _capacity_vs_mrst(matread(f))
             passed(rep) || display(rep)
             @test passed(rep)
         else
-            @info "Skipping: $f (scripts/mrst_capacity.m) missing"
+            @info "Skipping: MRST reference dump $f missing"
         end
 
         # the synthetic caprock, a constant CO2 density: the parts add up to the
@@ -2913,7 +2913,7 @@ end
         @test all(x -> 100 < x < 1000, c.density)
     end
 
-    @testset "injection case (Stage 11 item 4)" begin
+    @testset "injection case" begin
         mesh, cols = _sine_mesh()
         n = number_of_columns(cols)
         ve = ve_domain(mesh, cols; perm_x = fill(1e-13, n), poro = fill(0.25, n))
@@ -2956,15 +2956,14 @@ end
                                                 on_report = (k, st) -> k < 1))
     end
 
-    @testset "trapping inventory vs co2lab (Stage 9 item 2)" begin
+    @testset "trapping inventory vs co2lab" begin
         c, d = (joinpath(refdir, f) for f in ("inventory_case.mat", "inventory_mrst.mat"))
         if !isfile(c) || !isfile(d) || !isdir(atlas_data_directory())
-            @info "Skipping: Atlas data or $c, $d (scripts/inventory_case.jl, " *
-                  "mrst_dump_inventory.m) missing"
+            @info "Skipping: Atlas data or MRST reference dumps $c, $d missing"
         else
             case = matread(c)
             reps = [_inventory_vs_mrst(case, matread(d)), _inventory_consistency(case)]
-            # co2lab's own run of the case, if exported (mrst_ref_inventory.m)
+            # co2lab's own run of the case, if exported
             run = joinpath(refdir, "inventory_mrst_run.mat")
             isfile(run) && push!(reps, _inventory_run_vs_mrst(case, matread(run)))
             for rep in reps
@@ -2974,10 +2973,10 @@ end
         end
     end
 
-    @testset "VE fluid vs MRST co2lab (Stage 2 items 1, 3)" begin
+    @testset "VE fluid vs MRST co2lab" begin
         f = joinpath(refdir, "ve_fluid.mat")
         if !isfile(f)
-            @info "Skipping: $f not generated (scripts/mrst_dump_ve_fluid.m)"
+            @info "Skipping: MRST reference dump $f not found"
         else
             d = matread(f)
             H = vec(d["H"]); g = d["gravity"]

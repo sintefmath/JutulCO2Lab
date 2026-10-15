@@ -4,7 +4,7 @@
 # sector model (the benchmark's), the NPD's full-field model and the CO2
 # Storage Atlas — from the benchmark's injection point.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/traps_johansen.jl
+#   julia --project=examples examples/trapping/traps_johansen.jl
 #
 # Needs the NPD decks in johansen_data_directory() (downloadable from SINTEF:
 # the error message names the files). Plotting backend: GLMakie (a window per

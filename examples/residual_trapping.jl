@@ -1,9 +1,9 @@
 # co2lab's sloping aquifer with residual trapping (slopingAquiferResidualCapillary.m,
 # its sharp-interface configuration: residual saturations 0.25/0.25, zres = 40),
-# simulated with JutulCO2Lab: one run, top to bottom. The Stage 2 example
-# (sloping_aquifer.jl) explains the setup; this one adds hysteresis.
+# simulated with JutulCO2Lab: one run, top to bottom. The example
+# sloping_aquifer.jl explains the setup; this one adds hysteresis.
 #
-#   scripts/julia --project=JutulCO2Lab JutulCO2Lab/examples/residual_trapping.jl
+#   julia --project=. examples/residual_trapping.jl
 #
 # No input files: co2lab's case is built by `sloping_aquifer` (40 layers); CO2
 # properties from JutulDarcy's tables at its reference conditions.

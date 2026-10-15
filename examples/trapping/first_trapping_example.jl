@@ -3,7 +3,7 @@
 # ("rivers") between them, spill regions, the trapping capacity, and the leaf
 # traps, which nothing spills into.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/first_trapping_example.jl
+#   julia --project=examples examples/trapping/first_trapping_example.jl
 #
 # Plotting backend: GLMakie (a window per figure, 3D views rotatable with the
 # mouse; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie

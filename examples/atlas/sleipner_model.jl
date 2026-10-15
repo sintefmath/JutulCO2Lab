@@ -3,7 +3,7 @@
 # benchmark, as a VE model in global coordinates — shown in 3D and on the map
 # of the Atlas's Utsira formation.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/atlas/sleipner_model.jl
+#   julia --project=examples examples/atlas/sleipner_model.jl
 #
 # The benchmark data are no longer downloadable: a local copy must be in
 # sleipner_data_directory(). Plotting backend: GLMakie (a window per figure;

@@ -10,7 +10,7 @@
 # - the simulation, VE and 3D side by side, from one fine-scale fluid, with
 #   run times.
 #
-#   julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/layered_traps.jl
+#   julia --project=examples examples/trapping/layered_traps.jl
 #
 # Self-contained (the grid is built here). CO2 and brine properties are
 # JutulDarcy's. The 3D cells are 1 m tall, so that the plumes (several metres

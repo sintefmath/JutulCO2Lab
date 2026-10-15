@@ -4,7 +4,7 @@
 # for 180 more, split by trapping mechanism — structural traps (from the
 # spill-point analysis), residual trapping (hysteresis), dissolution.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/inventory/trapping_inventory.jl
+#   julia --project=examples examples/inventory/trapping_inventory.jl
 #
 # Plotting backend: GLMakie (a window per figure, 3D views rotatable with the
 # mouse; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie

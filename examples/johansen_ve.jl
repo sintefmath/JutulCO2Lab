@@ -6,11 +6,11 @@
 # trapping mechanism (co2lab's postprocessStates). The CO2 and brine
 # properties are JutulDarcy's, not co2lab's.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/johansen_ve.jl
+#   julia --project=examples examples/johansen_ve.jl
 #
 # Input: the Johansen data set's sector model, read directly — NPD5.grdecl
 # (ECLIPSE grid) and NPD5_Permeability.txt, NPD5_Porosity.txt, in
-# johansen_data_directory() (../mrst-data/Johansen; from MRST's Johansen data
+# johansen_data_directory() (mrst-data/Johansen; from MRST's Johansen data
 # set, https://www.sintef.no/contentassets/124f261f170947a6bc51dd76aea66129/
 # johansen.zip). No MRST output is needed.
 #

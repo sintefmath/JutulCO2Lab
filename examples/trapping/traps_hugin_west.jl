@@ -4,7 +4,7 @@
 # southern part with both methods side by side; at the end the whole
 # formation in the interactive trap viewer, as co2lab shows it.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/traps_hugin_west.jl
+#   julia --project=examples examples/trapping/traps_hugin_west.jl
 #
 # Plotting backend: GLMakie (a window per figure, 3D views rotatable with the
 # mouse; close it to continue) by default; JUTULCO2LAB_BACKEND=CairoMakie

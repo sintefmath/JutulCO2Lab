@@ -1,4 +1,4 @@
-# co2lab-demo's exploreCapacity (roadmap Stage 11 item 2): the CO2 storage
+# co2lab-demo's exploreCapacity: the CO2 storage
 # capacity of a formation of the CO2 Storage Atlas, column by column, as it
 # changes with the conditions — the temperature gradient, the pressure's
 # deviation from hydrostatic, the residual saturations and the dissolution —
@@ -16,9 +16,9 @@
 # structural capacity reachable from each column (its trap and those
 # downstream).
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/demos/explore_capacity.jl
-#   JUTULCO2LAB_BACKEND=WGLMakie scripts/julia --project=JutulCO2Lab/examples \
-#       JutulCO2Lab/examples/demos/explore_capacity.jl   (then open http://localhost:8080)
+#   julia --project=examples examples/demos/explore_capacity.jl
+#   JUTULCO2LAB_BACKEND=WGLMakie julia --project=examples \
+#       examples/demos/explore_capacity.jl   (then open http://localhost:8080)
 
 using JutulCO2Lab
 backend = Symbol(get(ENV, "JUTULCO2LAB_BACKEND", "GLMakie"))

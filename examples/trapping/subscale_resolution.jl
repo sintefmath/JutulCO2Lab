@@ -5,7 +5,7 @@
 # Utsira's area, estimates the volume unresolved in all of Utsira — first as
 # it is, then with the large-scale trend of the caprock removed.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/subscale_resolution.jl
+#   julia --project=examples examples/trapping/subscale_resolution.jl
 #
 # The Sleipner benchmark data are no longer downloadable: a local copy must be
 # in sleipner_data_directory(). Plotting backend: GLMakie (a window per

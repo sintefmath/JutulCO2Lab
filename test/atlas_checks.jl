@@ -1,9 +1,8 @@
-# Comparisons of the CO2 Storage Atlas code with co2lab (roadmap Stage 5), used
-# by the package tests (runtests.jl) and the gate (scripts/stage5_gate.jl).
-# Each takes an MRST export (scripts/mrst_dump_atlas_*.m, read with matread)
-# and returns an OracleReport.
+# Comparisons of the CO2 Storage Atlas code with co2lab, used by the package
+# tests (runtests.jl) and longer comparisons outside the suite. Each takes an
+# MRST export and returns an OracleReport.
 
-# atlas_maps.mat (scripts/mrst_dump_atlas_maps.m): every Atlas map as co2lab's
+# atlas_maps.mat: every Atlas map as co2lab's
 # readAAIGrid reads it, getAtlasGrid's maps for five formations at coarsening 1
 # and 3, and their average rock. Julia reads with co2lab's row handling here;
 # its default reading is the same map one row further south.
@@ -61,7 +60,7 @@ function _atlas_vs_mrst(d)
     return rep
 end
 
-# atlas_grids.mat (scripts/mrst_dump_atlas_grids.m): getAtlasGrid's decks and
+# atlas_grids.mat: getAtlasGrid's decks and
 # petroinfo for ten formation/coarsening/refining/layer cases. Julia builds
 # them with co2lab_compatible = true; co2lab's Inf at undefined pillars is 0
 # here (GeoEnergyIO's convention).
@@ -84,7 +83,7 @@ function _atlas_grids_vs_mrst(d)
         end
         check!(rep, "$label: ACTNUM", same(vec(g["ACTNUM"]), vec(e["ACTNUM"] .> 0)), 0;
                tol = exact)
-        # co2lab's rock arrays have one layer (co2lab-issues.org)
+        # co2lab's rock arrays have one layer
         for k in ("PORO", "PERMX", "NTG")
             haskey(e, k) || continue
             check!(rep, "$label: $k", same(vec(g[k][:, :, 1]), vec(e[k])), 0;
@@ -101,7 +100,7 @@ function _atlas_grids_vs_mrst(d)
     return rep
 end
 
-# atlas_formations.mat (scripts/mrst_dump_atlas_formations.m):
+# atlas_formations.mat:
 # getFormationTopGrid's Gt and rock2D for eight formation/coarsening/layer
 # cases. Julia removes cells thinner than 1 mm, which co2lab keeps: its
 # columns must be co2lab's minus thin ones, matched by the logical index of
@@ -155,7 +154,7 @@ function _atlas_domains_vs_mrst(d)
                tol = exact)
         has_ntg && check!(rep, "$label: ntg", rock.ntg, vec(e["ntg"])[p]; tol = rel)
 
-        # pore volume: 3D cell volumes against MRST's area·H (Stage 1, ≤ 0.2 %)
+        # pore volume: 3D cell volumes against MRST's area·H
         ntg = has_ntg ? rock.ntg : 1.0
         pv = dom[:volumes] .* dom[:porosity] .* ntg
         check!(rep, "$label: pore volume (≤ 0.2 %)", pv, vec(e["pore_volume"])[p];
@@ -164,7 +163,7 @@ function _atlas_domains_vs_mrst(d)
     return rep
 end
 
-# atlas_all.mat (scripts/mrst_dump_atlas_all.m): the formations getAtlasGrid
+# atlas_all.mat: the formations getAtlasGrid
 # builds decks for, and getFormationTopGrid's column count, total height,
 # total pore volume and mean rock for each at coarsening 5. Julia removes
 # columns thinner than 1 mm; formations without Atlas rock get placeholder
@@ -197,11 +196,11 @@ function _atlas_all_vs_mrst(d)
     return rep
 end
 
-# atlas_volumes.mat (scripts/mrst_dump_atlas_volumes.m): modelsFromAtlas.m's
+# atlas_volumes.mat: modelsFromAtlas.m's
 # table for the North Sea formations at full resolution — columns, caprock
 # depth range, bulk volume — as examples/atlas/models_from_atlas.jl prints it.
 # co2lab keeps processGRDECL's first piece, Julia the largest; Julia removes
-# cells thinner than 1 mm. Only in the gate (about a minute).
+# cells thinner than 1 mm. Not in the test suite (about a minute).
 function _atlas_volumes_vs_mrst(d)
     rep = OracleReport("modelsFromAtlas table vs co2lab (full resolution)"; mrst = d)
     exact = Tolerance(0.0, 0.0)
@@ -238,9 +237,9 @@ function _atlas_volumes_vs_mrst(d)
     return rep
 end
 
-# sleipner.mat (scripts/mrst_dump_sleipner.m): makeSleipnerVEmodel's steps with
+# sleipner.mat: makeSleipnerVEmodel's steps with
 # global coordinates — cells, columns, faces, caprock depths, heights, rock,
-# pore volumes and the open boundary. 43 layers: only in the gate.
+# pore volumes and the open boundary. 43 layers: not in the test suite.
 function _sleipner_vs_mrst(d)
     rep = OracleReport("Sleipner VE model vs co2lab (makeSleipnerVEmodel)"; mrst = d)
     exact = Tolerance(0.0, 0.0)

@@ -131,7 +131,7 @@ translates one to one.  The result goes to [`setup_co2lab_model`](@ref).
   density and viscosity, one of
   - `:table`: JutulDarcy's CO2–brine tables in pressure and temperature
     ([`jutuldarcy_property_tables`](@ref)), configured by `tables`;
-  - a [`PhaseTable`](@ref) (e.g. co2lab's, from `scripts/co2lab_tables.jl`);
+  - a [`PhaseTable`](@ref) (e.g. co2lab's sampled tables, read from an MRST export);
   - `(c, p_ref)`: co2lab's linear `ref·(1 + c·(p − p_ref))`;
   - `nothing`: constant `ref`.
 - `default_pvt`: what a property not given means: `:table` (default), or

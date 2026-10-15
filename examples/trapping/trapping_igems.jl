@@ -4,7 +4,7 @@
 # has offshore sand ridges under marine shale (amplitude up to 20 m, 2-4 km
 # wide, 10-60 km long) and no faults; 180 000 columns of 100 m.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/trapping_igems.jl
+#   julia --project=examples examples/trapping/trapping_igems.jl
 #
 # Needs the IGEMS surfaces (files.nr.no/igems/surfaces.zip) or the IGEMS
 # sample in atlas_data_directory(). Plotting backend: GLMakie (a window per

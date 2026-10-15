@@ -1,10 +1,10 @@
 # co2lab's sloping aquifer with residual trapping and CO2 dissolving into the
 # brine (sloping_aquifer.m's 'dissolution' options), simulated with JutulCO2Lab
 # three times: without dissolution, with co2lab's rate-driven dissolution, and
-# with instantaneous dissolution. The Stage 2 and 3 examples
-# (sloping_aquifer.jl, residual_trapping.jl) explain the setup.
+# with instantaneous dissolution. The examples sloping_aquifer.jl and
+# residual_trapping.jl explain the setup.
 #
-#   scripts/julia --project=JutulCO2Lab JutulCO2Lab/examples/dissolution.jl
+#   julia --project=. examples/dissolution.jl
 #
 # No input files: co2lab's case is built by `sloping_aquifer` (40 layers); CO2
 # properties from JutulDarcy's tables at its reference conditions.

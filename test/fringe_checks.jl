@@ -1,11 +1,9 @@
 # Comparisons of the capillary-fringe vertical model with co2lab's
-# 'P-scaled table' and 'P-K-scaled table' fluids (roadmap Stage 6 item 1 and
-# its pre-gate), with JutulCO2Lab's patch of co2lab's fringe tables
-# (scripts/mrst_patch: adaptive Hermite tables, plume-tip
+# 'P-scaled table' and 'P-K-scaled table' fluids, with co2lab's fringe tables
+# patched as JutulCO2Lab builds them (adaptive Hermite tables, plume-tip
 # regularisation, the corrected 'P-K-scaled table'), used by the package tests
-# (runtests.jl) and the Stage 6 gate. Reference: scripts/mrst_dump_fringe_fluid.m
-# (fringe_fluid.mat): co2lab's table and its krG, krW, pcWG and heights on
-# sampled states, per case.
+# (runtests.jl). Reference: the MRST export fringe_fluid.mat, co2lab's table
+# and its krG, krW, pcWG and heights on sampled states, per case.
 
 # The fluid of a dumped case: the PVT of the dump script, and the case's
 # fine-scale curves (the slope cases' (C, alpha), Johansen's functions, the
@@ -86,15 +84,14 @@ function _fringe_fluid_vs_mrst(d; tol = 1e-10, tol_trunc = tol)
     return rep
 end
 
-# capfringeFigures.m, capillary-fringe half (mrst_dump_capfringe_cp.m,
-# capfringe_cp.mat): the 'P-scaled table' curves over sG with and without
-# hysteresis, the heights and the reconstructed profile for S = 0.2,
-# Smax = 0.3, on the example's 50 m column. co2lab's table uses the reference
-# densities; the curves the densities at the example's pressure, reproduced by
-# linear PVT through them. Plumes reaching the bottom at `tol_trunc`
-# (co2lab's Newton accuracy there). A full column (S = 1 − srw) has no
-# determined Pc — any large enough one fills it — so there the check is that
-# both Pc give back S.
+# capfringeFigures.m, capillary-fringe half (capfringe_cp.mat): the 'P-scaled
+# table' curves over sG with and without hysteresis, the heights and the
+# reconstructed profile for S = 0.2, Smax = 0.3, on the example's 50 m column.
+# co2lab's table uses the reference densities; the curves the densities at the
+# example's pressure, reproduced by linear PVT through them. Plumes reaching
+# the bottom at `tol_trunc` (co2lab's Newton accuracy there). A full column (S
+# = 1 − srw) has no determined Pc — any large enough one fills it — so there
+# the check is that both Pc give back S.
 function _capfringe_cp_vs_mrst(d; tol = 1e-10, tol_trunc = tol)
     J = JutulCO2Lab
     mesh = ve_mesh_from_mrst(d["G3"])

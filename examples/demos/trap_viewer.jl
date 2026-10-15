@@ -1,4 +1,4 @@
-# A first interactive demo (roadmap Stage 11): the formations of the CO2
+# An interactive demo: the formations of the CO2
 # Storage Atlas in the interactive trap viewer, `interactive_traps` (co2lab's
 # interactiveTrapping), with menus for the formation and its coarsening.
 # Turn and zoom the caprock with the mouse; click a column to see the traps
@@ -10,9 +10,9 @@
 # (GLMakie, the default) or in a browser (WGLMakie; each page gets a viewer of
 # its own):
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/demos/trap_viewer.jl
-#   JUTULCO2LAB_BACKEND=WGLMakie scripts/julia --project=JutulCO2Lab/examples \
-#       JutulCO2Lab/examples/demos/trap_viewer.jl      (then open http://localhost:8080)
+#   julia --project=examples examples/demos/trap_viewer.jl
+#   JUTULCO2LAB_BACKEND=WGLMakie julia --project=examples \
+#       examples/demos/trap_viewer.jl      (then open http://localhost:8080)
 #
 # Mouse: left drag turns, wheel zooms (into the scene, not cut off at the
 # axis box), right drag pans; a left click (no drag) picks a column, a right

@@ -1,12 +1,11 @@
-# Comparisons of the trapping analysis with co2lab-spillpoint (roadmap Stage 8),
-# used by the package tests (runtests.jl) and the Stage 8 gate. Each takes the
-# MRST export traps.mat (scripts/mrst_dump_traps.m, read with matread) and
-# returns an OracleReport.
+# Comparisons of the trapping analysis with co2lab-spillpoint, used by the
+# package tests (runtests.jl). Each takes the MRST export traps.mat and returns
+# an OracleReport.
 
 # The mesh and columns of one exported case: an Atlas formation as co2lab builds
 # it (co2lab_compatible, no thin-cell removal), an IGEMS surface as co2lab
 # builds it ("IGEMS/<family>/<i>", transposed), a synthetic surface, or one of
-# the grids of co2lab-spillpoint's examples (mrst_dump_traps.m, 'examples')
+# the grids of co2lab-spillpoint's examples (the export's 'examples')
 function _trap_case_mesh(e)
     name, c = e["name"], Int(e["coarsening"])
     name == "sine" && return _sine_mesh()
@@ -84,7 +83,7 @@ function _synthetic101_mesh()
     return (m.mesh, m.columns)
 end
 
-# mrst_dump_traps.m's synthetic case: 30 x 20 cells of 100 m, 50 m thick, the
+# The export's synthetic case: 30 x 20 cells of 100 m, 50 m thick, the
 # caprock at 1000 - 20 sin(x/400) cos(y/300) + 0.005 x (cartGrid, nodes moved)
 function _sine_mesh()
     nx, ny = 30, 20

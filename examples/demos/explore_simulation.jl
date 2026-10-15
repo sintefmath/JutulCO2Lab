@@ -1,4 +1,4 @@
-# co2lab-demo's exploreSimulation (roadmap Stage 11 item 4): set up a CO2
+# co2lab-demo's exploreSimulation: set up a CO2
 # injection into a formation of the CO2 Storage Atlas by clicking — wells,
 # and which stretches of the boundary are closed, semi-open or open — then run
 # it (`setup_injection_case`, `simulate_injection_case`) and watch the plume
@@ -8,9 +8,9 @@
 # app's widgets on its panel; the results have a figure of their own beside
 # it (in a browser the page holds both; GLMakie opens a window for each).
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/demos/explore_simulation.jl
-#   JUTULCO2LAB_BACKEND=WGLMakie scripts/julia --project=JutulCO2Lab/examples \
-#       JutulCO2Lab/examples/demos/explore_simulation.jl   (then open http://localhost:8080)
+#   julia --project=examples examples/demos/explore_simulation.jl
+#   JUTULCO2LAB_BACKEND=WGLMakie julia --project=examples \
+#       examples/demos/explore_simulation.jl   (then open http://localhost:8080)
 #
 # Clicks on the caprock, by the mode chosen: "Place wells" — a left click adds
 # a well there, or selects the well nearby; the rate slider sets the selected

@@ -5,7 +5,7 @@
 # under the layer — each with its own trap analysis (ve_sheets,
 # trap_surface(...; sheet), sheet_spill_targets).
 #
-#   julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/trapping/sheets.jl
+#   julia --project=examples examples/trapping/sheets.jl
 #
 # Self-contained (the grid is built here). CO2 and brine properties are
 # JutulDarcy's. Plotting backend: GLMakie (a window per figure; 3D views

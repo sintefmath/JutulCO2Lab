@@ -1,7 +1,7 @@
 # co2lab's sloping aquifer (slopingAquiferSharpInterface.m, cross-section, zres = 5),
 # simulated with JutulCO2Lab: one run, top to bottom.
 #
-#   scripts/julia --project=JutulCO2Lab JutulCO2Lab/examples/sloping_aquifer.jl
+#   julia --project=. examples/sloping_aquifer.jl
 #
 # No input files: the case is built here as co2lab's sloping_aquifer.m builds
 # it (its grid, make_testgrid, matches co2lab's node for node).

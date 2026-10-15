@@ -2,7 +2,7 @@
 # formation as a volumetric grid, all North Sea formations in 3D, and their
 # volumes.
 #
-#   scripts/julia --project=JutulCO2Lab/examples JutulCO2Lab/examples/atlas/models_from_atlas.jl
+#   julia --project=examples examples/atlas/models_from_atlas.jl
 #
 # Plotting backend: GLMakie (a window per figure; close it to continue) by
 # default; JUTULCO2LAB_BACKEND=CairoMakie writes the figures to files instead.
@@ -54,8 +54,8 @@ show_figure(fig, "north_sea_grids")
 # ----------------------------- 3. Their volumes -------------------------------
 
 # Full resolution: number of cells, depth range of the caprock and bulk
-# volume. co2lab adds the volume in structural traps; that needs the trap
-# analysis of roadmap Stage 8.
+# volume. co2lab adds the volume in structural traps, from the trap analysis
+# (see the examples in trapping/).
 println("\nNorth Sea formations, full resolution:")
 println("  name          |  cells | top min | top max | bulk volume (m³)")
 println("  --------------|--------|---------|---------|-----------------")
