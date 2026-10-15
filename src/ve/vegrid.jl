@@ -8,7 +8,7 @@
 # A column is a vertically connected stretch of one pillar, in pure VE usually
 # the whole pillar. Cells are grouped by (i, j) pillar and ordered by k, as
 # co2lab's topSurfaceGrid (no geometric sort). Unlike co2lab, a pillar is cut
-# where two consecutive cells share no face (or only a sealed one), not at
+# where two consecutive cells share no face (or only a barrier), not at
 # every gap in k: a pinched-out layer does not cut.
 
 # ------------------------------ Column partition ------------------------------
@@ -34,8 +34,12 @@ gives the cells of its top-surface grid.
   (0 for discarded cells; see [`ve_trim`](@ref)).
 - `column_ij`: one entry per column, so a pillar holding several columns
   appears several times.
-- `sealed`, `leaky`: sorted interior face indices of the mesh; leaky faces
-  cut the pillar into blocks but keep their flow.
+- `sealed`, `leaky`: sorted interior face indices of the mesh, derived from
+  the multipliers: `sealed` every face of multiplier 0 (lateral ones too,
+  e.g. a sealing fault), `leaky` the barrier faces within pillars (multiplier
+  below the threshold); both cut pillars, leaky ones keep their flow.
+- `multiplier`: the transmissibility multiplier of every interior face of the
+  mesh (1 where none is given), applied by [`ve_domain`](@ref).
 """
 struct VEColumns
     cells::Vector{Int}                  # fine cells, column by column, top first
@@ -43,8 +47,9 @@ struct VEColumns
     partition::Vector{Int}              # fine cell → column
     column_ij::Vector{Tuple{Int, Int}}  # per column: its pillar's logical (i, j)
     is_ve::Vector{Bool}                 # per column: VE block (false: one fine cell)
-    sealed::Vector{Int}                 # sealed interior faces (no flow)
-    leaky::Vector{Int}                  # leaky interior faces (cut, flow kept)
+    sealed::Vector{Int}                 # interior faces of multiplier 0 (no flow)
+    leaky::Vector{Int}                  # barrier faces in pillars (cut, flow kept)
+    multiplier::Vector{Float64}         # per interior face: transmissibility multiplier
 end
 
 """
@@ -101,16 +106,17 @@ end
 # ---------------------------- Columns and trimming ----------------------------
 
 """
-    ve_columns(mesh; below_holes = :discard, sealed_faces = (), leaky_faces = (),
-               is_ve = nothing) -> (columns, discarded)
+    ve_columns(mesh; below_holes = :discard, is_ve = nothing,
+               transmissibility_multiplier = nothing, barrier_multiplier = nothing,
+               perm_z = nothing, barrier_perm_z = nothing) -> (columns, discarded)
 
 Partition a 3D mesh into VE columns: the first step in building a VE domain
 ([`ve_domain`](@ref)).
 
 Cells are grouped by `(i, j)` pillar and ordered by `k`, top to bottom. A
 pillar is cut wherever two consecutive cells are *disconnected*: they share
-no interior face, or only sealed or leaky ones. A gap in `k` whose cells
-still share a face (a pinch-out) does not cut.
+no interior face, or only barriers (below). A gap in `k` whose cells still
+share a face (a pinch-out) does not cut.
 
 # Arguments
 
@@ -121,13 +127,20 @@ still share a face (a pinch-out) does not cut.
     below the pillar's first cut is discarded; one column per pillar.
   - `:stack`: each connected stretch is its own column. Such columns connect
     laterally through partial faces, which take the transition flux.
-- `sealed_faces`: interior face indices of `mesh` with no flow; they cut.
-- `leaky_faces`: interior face indices of `mesh` that cut the pillar into
-  separate VE blocks but keep their flow.
 - `is_ve`: one `Bool` per cell of `mesh`, `false` for the fine 3D cells of a
   hybrid grid (whole pillars: [`ve_except_pillars`](@ref)); default
   `nothing`, all VE. Each fine cell becomes a block of its own, and the VE
   cells around it are cut into separate blocks (nothing is discarded).
+- `transmissibility_multiplier`: one multiplier per interior face of `mesh`
+  (as JutulDarcy's, e.g. from ECLIPSE's `MULTZ`), kept in the columns for
+  [`ve_domain`](@ref); default `nothing`, all 1. A face of multiplier 0 is
+  sealed: no flow, and within a pillar a cut.
+- `barrier_multiplier`: faces within a pillar whose multiplier is below this
+  (and above 0) are barriers: leaky faces that cut the pillar into separate
+  VE blocks, their flow kept. Default `nothing`, none.
+- `perm_z`, `barrier_perm_z`: vertical permeability (m²) per cell of `mesh`,
+  and the value below which a cell is a barrier: a fine 3D cell (`is_ve`
+  false), whatever `is_ve` says. Default `nothing`, none.
 
 # Returns
 
@@ -140,19 +153,33 @@ The tuple `(columns, discarded)`:
 
 # Notes
 
+- Vertical equilibrium needs fast vertical flow; it cannot hold across a
+  barrier, so barriers cut the pillars. What counts as one is the caller's
+  choice: there is no default threshold. A threshold without its data
+  (`barrier_multiplier` without `transmissibility_multiplier`,
+  `barrier_perm_z` without `perm_z`) throws an `ArgumentError`.
+- Barriers need `below_holes = :stack`: with `:discard` everything below a
+  pillar's first barrier is discarded (a warning is given).
 - If any cells are discarded, the partition still uses `mesh`'s cell
   numbering and does **not** cover every cell, so it cannot be passed to
   `CoarseMesh` as-is: use [`ve_trim`](@ref) and build the columns again.
 """
-function ve_columns(mesh; below_holes::Symbol = :discard, sealed_faces = (),
-                    leaky_faces = (), is_ve = nothing)
+function ve_columns(mesh; below_holes::Symbol = :discard, is_ve = nothing,
+                    transmissibility_multiplier = nothing,
+                    barrier_multiplier = nothing, perm_z = nothing,
+                    barrier_perm_z = nothing)
     below_holes in (:discard, :stack) ||
         throw(ArgumentError("below_holes must be :discard or :stack, got $below_holes"))
     nc = number_of_cells(mesh)
-    ve = _cell_is_ve(is_ve, nc)
-    sealed, leaky = sort!(unique(collect(Int, sealed_faces))),
-                    sort!(unique(collect(Int, leaky_faces)))
     ijk = [cell_ijk(mesh, c) for c in 1:nc]
+    ve = _cell_is_ve(is_ve, nc) .& _not_barrier_cells(perm_z, barrier_perm_z, nc)
+    m = _face_multipliers(transmissibility_multiplier, number_of_faces(mesh))
+    # sealed and barrier faces; those within pillars cut them
+    sealed, leaky, cuts = _barrier_faces(mesh, ijk, m, barrier_multiplier,
+                                         transmissibility_multiplier)
+    below_holes == :discard && cuts &&
+        @warn "Barriers cut pillars, but below_holes = :discard drops everything " *
+              "below a pillar's first one; use :stack"
     # per cell, the cell it connects to directly below (0: none)
     below = _connected_below(mesh, ijk, union(sealed, leaky))
 
@@ -181,7 +208,7 @@ function ve_columns(mesh; below_holes::Symbol = :discard, sealed_faces = (),
     for c in 1:(length(pos) - 1), m in pos[c]:(pos[c+1] - 1)
         partition[cells[m]] = c
     end
-    columns = VEColumns(cells, pos, partition, pillar, block_ve, sealed, leaky)
+    columns = VEColumns(cells, pos, partition, pillar, block_ve, sealed, leaky, m)
     return (columns, sort!(discarded))
 end
 
@@ -190,6 +217,35 @@ function _cell_is_ve(is_ve, nc)
     isnothing(is_ve) && return fill(true, nc)
     length(is_ve) == nc || throw(ArgumentError("is_ve: one value per cell expected"))
     return collect(Bool, is_ve)
+end
+
+# One Bool per cell: false for cells with perm_z below the barrier threshold
+function _not_barrier_cells(perm_z, threshold, nc)
+    isnothing(threshold) && return fill(true, nc)
+    isnothing(perm_z) && throw(ArgumentError("barrier_perm_z needs perm_z"))
+    length(perm_z) == nc || throw(ArgumentError("perm_z: one value per cell expected"))
+    return perm_z .>= threshold
+end
+
+# The multiplier of every interior face (all 1 for `nothing`), a new vector
+function _face_multipliers(m, nf)
+    isnothing(m) && return ones(nf)
+    length(m) == nf ||
+        throw(ArgumentError("transmissibility_multiplier: one value per face expected"))
+    all(>=(0), m) || throw(ArgumentError("transmissibility_multiplier must be ≥ 0"))
+    return collect(Float64, m)
+end
+
+# (sealed, leaky, cuts): every face of multiplier 0; the faces within a pillar
+# (vertical flow) below the threshold; whether any of them cuts a pillar
+function _barrier_faces(mesh, ijk, m, threshold, given)
+    !isnothing(threshold) && isnothing(given) &&
+        throw(ArgumentError("barrier_multiplier needs transmissibility_multiplier"))
+    within(f) = ((l, r) = mesh.faces.neighbors[f]; ijk[l][1:2] == ijk[r][1:2])
+    sealed = findall(==(0), m)
+    leaky = isnothing(threshold) ? Int[] :
+            [f for f in eachindex(m) if 0 < m[f] < threshold && within(f)]
+    return (sealed, leaky, !isempty(leaky) || any(within, sealed))
 end
 
 # The blocks of the stretch `r` of a pillar's cells `col`: runs of VE cells,
@@ -253,14 +309,14 @@ function _pillar_cells(mesh, ijk)
 end
 
 """
-    _connected_below(mesh, ijk, sealed_faces) -> Vector{Int}
+    _connected_below(mesh, ijk, cut_faces) -> Vector{Int}
 
 For every cell, the cell below it in its pillar that it shares an interior
-face not in `sealed_faces` with (0 if none). Throws if a cell connects to two
+face not in `cut_faces` with (0 if none). Throws if a cell connects to two
 cells below.
 """
-function _connected_below(mesh, ijk, sealed_faces)
-    sealed = Set{Int}(sealed_faces)
+function _connected_below(mesh, ijk, cut_faces)
+    sealed = Set{Int}(cut_faces)
     below = zeros(Int, length(ijk))
     for f in 1:number_of_faces(mesh)
         f in sealed && continue

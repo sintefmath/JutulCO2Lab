@@ -134,7 +134,9 @@ JutulDarcy is patched.
    net rock (holes).
 2. *Columns*: `ve_columns` → `VEColumns`, the partition of fine cells into
    columns (vertically connected stretches of a pillar); `ve_trim` removes
-   discarded cells.
+   discarded cells. Barriers cut pillars: faces with transmissibility
+   multipliers below `barrier_multiplier`, cells with `perm_z` below
+   `barrier_perm_z` (made fine 3D cells); thresholds chosen explicitly.
 3. *VE domain*: `ve_domain` → a `CoarseMesh` over the 3D mesh, wrapped by
    `reservoir_domain`, with thickness-averaged rock, the caprock datum as
    `:gdz`, and `:column_height`, `:rugosity`, `:is_ve`, `:pillar_columns`.

@@ -41,9 +41,12 @@ function in_layer(f)
     return a[1:2] == b[1:2] && patch(a[1], a[2]) && minmax(a[3], b[3]) == (10, 11)
 end
 layer = filter(in_layer, axes(N, 2))
+# the layer seals: transmissibility multiplier 0 on its faces
+mult = ones(size(N, 2))
+mult[layer] .= 0.0
 
 # VE columns, cut at the layer: below it, a second VE column in each pillar
-columns, _ = ve_columns(mesh; sealed_faces = layer, below_holes = :stack)
+columns, _ = ve_columns(mesh; transmissibility_multiplier = mult, below_holes = :stack)
 ve = ve_domain(mesh, columns; perm_x = fill(500e-15, nz * nx * ny),
                poro = fill(0.2, nz * nx * ny))
 

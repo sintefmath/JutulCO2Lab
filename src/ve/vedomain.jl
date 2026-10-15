@@ -284,7 +284,8 @@ The NamedTuple `(domain, coarse, geometry, rock)`, all new:
     of blocks in its pillar;
   - per face: `:gdz`, the gravity term from the reference depths;
     `:face_category`, `:face_intervals`, `:face_depth` (below);
-    `:transmissibilities` if some face is not a continuous VE–VE face.
+    `:transmissibilities` if some face is not a continuous VE–VE face or
+    some multiplier is not 1.
 - `coarse`: the `CoarseMesh` that `domain` wraps.
 - `geometry`: caprock depth, height and extent per column
   ([`ve_column_geometry`](@ref)).
@@ -300,7 +301,9 @@ layer), 5 VE–fine. A transition face carries each side's depth interval
 faces have `NaN` there.
 
 Transmissibilities: 0 across sealed faces, the coarse mesh's for continuous
-VE–VE faces, otherwise the sum over the fine faces. A warning is given if
+VE–VE faces, otherwise the sum over the fine faces. The columns'
+transmissibility multipliers ([`ve_columns`](@ref)) apply per fine face (on
+continuous VE–VE faces, their area-weighted mean). A warning is given if
 the blocks fall apart into unconnected pieces.
 
 # Notes
@@ -397,7 +400,8 @@ function _set_face_data!(domain, mesh, columns, coarse, geometry, perm, poro,
     domain[:face_category, Faces()] = category
     domain[:face_intervals, Faces()] = intervals
     domain[:face_depth, Faces()] = depth
-    T = _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro)
+    T = _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro,
+                                 columns.multiplier)
     isnothing(T) || (domain[:transmissibilities, Faces()] = T)
     # stacked or sealed blocks may fall apart
     stacked = any(>(1), domain[:pillar_columns])

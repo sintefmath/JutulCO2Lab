@@ -2,7 +2,7 @@
 # how flux across it is computed, and the data that flux needs.
 #
 # Categories:
-#   0 sealed: all its fine faces sealed; no flow.
+#   0 sealed: all its fine faces sealed (multiplier 0); no flow.
 #   1 fine–fine: the ordinary 3D flux.
 #   2 VE–VE, continuous: the two blocks' top cells share a face (the caprock
 #     continues) and the columns face each other over their whole height;
@@ -19,8 +19,10 @@
 # Categories 3–5 are the transitions. They carry, per side, the depth interval
 # of that side's cells at the face (below its block's top), a common depth
 # (the fine cell's centroid for 5, the faces' mean depth for 3 and 4), and the
-# transmissibility summed from the fine grid's. Category 2 keeps the coarse
-# mesh's transmissibility (as pure VE), 1 takes the fine grid's.
+# transmissibility summed from the fine grid's, each fine face's times its
+# multiplier. Category 2 keeps the coarse mesh's transmissibility (as pure VE),
+# times its fine faces' area-weighted mean multiplier; 1 takes the fine grid's
+# (with its multiplier).
 #
 # `fault_flux = :virtual` (default) follows the topology. `:co2lab` makes
 # lateral VE–VE faces between pillars with one VE block each continuous
@@ -128,28 +130,34 @@ function _common_depth(columns, geo, F, (L, R), category)
 end
 
 """
-    _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro)
+    _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro, m)
         -> Union{Vector{Float64}, Nothing}
 
 The coarse faces' transmissibilities by category: 0 for sealed faces, the
-coarse mesh's for continuous VE–VE faces, and for the others the sum of the
-fine grid's over the face's fine faces (`perm`: 3 × cells of `mesh`).
+coarse mesh's for continuous VE–VE faces (times the area-weighted mean of
+their fine faces' multipliers `m`), and for the others the sum of the fine
+grid's over the face's fine faces, each times its multiplier (`perm`:
+3 × cells of `mesh`).
 
-Returns a new vector, or `nothing` when every face is continuous VE–VE (the
-coarse mesh's transmissibilities then apply unchanged).
+Returns a new vector, or `nothing` when every face is continuous VE–VE and
+every multiplier 1 (the coarse mesh's transmissibilities then apply
+unchanged).
 """
-function _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro)
-    all(==(_FACE_VE), category) && return nothing
+function _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro, m)
+    plain = all(==(1), m)
+    all(==(_FACE_VE), category) && plain && return nothing
     T = JutulDarcy.reservoir_transmissibility(domain)
     if any(c -> c != _FACE_VE && c != _FACE_SEALED, category)
         fine = reservoir_domain(mesh; permeability = perm, porosity = poro)
-        Tf = JutulDarcy.reservoir_transmissibility(fine)
+        Tf = JutulDarcy.reservoir_transmissibility(fine) .* m
     end
+    # continuous VE–VE faces: their fine faces' multipliers, weighted by area
+    a = plain ? nothing : tpfv_geometry(mesh).areas
     for f in eachindex(category)
-        c = category[f]
+        c, F = category[f], coarse.coarse_faces_to_fine[f]
         c == _FACE_SEALED && (T[f] = 0.0)
-        c in (_FACE_FINE, _TRANSITIONS...) &&
-            (T[f] = sum(Tf[ff] for ff in coarse.coarse_faces_to_fine[f]))
+        c in (_FACE_FINE, _TRANSITIONS...) && (T[f] = sum(Tf[ff] for ff in F))
+        c == _FACE_VE && !plain && (T[f] *= sum(a[F] .* m[F]) / sum(a[F]))
     end
     return T
 end

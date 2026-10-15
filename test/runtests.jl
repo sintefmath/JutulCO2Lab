@@ -24,6 +24,14 @@ function _cp_mesh(nx, nz, top; actnum = fill(true, nx, 1, nz))
     return JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
 end
 
+# Transmissibility multipliers of `mesh`'s faces: `value` on `faces` (default
+# 0: sealed), 1 elsewhere
+function _multipliers(mesh, faces, value = 0.0)
+    m = ones(number_of_faces(mesh))
+    m[faces] .= value
+    return m
+end
+
 # As _cp_mesh, but depths per pillar (p = 0..nx): layer k between pillars
 # p and p+1 has corners top(p, k) and top(p + 1, k), so sloping layers are
 # conforming (neighbouring cells share their faces fully)
@@ -894,9 +902,11 @@ end
         f = only(f for f in 1:number_of_faces(m) if
                  sort([cell_ijk(m, c) for c in m.faces.neighbors[f]]) ==
                  [(1, 1, 1), (1, 1, 2)])
-        cols, disc = ve_columns(m; sealed_faces = [f])
+        cols, disc = @test_logs (:warn, r"below_holes = :discard") ve_columns(
+            m; transmissibility_multiplier = _multipliers(m, [f]))
         @test pillar_ks(m, cols) == [[1], [1, 2, 3], [1, 2, 3]] && length(disc) == 2
-        cols, disc = ve_columns(m; sealed_faces = [f], below_holes = :stack)
+        cols, disc = ve_columns(m; transmissibility_multiplier = _multipliers(m, [f]),
+                                below_holes = :stack)
         @test pillar_ks(m, cols)[1:2] == [[1], [2, 3]] && isempty(disc)
 
         # ...and the coarse face between the two stacked columns is sealed
@@ -1031,6 +1041,68 @@ end
         @test_throws ArgumentError net_rock(full; poro, perm_x = perm, ntg = ntg .- 0.1)
     end
 
+    @testset "barriers: transmissibility multipliers, low vertical permeability" begin
+        J = JutulCO2Lab
+        layered(i, k) = 1000.0 + 10.0 * (k - 1)
+        mesh = _cp_mesh(3, 3, layered)
+        nc, nf = number_of_cells(mesh), number_of_faces(mesh)
+        ijk = [cell_ijk(mesh, c) for c in 1:nc]
+        N = mesh.faces.neighbors
+        nk(cols) = [[ijk[c][3] for c in column_cells(cols, b)]
+                    for b in 1:number_of_columns(cols)]
+        face(a, b) = only(f for f in 1:nf if Set(ijk[[N[f]...]]) == Set([a, b]))
+        perm, poro = fill(1e-13, nc), fill(0.2, nc)
+        Tf = JutulDarcy.reservoir_transmissibility(
+            reservoir_domain(mesh; permeability = perm, porosity = poro))
+
+        # between k = 1 and 2: pillar 1 sealed (0), pillar 2 a barrier (0.01
+        # below the threshold 0.1), pillar 3 not (0.5)
+        m = ones(nf)
+        f1, f2, f3 = (face((i, 1, 1), (i, 1, 2)) for i in 1:3)
+        m[[f1, f2, f3]] = [0.0, 0.01, 0.5]
+        cols, _ = ve_columns(mesh; transmissibility_multiplier = m,
+                             barrier_multiplier = 0.1, below_holes = :stack)
+        @test nk(cols) == [[1], [2, 3], [1], [2, 3], [1, 2, 3]]
+        @test cols.sealed == [f1] && cols.leaky == [f2] && cols.multiplier == m
+
+        # the barrier's transmissibility: the fine face's times its multiplier
+        d = ve_domain(mesh, cols; perm_x = perm, poro).domain
+        T, cat, Nc = d[:transmissibilities], d[:face_category], d[:neighbors]
+        across(a, b) = only(f for f in axes(Nc, 2) if Set(Nc[:, f]) == Set([a, b]))
+        @test cat[across(3, 4)] == J._FACE_VE_VERTICAL && T[across(3, 4)] ≈ 0.01Tf[f2]
+        @test cat[across(1, 2)] == J._FACE_SEALED && T[across(1, 2)] == 0
+
+        # without a threshold only the multiplier 0 cuts
+        cols, _ = ve_columns(mesh; transmissibility_multiplier = m, below_holes = :stack)
+        @test nk(cols) == [[1], [2, 3], [1, 2, 3], [1, 2, 3]]
+
+        # pure VE, a lateral multiplier: the continuous VE–VE face's coarse
+        # transmissibility times the multiplier
+        lat = [f for f in 1:nf if Set(ijk[n][1] for n in N[f]) == Set([1, 2])]
+        ml = ones(nf)
+        ml[lat] .= 0.5
+        T0 = JutulDarcy.reservoir_transmissibility(
+            ve_domain(mesh, first(ve_columns(mesh)); perm_x = perm, poro).domain)
+        dl = ve_domain(mesh, first(ve_columns(mesh; transmissibility_multiplier = ml));
+                       perm_x = perm, poro).domain
+        @test all(==(J._FACE_VE), dl[:face_category])
+        half = [Set(dl[:neighbors][:, f]) == Set([1, 2]) for f in eachindex(T0)]
+        @test dl[:transmissibilities] ≈ T0 .* ifelse.(half, 0.5, 1.0) && count(half) == 1
+
+        # a cell of low vertical permeability: a fine 3D cell
+        kz = copy(perm)
+        kz[findfirst(==((1, 1, 2)), ijk)] = 1e-18
+        cols, _ = ve_columns(mesh; perm_z = kz, barrier_perm_z = 1e-16)
+        @test nk(cols)[1:3] == [[1], [2], [3]] && cols.is_ve[1:3] == [true, false, true]
+
+        # thresholds need their data; :discard with barriers warns
+        @test_throws ArgumentError ve_columns(mesh; barrier_multiplier = 0.1)
+        @test_throws ArgumentError ve_columns(mesh; barrier_perm_z = 1e-16)
+        @test_throws ArgumentError ve_columns(mesh; transmissibility_multiplier = m[2:end])
+        @test_logs (:warn, r"below_holes = :discard") ve_columns(
+            mesh; transmissibility_multiplier = m, barrier_multiplier = 0.1)
+    end
+
     @testset "hybrid grid: blocks and face categories" begin
         J = JutulCO2Lab
         nc(m) = number_of_cells(m)
@@ -1097,17 +1169,20 @@ end
                                  abs(d[:cell_centroids][3, 2] - d[:cell_centroids][3, 1])
         @test_throws ErrorException setup_co2lab_model(d)
 
-        # a layer between k = 2 and 3: leaky — stacked blocks, vertical
-        # transitions with the fine grid's transmissibility; sealed — no flow
+        # a layer between k = 2 and 3: a barrier (multiplier 0.01) — stacked
+        # blocks, vertical transitions with the fine grid's transmissibility
+        # times 0.01; sealed (0) — no flow
         N = slope.faces.neighbors
         lay = [f for f in 1:number_of_faces(slope) if
                ijk[N[f][1]][1:2] == ijk[N[f][2]][1:2] &&
                minmax(ijk[N[f][1]][3], ijk[N[f][2]][3]) == (2, 3)]
-        cols, _ = ve_columns(slope; leaky_faces = lay, below_holes = :stack)
+        cols, _ = ve_columns(slope; transmissibility_multiplier = _multipliers(slope,
+                             lay, 0.01), barrier_multiplier = 0.1, below_holes = :stack)
         d = dom(slope, cols).domain
         @test count(==(J._FACE_VE_VERTICAL), d[:face_category]) == 4
         @test all(d[:transmissibilities][d[:face_category] .== J._FACE_VE_VERTICAL] .> 0)
-        cols, _ = ve_columns(slope; sealed_faces = lay, below_holes = :stack)
+        cols, _ = ve_columns(slope; transmissibility_multiplier = _multipliers(slope,
+                             lay), below_holes = :stack)
         d = dom(slope, cols).domain
         @test count(==(J._FACE_SEALED), d[:face_category]) == 4
         @test all(d[:transmissibilities][d[:face_category] .== J._FACE_SEALED] .== 0)
@@ -2831,7 +2906,8 @@ end
                        a[1:2] == b[1:2] && patch(a[1], a[2]) && minmax(a[3], b[3]) == k)
         barrier = [f for f in axes(N, 2) if layer(f, (3, 4))]
         plain, _ = ve_columns(m)
-        cols, _ = ve_columns(m; sealed_faces = barrier, below_holes = :stack)
+        cols, _ = ve_columns(m; transmissibility_multiplier = _multipliers(m, barrier),
+                             below_holes = :stack)
         sh = ve_sheets(m, cols)
         @test sh.nsheets == 2 && sh.top == [true, false]
         @test count(==(2), sh.sheet) == 20 && count(==(1), sh.sheet) == 72
@@ -2874,7 +2950,8 @@ end
         # outer boundary; their sides' edges lie at their tops (the barrier)
         across = [f for f in axes(N, 2) if (a = ijk[N[1, f]]; b = ijk[N[2, f]];
                   a[1:2] == b[1:2] && 4 <= a[1] <= 8 && minmax(a[3], b[3]) == (3, 4))]
-        fc, _ = ve_columns(m; sealed_faces = across, below_holes = :stack)
+        fc, _ = ve_columns(m; transmissibility_multiplier = _multipliers(m, across),
+                           below_holes = :stack)
         nc = number_of_cells(m)
         fv = ve_domain(m, fc; perm_x = fill(1e-13, nc), poro = fill(0.2, nc))
         fs, _ = ve_boundary_sides(m, fc, fv.domain)

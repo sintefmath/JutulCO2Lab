@@ -61,11 +61,14 @@ function on_layer(f, (k, cols))
     return a[1] == b[1] && a[1] in cols && minmax(a[3], b[3]) == (k, k + 1)
 end
 sealed = [f for f in axes(N, 2) if any(l -> on_layer(f, l), layers)]
+# the layers seal: transmissibility multiplier 0 on their faces
+mult = ones(size(N, 2))
+mult[sealed] .= 0.0
 
 # --------------------------- 2. Spill-point analysis --------------------------
 
 # The VE grid: the pillars cut at the layers; each piece a VE column.
-columns, _ = ve_columns(mesh; sealed_faces = sealed, below_holes = :stack)
+columns, _ = ve_columns(mesh; transmissibility_multiplier = mult, below_holes = :stack)
 sheets = ve_sheets(mesh, columns)
 # Closed as in the simulation: the section's sides y = 0 and y = W and its
 # left end (sealed edges, which the trap analysis and the spill targets treat
@@ -173,8 +176,8 @@ rate = 4e6 / year
 # report steps `dt`
 function setup_run(kind, dt)
     cols = kind == :VE ? columns :
-           first(ve_columns(mesh; sealed_faces = sealed, is_ve = fill(false, nc),
-                            below_holes = :stack))
+           first(ve_columns(mesh; transmissibility_multiplier = mult,
+                            is_ve = fill(false, nc), below_holes = :stack))
     ve = ve_domain(mesh, cols; perm_x = perm, poro, temperature = 273.15 + 40)
     fluid = co2lab_ve_fluid(fine_fluid, mesh, cols; poro, perm_x = perm)
     model = setup_co2lab_model(ve.domain; wells = [injector(kind, ve, cols)], fluid)
