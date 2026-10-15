@@ -104,7 +104,8 @@ export setup_injection_case, simulate_injection_case, ve_boundary_loops
 export sloping_aquifer_grid, sloping_aquifer, rampup_timesteps
 
 include("ve/ve_top_surface.jl")
-export ve_top_surface, ve_contour_lines
+include("ve/ve_section.jl")
+export ve_top_surface, ve_contour_lines, ve_section
 
 # ----------------------------- CO2 Storage Atlas ------------------------------
 
@@ -155,6 +156,7 @@ export plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!
 export plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure
 export plot_traps, plot_traps!, ve_axis3
 export plot_trapping_history, plot_trapping_history!
+export plot_ve_section, plot_ve_section!
 export interactive_traps, interactive_traps!, show_column_values!
 
 # ------------------------------- Precompilation -------------------------------

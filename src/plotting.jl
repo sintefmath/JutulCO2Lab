@@ -153,6 +153,65 @@ Modifies: `ax`
 """
 function plot_ve_surface! end
 
+# -------------------------------- Cross-sections ------------------------------
+
+"""
+    plot_ve_section(section; exaggeration = 10, width = 1200, title = "",
+                    legend = true, kwarg...) -> Figure
+    plot_ve_section!(ax, section; ve_color = (:steelblue, 0.35),
+                     fine_color = (:darkorange, 0.5),
+                     outline = (color = :black, linewidth = 1),
+                     internal = (color = :grey60, linewidth = 0.5),
+                     sealed = (color = :red, linewidth = 2.5),
+                     leaky = (color = :red, linewidth = 2.5, linestyle = :dash))
+        -> ax
+
+A vertical cross-section of a VE or hybrid grid: VE blocks and fine 3D cells
+filled in two colours, block outlines in black, the fine cells inside VE
+blocks in grey, and barriers highlighted.
+
+# Arguments
+
+- `ax`: a 2D `Axis`; depth should point down (`yreversed = true`, as
+  `plot_ve_section` makes it).
+- `section`: the section ([`ve_section`](@ref)).
+- `ve_color`, `fine_color`: fill of the cells of VE blocks and of fine 3D
+  cells.
+- `outline`, `internal`, `sealed`, `leaky`: line attributes (a NamedTuple of
+  Makie `linesegments` attributes) of the section's segments of each kind:
+  the blocks' outlines, the faces between fine cells inside a VE block, and
+  sealed and leaky barrier faces; `nothing` leaves that kind out (e.g.
+  `internal = nothing` for VE blocks without their fine cells).
+- `exaggeration` (`plot_ve_section` only): vertical exaggeration of the
+  initial figure, which is sized for it; the axis is not locked to it, so
+  resizing the window changes it.
+- `width` (`plot_ve_section` only): the initial figure width (pixels).
+- `title`, `legend` (`plot_ve_section` only): the axis title, and a legend
+  (beside the axis) of the fills and the barrier kinds present. Other
+  keywords are passed on to `plot_ve_section!`.
+
+# Returns
+
+`plot_ve_section`: a new `Figure` with one axis. `plot_ve_section!`: `ax`.
+
+Modifies: `ax` (`plot_ve_section!`)
+
+# Example
+
+```julia
+section = ve_section(mesh, columns; along = :i, index = 10)
+show_figure(plot_ve_section(section; exaggeration = 20), "section_j10")
+```
+"""
+function plot_ve_section end
+
+"""
+    plot_ve_section!(ax, ...)
+
+The in-place form of [`plot_ve_section`](@ref), documented there.
+"""
+function plot_ve_section! end
+
 # ----------------------------- Traps and inventory ----------------------------
 
 """

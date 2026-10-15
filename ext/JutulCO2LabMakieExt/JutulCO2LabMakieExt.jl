@@ -1,7 +1,7 @@
 """
-Makie extension of JutulCO2Lab: map and 3D views of VE domains, CO2 Storage
-Atlas data, trapping analyses and trapping inventories, and the interactive
-trap viewer. Loaded with any Makie backend (GLMakie, CairoMakie, WGLMakie).
+Makie extension of JutulCO2Lab: map, 3D and cross-section views of VE
+domains, CO2 Storage Atlas data, trapping analyses and trapping inventories,
+and the interactive trap viewer. Loaded with any Makie backend (GLMakie, CairoMakie, WGLMakie).
 The public functions are documented where they are declared, in
 `src/plotting.jl`; the methods here carry only short comments.
 """
@@ -13,13 +13,15 @@ using Printf: @sprintf
 import JutulCO2Lab: plot_ve_map, plot_ve_map!, plot_atlas_map, plot_atlas_map!,
     plot_atlas_context!, plot_ve_outline!, plot_ve_surface!, show_figure,
     plot_traps, plot_traps!, ve_axis3, plot_trapping_history, plot_trapping_history!,
-    interactive_traps, interactive_traps!, show_column_values!
+    interactive_traps, interactive_traps!, show_column_values!, plot_ve_section,
+    plot_ve_section!
 
 include("map_plots.jl")
 include("atlas_plots.jl")
 include("trap_plots.jl")
 include("surface_3d.jl")
 include("inventory_plots.jl")
+include("section_plots.jl")
 include("interactive_traps.jl")
 
 # ------------------------------ Figures, backends -----------------------------

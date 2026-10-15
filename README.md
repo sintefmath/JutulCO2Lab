@@ -109,7 +109,9 @@ figures to `./figures` instead (`WGLMakie`: a browser page, for the demos).
 - Without data sets: `sloping_aquifer.jl` (co2lab's sloping aquifer, step by
   step), `residual_trapping.jl`, `dissolution.jl`, `layered_fringe.jl`
   (`LayeredFringe` against the single-effect models and 3D), `hybrid_grid.jl`
-  (fine cells around the injector, VE elsewhere), `atlas/show_top_surface_grids.jl`,
+  (fine cells around the injector, VE elsewhere), `ve_sections.jl`
+  (cross-sections: VE columns, 3D cells, holes and barriers; with
+  `Johansen/` also Johansen's), `atlas/show_top_surface_grids.jl`,
   `trapping/first_trapping_example.jl`, `trapping/sheets.jl`,
   `trapping/layered_traps.jl`.
 - With `Johansen/`: `johansen_ve.jl` (co2lab's `exampleVEJohansen.m`),
@@ -223,6 +225,7 @@ src/ve/                the VE simulator
   vebc.jl              VE boundary conditions
   vereconstruct.jl     3D states from VE states
   ve_top_surface.jl    the caprock in map view, contour lines
+  ve_section.jl        vertical cross-sections: VE blocks, 3D cells, barriers
   injection_case.jl    co2lab-demo's exploreSimulation scenario
   sloping_aquifer.jl   co2lab's sloping aquifer case
 

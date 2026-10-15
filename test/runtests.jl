@@ -1103,6 +1103,54 @@ end
             mesh; transmissibility_multiplier = m, barrier_multiplier = 0.1)
     end
 
+    @testset "cross-sections (ve_section)" begin
+        layered(i, k) = 1000.0 + 10.0 * (k - 1)
+        mesh = _cp_mesh(3, 3, layered)
+        nc, nf = number_of_cells(mesh), number_of_faces(mesh)
+        ijk = [cell_ijk(mesh, c) for c in 1:nc]
+        N = mesh.faces.neighbors
+        face(a, b) = only(f for f in 1:nf if Set(ijk[[N[f]...]]) == Set([a, b]))
+
+        # pillar 1 sealed between k = 1 and 2, pillar 2 a leaky barrier there,
+        # pillar 3 fine 3D cells
+        m = ones(nf)
+        m[face((1, 1, 1), (1, 1, 2))] = 0.0
+        m[face((2, 1, 1), (2, 1, 2))] = 0.01
+        cols, _ = ve_columns(mesh; transmissibility_multiplier = m,
+                             barrier_multiplier = 0.1, below_holes = :stack,
+                             is_ve = [ijk[c][1] != 3 for c in 1:nc])
+        sec = ve_section(mesh, cols; along = :i, index = 1)
+        @test sort(sec.cells) == 1:nc && all(sec.direction .≈ (1.0, 0.0))
+        @test sec.is_ve == [ijk[c][1] != 3 for c in sec.cells]
+        @test sec.block == cols.partition[sec.cells]
+
+        # cell (i, 1, k) spans x 100(i − 1) to 100i, depths from 1000 + 10(k − 1)
+        # down 10 m
+        corners(i, k) = (zt = 1000.0 + 10(k - 1);
+                         ((100.0(i - 1), zt), (100.0i, zt), (100.0i, zt + 10),
+                          (100.0(i - 1), zt + 10)))
+        @test all(all(all(sec.polygons[n][q] .≈ corners(ijk[c][1], ijk[c][3])[q])
+                      for q in 1:4) for (n, c) in enumerate(sec.cells))
+
+        # 12 horizontal and 12 lateral faces: the two barriers, the faces
+        # between k = 2 and 3 inside pillars 1 and 2's lower VE blocks, the
+        # rest outlines
+        count_of(k) = count(==(k), sec.kind)
+        @test length(sec.segments) == 24
+        @test (count_of(:sealed), count_of(:leaky), count_of(:internal)) == (1, 1, 2)
+        @test count_of(:outline) == 20
+        s = findfirst(==(:sealed), sec.kind)
+        @test all(sec.segments[s][1] .≈ (0.0, 1010.0)) &&
+              all(sec.segments[s][2] .≈ (100.0, 1010.0))
+
+        # along j through pillar 2: one pillar, so the y axis
+        sj = ve_section(mesh, cols; along = :j, index = 2)
+        @test length(sj.cells) == 3 && sj.direction == (0.0, 1.0)
+        @test extrema(p[1] for poly in sj.polygons for p in poly) == (0.0, 100.0)
+        @test_throws ArgumentError ve_section(mesh, cols; along = :k, index = 1)
+        @test_throws ArgumentError ve_section(mesh, cols; along = :i, index = 5)
+    end
+
     @testset "hybrid grid: blocks and face categories" begin
         J = JutulCO2Lab
         nc(m) = number_of_cells(m)

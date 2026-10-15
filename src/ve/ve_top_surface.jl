@@ -72,16 +72,22 @@ end
 # Nodes of cell c's top face: a boundary face, or the interior face to the
 # cell above (a block below another block, or below fine cells). Throws unless
 # there is exactly one
-function _top_face_nodes(mesh, ijk, bdir, c)
-    tops = [collect(mesh.boundary_faces.faces_to_nodes[f])
-            for f in mesh.boundary_faces.cells_to_faces[c] if bdir[f] == _TOP]
+_top_face_nodes(mesh, ijk, bdir, c) = _face_nodes_toward(mesh, ijk, bdir, c, _TOP)
+
+# Nodes of cell c's face in direction `dir` (_TOP or _BOTTOM): a boundary face
+# or the interior face to the cell above or below. Throws unless there is
+# exactly one
+function _face_nodes_toward(mesh, ijk, bdir, c, dir)
+    found = [collect(mesh.boundary_faces.faces_to_nodes[f])
+             for f in mesh.boundary_faces.cells_to_faces[c] if bdir[f] == dir]
     for f in mesh.faces.cells_to_faces[c]
         d, _ = _interior_face_direction(mesh, ijk, c, f)
-        d == _TOP && push!(tops, collect(mesh.faces.faces_to_nodes[f]))
+        d == dir && push!(found, collect(mesh.faces.faces_to_nodes[f]))
     end
-    length(tops) == 1 ||
-        error("cell $c ($(ijk[c])) has $(length(tops)) top faces, expected one")
-    return only(tops)
+    name = dir == _TOP ? "top" : "bottom"
+    length(found) == 1 ||
+        error("cell $c ($(ijk[c])) has $(length(found)) $name faces, expected one")
+    return only(found)
 end
 
 # Edges (node pairs, smaller first) that belong to exactly one polygon
