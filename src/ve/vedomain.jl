@@ -6,7 +6,84 @@
 # ------------------------- Rock and initial pressure --------------------------
 
 """
-    ve_average_rock(columns, dz; perm_x, perm_y = nothing, poro, ntg = nothing,
+    net_rock(mesh; poro, perm_x, perm_y = nothing, perm_z = nothing, ntg,
+             ntg_min = 0.0) -> NamedTuple
+
+Fold net-to-gross into the rock of a 3D mesh and remove the cells without net
+rock: the first step for a formation whose data give net-to-gross. The VE
+domain ([`ve_domain`](@ref)), the vertical models and a 3D model then all take
+the net rock; no net-to-gross is passed on.
+
+# Arguments
+
+- `mesh`: the 3D mesh, with logical indices (as for [`ve_columns`](@ref)).
+- `poro`: porosity per cell, of the whole (gross) cell.
+- `perm_x`, `perm_y`: lateral permeability (m²) per cell; `perm_y` optional.
+- `perm_z`: vertical permeability (m²) per cell; optional.
+- `ntg`: net-to-gross per cell (≥ 0), or `nothing` (the rock as given, no
+  cell removed).
+- `ntg_min`: cells with `ntg ≤ ntg_min` are removed. Default 0.
+
+# Returns
+
+The NamedTuple `(mesh, cells, poro, perm_x, perm_y, perm_z)`:
+
+- `mesh`: the mesh without the removed cells ([`ve_trim`](@ref)); `mesh`
+  itself, not a copy, when no cell is removed.
+- `cells`: the kept cells, as indices into the given `mesh` (for other
+  per-cell data).
+- `poro`, `perm_x`, `perm_y`: new vectors per kept cell, `poro · ntg`,
+  `perm_x · ntg`, `perm_y · ntg`; `perm_y` is `nothing` if not given.
+- `perm_z`: a new vector per kept cell, the given `perm_z` **not** scaled;
+  `nothing` if not given.
+
+Throws an `ArgumentError` if `ntg` has a wrong length, a negative or a `NaN`
+value.
+
+# Notes
+
+- Net-to-gross is the fraction of a cell's thickness that is reservoir rock;
+  the rest holds no pore space and lets nothing through laterally. Pore
+  volume and lateral flow scale with it, as with ECLIPSE's `NTG`.
+- Vertical permeability: a given `perm_z` is taken as effective already, the
+  non-reservoir part accounted for (ECLIPSE's `NTG` leaves vertical
+  transmissibility alone). Without it, [`ve_domain`](@ref) takes vertical
+  permeability from `perm_x`, so one permeability per cell is scaled in all
+  directions. JutulDarcy's `net_to_gross` scales lateral transmissibility
+  only, also then.
+- A removed cell is a hole, with no flow through it in any direction:
+  [`ve_columns`](@ref) cuts the pillar there (with `below_holes = :stack`,
+  a column above it and one below).
+- co2lab averages porosity and net-to-gross over a column separately and
+  multiplies the averages; that misses the pore volume where net-to-gross
+  varies within a column. The average of the product, as here, is exact.
+"""
+function net_rock(mesh; poro, perm_x, perm_y = nothing, perm_z = nothing, ntg,
+                  ntg_min::Real = 0.0)
+    nc = number_of_cells(mesh)
+    # no net-to-gross: every cell kept, the rock as given
+    isnothing(ntg) && return (mesh = mesh, cells = collect(1:nc), poro = copy(poro),
+                              perm_x = copy(perm_x), perm_y = _copy_or(perm_y),
+                              perm_z = _copy_or(perm_z))
+    length(ntg) == nc || throw(ArgumentError("ntg: one value per cell expected"))
+    all(>=(0), ntg) || throw(ArgumentError("ntg must be ≥ 0 and not NaN"))
+
+    # cells with net rock kept, the others removed from the mesh
+    cells = findall(>(ntg_min), ntg)
+    trimmed = ve_trim(mesh, setdiff(1:nc, cells))
+
+    # pore volume and lateral flow scale with net-to-gross; a given vertical
+    # permeability is effective already
+    net(x) = isnothing(x) ? nothing : x[cells] .* ntg[cells]
+    return (mesh = trimmed, cells = cells, poro = net(poro), perm_x = net(perm_x),
+            perm_y = net(perm_y), perm_z = isnothing(perm_z) ? nothing : perm_z[cells])
+end
+
+# A copy of x, or nothing
+_copy_or(x) = isnothing(x) ? nothing : copy(x)
+
+"""
+    ve_average_rock(columns, dz; perm_x, perm_y = nothing, poro,
                     anisotropy_rtol = 1e-6) -> NamedTuple
 
 Thickness-weighted column averages of the rock, `sum(x .* dz) / sum(dz)` per
@@ -19,13 +96,12 @@ column, exactly as co2lab's `averageRock`. Used by [`ve_domain`](@ref).
   ([`ve_column_geometry`](@ref)).
 - `perm_x`, `perm_y`: lateral permeability (m²) per fine cell of the 3D mesh;
   `perm_y` is only checked against `perm_x`.
-- `poro`, `ntg`: porosity and net-to-gross per fine cell; `ntg` optional.
+- `poro`: porosity per fine cell.
 - `anisotropy_rtol`: relative tolerance for `perm_y` differing from `perm_x`.
 
 # Returns
 
-The NamedTuple `(perm, poro, ntg)` of new per-column vectors; `ntg` is
-`nothing` if not given.
+The NamedTuple `(perm, poro)` of new per-column vectors.
 
 # Notes
 
@@ -34,18 +110,17 @@ The NamedTuple `(perm, poro, ntg)` of new per-column vectors; `ntg` is
   never used.
 - If `perm_y` differs from `perm_x` beyond `anisotropy_rtol` in any cell, a
   warning reports how many cells and the largest ratio; x is used anyway.
+- Net-to-gross: average the net rock ([`net_rock`](@ref)).
 """
 function ve_average_rock(columns::VEColumns, dz::AbstractVector;
-                         perm_x, perm_y = nothing, poro, ntg = nothing,
-                         anisotropy_rtol = 1e-6)
+                         perm_x, perm_y = nothing, poro, anisotropy_rtol = 1e-6)
     isnothing(perm_y) || _warn_lateral_anisotropy(perm_x, perm_y, anisotropy_rtol)
 
     # thickness-weighted average over each column's cells
     avg(x) = [sum(x[columns.cells[r]] .* dz[r]) / sum(dz[r])
               for r in (columns.pos[c]:(columns.pos[c+1] - 1)
                         for c in 1:number_of_columns(columns))]
-    return (perm = avg(perm_x), poro = avg(poro),
-            ntg = isnothing(ntg) ? nothing : avg(ntg))
+    return (perm = avg(perm_x), poro = avg(poro))
 end
 
 """
@@ -167,8 +242,8 @@ end
 
 """
     ve_domain(mesh, columns; perm_x, perm_y = nothing, perm_z = nothing, poro,
-              ntg = nothing, rugosity = 0.0, temperature = nothing,
-              fault_flux = :virtual) -> NamedTuple
+              rugosity = 0.0, temperature = nothing, fault_flux = :virtual)
+        -> NamedTuple
 
 Build the VE reservoir domain: a `CoarseMesh` over `mesh` with one block per
 column of `columns`, carrying the column-averaged rock and the data the VE
@@ -186,7 +261,6 @@ and fine 3D cells (hybrid grids); both are handled in full.
 - `perm_y`: only checked; VE uses `perm_x` (a warning if they differ).
 - `perm_z`: vertical permeability per fine cell, for vertical faces between
   blocks (stacked blocks, fine cells); default `perm_x`.
-- `ntg`: net-to-gross per fine cell, averaged like porosity.
 - `rugosity`: the caprock's rugosity `dh` (m), a number or one per column;
   the relperm loses an accretion layer `min(dh, H)` under the caprock
   (co2lab's `makeVEFluid` option).
@@ -203,8 +277,8 @@ and fine 3D cells (hybrid grids); both are handled in full.
 The NamedTuple `(domain, coarse, geometry, rock)`, all new:
 
 - `domain`: the `DataDomain` on the `CoarseMesh`, with
-  - per block: the averaged `:permeability`, `:porosity` and `:net_to_gross`
-    (if given); `:column_height`, `:rugosity`, `:temperature` (if given);
+  - per block: the averaged `:permeability` and `:porosity`;
+    `:column_height`, `:rugosity`, `:temperature` (if given);
     `:is_ve`; `:reference_depth`, the depth of the block's pressure (a VE
     block's caprock, a fine cell's centroid); `:pillar_columns`, the number
     of blocks in its pillar;
@@ -238,18 +312,18 @@ the blocks fall apart into unconnected pieces.
   from them. The caprock enters through `:gdz` and `:reference_depth`;
   anything needing a block's pressure depth must use `:reference_depth`,
   not the centroid.
+- Net-to-gross: pass the net rock of [`net_rock`](@ref) (with the mesh it
+  returns), so the domain carries no `:net_to_gross`.
 """
 function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing,
-                   perm_z = nothing, poro, ntg = nothing, rugosity = 0.0,
+                   perm_z = nothing, poro, rugosity = 0.0,
                    temperature = nothing, fault_flux::Symbol = :virtual)
     geometry = ve_column_geometry(mesh, columns)
-    rock = ve_average_rock(columns, geometry.dz; perm_x, perm_y, poro, ntg)
+    rock = ve_average_rock(columns, geometry.dz; perm_x, perm_y, poro)
 
     # the VE grid: one coarse cell per column
     coarse = CoarseMesh(mesh, columns.partition)
-    kw = isnothing(rock.ntg) ? (;) : (net_to_gross = rock.ntg,)
-    domain = reservoir_domain(coarse; permeability = rock.perm, porosity = rock.poro,
-                              kw...)
+    domain = reservoir_domain(coarse; permeability = rock.perm, porosity = rock.poro)
 
     # gravity between VE blocks from caprock depths, not mid-column centroids;
     # fine cells from their centroids
@@ -268,8 +342,7 @@ function ve_domain(mesh, columns::VEColumns; perm_x, perm_y = nothing,
 
     # the faces: categories, virtual-cell intervals, transmissibilities
     perm = [perm_x'; something(perm_y, perm_x)'; something(perm_z, perm_x)']
-    _set_face_data!(domain, mesh, columns, coarse, geometry, perm, poro, ntg,
-                    fault_flux)
+    _set_face_data!(domain, mesh, columns, coarse, geometry, perm, poro, fault_flux)
     return (domain = domain, coarse = coarse, geometry = geometry, rock = rock)
 end
 
@@ -307,8 +380,7 @@ function _pillar_columns(columns::VEColumns)
 end
 
 """
-    _set_face_data!(domain, mesh, columns, coarse, geometry, perm, poro, ntg,
-                    fault_flux)
+    _set_face_data!(domain, mesh, columns, coarse, geometry, perm, poro, fault_flux)
 
 Store each coarse face's category, virtual-cell intervals, common depth and
 transmissibility (see `vehybrid.jl`), and warn if the blocks fall apart.
@@ -318,14 +390,14 @@ Modifies: `domain` (sets `:face_category`, `:face_intervals`, `:face_depth`
 on `Faces()`, and `:transmissibilities` unless every face is continuous
 VE–VE).
 """
-function _set_face_data!(domain, mesh, columns, coarse, geometry, perm, poro, ntg,
+function _set_face_data!(domain, mesh, columns, coarse, geometry, perm, poro,
                          fault_flux)
     category = _face_categories(mesh, columns, coarse, fault_flux)
     intervals, depth = _face_intervals(mesh, columns, coarse, category, geometry)
     domain[:face_category, Faces()] = category
     domain[:face_intervals, Faces()] = intervals
     domain[:face_depth, Faces()] = depth
-    T = _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro, ntg)
+    T = _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro)
     isnothing(T) || (domain[:transmissibilities, Faces()] = T)
     # stacked or sealed blocks may fall apart
     stacked = any(>(1), domain[:pillar_columns])

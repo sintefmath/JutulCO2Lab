@@ -52,7 +52,7 @@ export VEColumnSides, ve_column_sides
 
 include("ve/vehybrid.jl")
 include("ve/vedomain.jl")
-export ve_average_rock, ve_domain, VEBoundarySides, ve_boundary_sides
+export net_rock, ve_average_rock, ve_domain, VEBoundarySides, ve_boundary_sides
 export ve_hydrostatic_pressure, ve_hydrostatic_profile, geothermal_gradient
 
 # ----------------------------- VE fluid and model -----------------------------

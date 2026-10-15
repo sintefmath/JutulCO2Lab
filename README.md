@@ -8,7 +8,8 @@ of MRST-co2lab, verified against it.
 What it covers:
 
 - **VE models on 3D grids**: columns (vertically connected stretches of a
-  pillar, stackable), thickness-averaged rock, the caprock datum, boundary
+  pillar, stackable), thickness-averaged rock (net-to-gross folded in, cells
+  without net rock removed), the caprock datum, boundary
   sides; co2lab's fluid system, VE relperm, capillary pressure, PVT (linear,
   or JutulDarcy's CO2–brine tables per column temperature), wells, pressure
   boundary conditions and reconstruction of 3D states.
@@ -128,7 +129,9 @@ JutulDarcy is patched.
 
 1. *3D mesh*: a Jutul `UnstructuredMesh` with logical `(i, j, k)` and a
    direction tag on every boundary face — from MRST (`ve_mesh_from_mrst`) or
-   from Jutul's own corner-point processing.
+   from Jutul's own corner-point processing. With net-to-gross, `net_rock`
+   folds it into porosity and permeability and removes the cells without
+   net rock (holes).
 2. *Columns*: `ve_columns` → `VEColumns`, the partition of fine cells into
    columns (vertically connected stretches of a pillar); `ve_trim` removes
    discarded cells.

@@ -28,7 +28,8 @@ Build the integrated sharp interface for one grid, to give to
 
 - `mesh`, `columns`: the 3D mesh and its VE columns ([`ve_columns`](@ref)).
 - `poro`, `perm_x`: porosity and x-permeability (m²) per cell of `mesh`, the
-  same as given to [`ve_domain`](@ref).
+  same as given to [`ve_domain`](@ref) (net rock with net-to-gross:
+  [`net_rock`](@ref)).
 - `perm_y`: only checked: the relperm uses `perm_x` only, as co2lab, and a
   warning is given if `perm_y` differs from it by more than `anisotropy_rtol`
   (relative) anywhere.

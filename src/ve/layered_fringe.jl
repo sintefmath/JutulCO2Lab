@@ -54,7 +54,7 @@ the fringe's profile, cell by cell, with the hysteresis law's residual CO2.
 
 - `mesh`, `columns`: the 3D mesh and its VE columns ([`ve_columns`](@ref)).
 - `poro`, `perm_x`: porosity and x-permeability (m²) per cell of `mesh`, as
-  given to [`ve_domain`](@ref).
+  given to [`ve_domain`](@ref) (net rock with net-to-gross: [`net_rock`](@ref)).
 - `perm_y`: only checked against `perm_x`, as for
   [`SharpInterfaceIntegrated`](@ref).
 - `invPc3D`: fine-scale brine saturation as a function of capillary

@@ -128,7 +128,7 @@ function _common_depth(columns, geo, F, (L, R), category)
 end
 
 """
-    _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro, ntg)
+    _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro)
         -> Union{Vector{Float64}, Nothing}
 
 The coarse faces' transmissibilities by category: 0 for sealed faces, the
@@ -138,12 +138,11 @@ fine grid's over the face's fine faces (`perm`: 3 × cells of `mesh`).
 Returns a new vector, or `nothing` when every face is continuous VE–VE (the
 coarse mesh's transmissibilities then apply unchanged).
 """
-function _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro, ntg)
+function _hybrid_transmissibility(domain, mesh, coarse, category, perm, poro)
     all(==(_FACE_VE), category) && return nothing
     T = JutulDarcy.reservoir_transmissibility(domain)
     if any(c -> c != _FACE_VE && c != _FACE_SEALED, category)
-        kw = isnothing(ntg) ? (;) : (net_to_gross = ntg,)
-        fine = reservoir_domain(mesh; permeability = perm, porosity = poro, kw...)
+        fine = reservoir_domain(mesh; permeability = perm, porosity = poro)
         Tf = JutulDarcy.reservoir_transmissibility(fine)
     end
     for f in eachindex(category)

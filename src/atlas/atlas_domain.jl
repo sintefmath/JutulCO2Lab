@@ -17,7 +17,8 @@ An Atlas formation as a VE domain, ready for
 `getFormationTopGrid(name, coarsening, 'vertical_layers', layers)`.
 
 Steps: the mesh of [`atlas_mesh`](@ref) (grid section, largest connected
-piece, columns), then the rock per 3D cell and [`ve_domain`](@ref).
+piece, columns), then the rock per 3D cell, its net rock ([`net_rock`](@ref))
+and [`ve_domain`](@ref).
 
 # Arguments
 
@@ -34,14 +35,18 @@ piece, columns), then the rock per 3D cell and [`ve_domain`](@ref).
 
 # Returns
 
-The NamedTuple `(mesh, columns, ve, grid, petro)`, all new:
+The NamedTuple `(mesh, columns, ve, grid, petro, rock)`, all new:
 
 - `mesh`: the 3D `UnstructuredMesh` of the largest connected piece.
 - `columns`: its `VEColumns`.
-- `ve`: [`ve_domain`](@ref)'s result.
+- `ve`: [`ve_domain`](@ref)'s result, on the net rock.
 - `grid`: the grid section, `"ACTNUM"` restricted to the mesh's cells.
 - `petro`: the formation's average rock `(perm, poro, ntg)`, with `perm` and
   `poro` as given.
+- `rock`: the gross rock per cell of `mesh`, `(perm_x, poro, ntg)`, as the
+  Atlas gives it (`ntg` is `nothing` without net-to-gross); its
+  [`net_rock`](@ref) is what `ve` holds, and what a vertical model over the
+  cells (e.g. [`LayeredFringe`](@ref)) takes.
 
 # Notes
 
@@ -51,6 +56,12 @@ The NamedTuple `(mesh, columns, ve, grid, petro)`, all new:
 - With rock maps, net-to-gross comes only from a net-to-gross map (co2lab
   then drops the Atlas's average net-to-gross, and so does this); without
   maps, from the average if the Atlas gives one.
+- Net-to-gross is folded into porosity and permeability per cell
+  ([`net_rock`](@ref)), so `ve.rock` and the domain hold net values where
+  co2lab's `rock2D` holds gross ones and a separate `ntg`. Net-to-gross is
+  constant over each Atlas column, so pore volumes and transmissibilities are
+  co2lab's. Cells with net-to-gross 0 would be removed and the mesh built
+  anew; no Atlas map has any.
 - co2lab makes the layers by refining a one-layer deck (`refineGrdecl`);
   the layers are the same up to rounding.
 """
@@ -68,8 +79,18 @@ function atlas_ve_domain(name::AbstractString; coarsening::Integer = 1,
                             "for $name: pass `perm` and `poro`"))
 
     rock = _atlas_cell_rock(m.grid, m.mesh, petro)
-    ve = ve_domain(m.mesh, m.columns; rock..., rugosity, temperature)
-    return (mesh = m.mesh, columns = m.columns, ve = ve, grid = m.grid, petro = petro)
+    # cells without net rock removed, the rest meshed anew
+    if !isnothing(rock.ntg) && any(<=(0), rock.ntg)
+        m = (; m..., grid_section_subset(m.grid, m.mesh, rock.ntg .> 0)...)
+        rock = _atlas_cell_rock(m.grid, m.mesh, petro)
+    end
+
+    # the domain on the net rock: net-to-gross in porosity and permeability
+    net = net_rock(m.mesh; rock...)
+    ve = ve_domain(m.mesh, m.columns; perm_x = net.perm_x, poro = net.poro, rugosity,
+                   temperature)
+    return (mesh = m.mesh, columns = m.columns, ve = ve, grid = m.grid, petro = petro,
+            rock = rock)
 end
 
 """
@@ -161,7 +182,7 @@ end
 
 # ------------------------------------ Rock ------------------------------------
 
-# Per 3D cell of `mesh` (NamedTuple for ve_domain: perm_x, poro, ntg): the
+# Per 3D cell of `mesh` (NamedTuple for net_rock: perm_x, poro, ntg): the
 # section's rock maps with NaN replaced by the averages (co2lab's updateNaNs),
 # or the averages where there are no maps
 function _atlas_cell_rock(grid, mesh, petro)

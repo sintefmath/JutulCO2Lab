@@ -92,7 +92,8 @@ upscaled over each column, with residual, PVT and dissolution taken from
 
 - `fluid`: the fine-scale fluid ([`FineScaleFluid`](@ref)).
 - `mesh`, `columns`: the 3D mesh and its columns ([`ve_columns`](@ref)).
-- `poro`, `perm_x`: porosity and x-permeability (m²) per cell of `mesh`.
+- `poro`, `perm_x`: porosity and x-permeability (m²) per cell of `mesh`, as
+  given to [`ve_domain`](@ref) (net rock with net-to-gross: [`net_rock`](@ref)).
 - `perm_y`: y-permeability per cell, only checked against `perm_x`.
 - `rock_type`: rock type per cell of `mesh` (index into
   `fluid.rock_types`); `nothing`: rock type 1 everywhere.

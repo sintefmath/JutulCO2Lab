@@ -968,6 +968,69 @@ end
         @test !JutulCO2Lab._is_ve([true, false], 2)
     end
 
+    @testset "net-to-gross: net rock, cells without net rock removed" begin
+        layered(i, k) = 1000.0 + 10.0 * (k - 1)
+        full = _cp_mesh(3, 3, layered)
+        n = number_of_cells(full)
+        ijk = [cell_ijk(full, c) for c in 1:n]
+        # net-to-gross 0 in a shale (pillars 1-2, k = 2), 0.2-1 elsewhere
+        ntg = [i <= 2 && k == 2 ? 0.0 : 0.2 * (i + k - 1) for (i, _, k) in ijk]
+        poro = [0.1 + 0.05k for (_, _, k) in ijk]
+        perm = fill(1e-13, n)
+        nk(m, cols) = [[cell_ijk(m, c)[3] for c in column_cells(cols, b)]
+                       for b in 1:number_of_columns(cols)]
+
+        # the shale removed: a hole, so stacked columns above and below it
+        net = net_rock(full; poro, perm_x = perm, ntg)
+        keep = findall(>(0), ntg)
+        @test net.cells == keep && number_of_cells(net.mesh) == length(keep)
+        @test net.poro ≈ poro[keep] .* ntg[keep] && net.perm_x ≈ perm[keep] .* ntg[keep]
+        @test isnothing(net.perm_y) && isnothing(net.perm_z)
+        cols, _ = ve_columns(net.mesh; below_holes = :stack)
+        @test nk(net.mesh, cols) == [[1], [3], [1], [3], [1, 2, 3]]
+
+        # a VE column's pore volume: the sum of the cells' vol·poro·ntg (not
+        # the product of column averages)
+        ve = ve_domain(net.mesh, cols; perm_x = net.perm_x, poro = net.poro)
+        vol = reservoir_domain(full; permeability = perm, porosity = poro)[:volumes]
+        c3 = findall(c -> c[1] == 3, ijk)
+        @test JutulDarcy.pore_volume(ve.domain)[5] ≈ sum((vol .* poro .* ntg)[c3])
+        @test !haskey(ve.domain, :net_to_gross)
+
+        # with perm_z given: JutulDarcy's net_to_gross (ECLIPSE's NTG), the
+        # same pore volumes and transmissibilities on every face
+        pos, kz = max.(ntg, 0.1), fill(2e-14, n)
+        net = net_rock(full; poro, perm_x = perm, perm_z = kz, ntg = pos)
+        @test net.mesh === full && net.perm_z == kz
+        ours = reservoir_domain(full; porosity = net.poro,
+                                permeability = [net.perm_x'; net.perm_x'; net.perm_z'])
+        jd = reservoir_domain(full; porosity = poro, permeability = [perm'; perm'; kz'],
+                              net_to_gross = pos)
+        T(d) = JutulDarcy.reservoir_transmissibility(d)
+        @test JutulDarcy.pore_volume(ours) ≈ JutulDarcy.pore_volume(jd)
+        @test T(ours) ≈ T(jd)
+
+        # one permeability per cell: scaled in all directions, so vertical
+        # faces (within a pillar) carry less than with JutulDarcy's
+        one = net_rock(full; poro, perm_x = perm, ntg = pos)
+        T1 = T(reservoir_domain(full; porosity = one.poro, permeability = one.perm_x))
+        Tj = T(reservoir_domain(full; porosity = poro, permeability = perm,
+                                net_to_gross = pos))
+        N = get_neighborship(full)
+        vert = [ijk[N[1, f]][1] == ijk[N[2, f]][1] for f in axes(N, 2)]
+        @test T1[.!vert] ≈ Tj[.!vert] && all(T1[vert] .< Tj[vert])
+
+        # a threshold; no net-to-gross; bad values
+        @test net_rock(full; poro, perm_x = perm, ntg, ntg_min = 0.5).cells ==
+              findall(>(0.5), ntg)
+        none = net_rock(full; poro, perm_x = perm, ntg = nothing)
+        @test none.mesh === full && none.poro == poro && none.poro !== poro
+        @test_throws ArgumentError net_rock(full; poro, perm_x = perm, ntg = ntg[2:end])
+        @test_throws ArgumentError net_rock(full; poro, perm_x = perm,
+                                            ntg = [NaN; ntg[2:end]])
+        @test_throws ArgumentError net_rock(full; poro, perm_x = perm, ntg = ntg .- 0.1)
+    end
+
     @testset "hybrid grid: blocks and face categories" begin
         J = JutulCO2Lab
         nc(m) = number_of_cells(m)
@@ -2662,7 +2725,7 @@ end
             g = JutulCO2Lab.Graphs.SimpleGraph(number_of_columns(o.columns))
             foreach(f -> JutulCO2Lab.Graphs.add_edge!(g, N[1, f], N[2, f]), axes(N, 2))
             @test JutulCO2Lab.Graphs.is_connected(g)
-            @test !any(isnan, o.ve.rock.perm) && !any(isnan, o.ve.rock.ntg)
+            @test !any(isnan, o.ve.rock.perm) && !any(isnan, o.rock.ntg)
             @test all(==(2), diff(o.columns.pos))
         end
     end

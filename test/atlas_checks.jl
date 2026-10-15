@@ -100,6 +100,17 @@ function _atlas_grids_vs_mrst(d)
     return rep
 end
 
+# The gross rock of an Atlas domain `o` (atlas_ve_domain) averaged over its
+# columns, as co2lab's rock2D: (perm, poro, ntg), ntg nothing if none
+function _gross_column_rock(o)
+    dz = o.ve.geometry.dz
+    rock = ve_average_rock(o.columns, dz; perm_x = o.rock.perm_x, poro = o.rock.poro)
+    # net-to-gross averaged as porosity is
+    ntg = isnothing(o.rock.ntg) ? nothing :
+          ve_average_rock(o.columns, dz; perm_x = o.rock.ntg, poro = o.rock.ntg).poro
+    return (; rock..., ntg)
+end
+
 # atlas_formations.mat:
 # getFormationTopGrid's Gt and rock2D for eight formation/coarsening/layer
 # cases. Julia removes cells thinner than 1 mm, which co2lab keeps: its
@@ -134,7 +145,7 @@ function _atlas_domains_vs_mrst(d)
         check!(rep, "$label: removed columns thinner than 1 mm per layer",
                count(>=(1e-3 * L), H_m[gone]), 0; tol = exact)
 
-        dom, geo, rock = ve.domain, ve.geometry, ve.rock
+        dom, geo, rock = ve.domain, ve.geometry, _gross_column_rock(o)
         N = dom[:neighbors]
         F = Int.(e["face_pairs"])
         kept = Set(p)
@@ -153,10 +164,13 @@ function _atlas_domains_vs_mrst(d)
         check!(rep, "$label: has ntg", isnothing(rock.ntg) ? 0 : 1, has_ntg ? 1 : 0;
                tol = exact)
         has_ntg && check!(rep, "$label: ntg", rock.ntg, vec(e["ntg"])[p]; tol = rel)
+        # the domain's net rock: co2lab's averages times its net-to-gross
+        ntg_m = has_ntg ? vec(e["ntg"])[p] : 1.0
+        check!(rep, "$label: net perm, poro", [ve.rock.perm; ve.rock.poro],
+               [vec(e["perm"])[p] .* ntg_m; vec(e["poro"])[p] .* ntg_m]; tol = rel)
 
         # pore volume: 3D cell volumes against MRST's area·H
-        ntg = has_ntg ? rock.ntg : 1.0
-        pv = dom[:volumes] .* dom[:porosity] .* ntg
+        pv = dom[:volumes] .* dom[:porosity]
         check!(rep, "$label: pore volume (≤ 0.2 %)", pv, vec(e["pore_volume"])[p];
                tol = Tolerance(2e-3, 0.0))
     end
@@ -186,11 +200,12 @@ function _atlas_all_vs_mrst(d)
         check!(rep, "$name: total height", sum(ve.geometry.H), e["sum_height"];
                tol = Tolerance(1e-7, 0.0))
         norock && continue
-        ntg = isnothing(ve.rock.ntg) ? 1.0 : ve.rock.ntg
-        pv = sum(ve.domain[:volumes] .* ve.domain[:porosity] .* ntg)
+        pv = sum(ve.domain[:volumes] .* ve.domain[:porosity])
         check!(rep, "$name: total pore volume", pv, e["pore_volume"];
                tol = Tolerance(1e-4, 0.0))
-        check!(rep, "$name: mean perm, poro", [mean(ve.rock.perm), mean(ve.rock.poro)],
+        # co2lab's means are of the gross rock
+        rock = _gross_column_rock(o)
+        check!(rep, "$name: mean perm, poro", [mean(rock.perm), mean(rock.poro)],
                [e["mean_perm"], e["mean_poro"]]; tol = Tolerance(1e-12, 0.0))
     end
     return rep
