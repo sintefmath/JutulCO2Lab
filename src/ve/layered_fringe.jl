@@ -40,7 +40,7 @@
     LayeredFringe(mesh, columns; poro, perm_x, invPc3D, kr3D = 3, krw3D = :linear,
                   rock_type = nothing, hysteresis = EndpointScaling(), perm_y = nothing,
                   geometry = ve_column_geometry(mesh, columns), tolerance = 1e-6,
-                  tip_saturation = 1e-6, touched_saturation = 1e-3) -> LayeredFringe
+                  tip_height = 1e-6, touched_saturation = 1e-3) -> LayeredFringe
 
 Vertical model for a capillary fringe in VE columns whose rock varies with
 depth: co2lab's `'P-scaled table'` fringe combined with the layers of
@@ -72,8 +72,12 @@ the fringe's profile, cell by cell, with the hysteresis law's residual CO2.
   (default, co2lab's) or [`FixedResidual`](@ref).
 - `geometry`: the columns' geometry ([`ve_column_geometry`](@ref)), computed
   if not given.
-- `tolerance`, `tip_saturation`, `touched_saturation`: as for
-  [`CapillaryFringeTable`](@ref).
+- `tip_height`: the plume tip, as a fraction of the column height `H`:
+  below the CO2 saturation of a profile reaching `tip_height·H` below the
+  depth where CO2 first enters the column, the capillary height is taken
+  linear in the saturation (the exact height has an unbounded slope at zero
+  CO2 for many curves).  Default `1e-6`.
+- `tolerance`, `touched_saturation`: as for [`CapillaryFringeTable`](@ref).
 
 # Returns
 
@@ -87,7 +91,8 @@ A new `LayeredFringe`, valid only for this grid.
   capillarity this is co2lab's accretion layer, as for
   [`SharpInterfaceIntegrated`](@ref).
 - With uniform rock, the heights and CO2 relperm equal those of
-  [`CapillaryFringeTable`](@ref).
+  [`CapillaryFringeTable`](@ref), except below the tip (that model's tip is
+  a saturation).
 """
 struct LayeredFringe{W, L <: HysteresisLaw} <: VerticalModel
     cells::SharpInterfaceIntegrated          # per column: cell boundaries, ∫φA, ∫k_x dz
@@ -95,13 +100,14 @@ struct LayeredFringe{W, L <: HysteresisLaw} <: VerticalModel
     krw3D::Vector{W}                         # per rock type: brine relperm, or :linear
     cell_type::Vector{Int}                   # rock type of cell a of `cells`
     law::L                                   # hysteresis law
+    tip_height::Float64                      # plume tip, fraction of column height
 end
 
 function LayeredFringe(mesh, columns::VEColumns; poro, perm_x, invPc3D, kr3D = 3,
                        krw3D = :linear, rock_type = nothing,
                        hysteresis::HysteresisLaw = EndpointScaling(), perm_y = nothing,
                        geometry = ve_column_geometry(mesh, columns),
-                       tolerance = 1e-6, tip_saturation = 1e-6,
+                       tolerance = 1e-6, tip_height = 1e-6,
                        touched_saturation = 1e-3)
     types = something(rock_type, ones(Int, number_of_cells(mesh)))
     n = maximum(types)
@@ -116,11 +122,11 @@ function LayeredFringe(mesh, columns::VEColumns; poro, perm_x, invPc3D, kr3D = 3
     cells = SharpInterfaceIntegrated(mesh, columns; poro, perm_x, perm_y, geometry)
     # (nothing: no capillarity, a step at p = 0 to the residual brine)
     fringes = [CapillaryFringeTable(; invPc3D = pc, kr3D = kr, tolerance,
-                                    tip_saturation, touched_saturation)
+                                    touched_saturation)
                for (pc, kr) in zip(curves[1], curves[2])]
     krw = [kw for kw in curves[3]]
     return LayeredFringe(cells, fringes, krw, _cell_types(cells, columns, types),
-                         hysteresis)
+                         hysteresis, Float64(tip_height))
 end
 
 # One value per rock type: a vector as given, a single value for all n
@@ -184,6 +190,7 @@ struct LayeredFringeModel{T, W, L} <: VerticalModel
     res_gas::Float64                 # residual CO2 saturation
     law::L                           # hysteresis law
     p_res::Vector{Float64}           # per rock type: capillary pressure where s = r_g
+    tip_height::Float64              # plume tip, fraction of column height
 end
 
 # The model belongs to its grid; the tables as CapillaryFringeTable's
@@ -192,7 +199,8 @@ function _vertical_model(spec::LayeredFringe, domain, fluid)
     tables = [_fringe_table(f, domain, fluid) for f in spec.fringes]
     p_res = [_residual_pressure(t, fluid.res_gas) for t in tables]
     return LayeredFringeModel(spec.cells, tables, spec.krw3D, spec.cell_type,
-                              fluid.res_water, fluid.res_gas, spec.law, p_res)
+                              fluid.res_water, fluid.res_gas, spec.law, p_res,
+                              spec.tip_height)
 end
 
 # The capillary pressure at which table t's drainage CO2 saturation reaches
@@ -250,7 +258,12 @@ function _interval_integrals(m::LayeredFringeModel, i, T, B, h, h_max, drho)
     free, smax, co2, kf, km, krG, krW = z0, z0, z0, z0, z0, z0, z0
     pv, kz = 0.0, 0.0
     hv = max(Jutul.value(h), Jutul.value(h_max))
-    for a in _cell_range(c, i)
+    # cells below both profiles hold brine only: with brine relperm 1 there,
+    # they are summed in one step after the loop (the column's running sums)
+    r = _cell_range(c, i)
+    bulk = all(kw -> _brine_relperm_full(kw) == 1.0, m.krw3D)
+    stop = bulk ? _last_profile_cell(c, r, hv) : last(r)
+    for a in first(r):stop
         top, bot = max(c.z[a], T), min(c.z[a+1], B)
         bot > top || continue
         dz = c.z[a+1] - c.z[a]
@@ -269,9 +282,23 @@ function _interval_integrals(m::LayeredFringeModel, i, T, B, h, h_max, drho)
         krG += k * kg
         krW += k * _brine_integral(m, a, top, bot, s, h, h_max, dg)
     end
+
+    # the brine-only cells below, from the running sums of pore volume and k dz
+    top, bot = max(c.z[stop+1], T), min(c.z[last(r)+1], B)
+    if bulk && bot > top
+        dk = _integral(c, i, c.K, bot) - _integral(c, i, c.K, top)
+        pv += _integral(c, i, c.V, bot) - _integral(c, i, c.V, top)
+        kz, krW = kz + dk, krW + dk
+    end
     return (free = free, max = smax, co2 = co2, kfree = kf, kmax = km, krG = krG,
             krW = krW, pv = pv, kz = kz)
 end
+
+# The last cell of the range `r` (indices into the cell boundaries of `c`)
+# whose top is not below depth `hv`: the cells after it lie below both
+# profiles (the top cell always counts: an empty column's slope at S = 0)
+_last_profile_cell(c, r, hv) =
+    first(r) + clamp(searchsortedlast(view(c.z, r), hv), 1, length(r)) - 1
 
 # Cell a's integrals over [top, bot] (within it): ∫ s dz of the free (h) and
 # maximum (h_max) drainage profiles and of the actual saturation, and ∫ kr dz
@@ -350,13 +377,46 @@ The capillary height of column `i` whose drainage profile holds the CO2
 saturation `S` (pore-volume weighted), at density difference `drho`: the root
 of `Σ φA ∫ s dz − S·V` over the column. Solved on plain values to round-off,
 the derivatives by one Newton step with the AD values; below the tip
-saturation linear in `S`, as [`CapillaryFringeTable`](@ref). Zero for
-`drho ≤ 0`.
+([`_tip`](@ref)) linear in `S`. Zero for `drho ≤ 0`.
 """
 function _layered_height(m::LayeredFringeModel, i, S, drho)
-    tip = _settings(m).tip
-    Jutul.value(S) < tip && return _layered_newton(m, i, tip, drho) * S / tip
+    Jutul.value(drho) > 0 || return zero(S) + zero(drho)
+    ht, St = _tip(m, i, drho)
+    Jutul.value(S) < Jutul.value(St) && return ht * S / St
     return _layered_newton(m, i, S, drho)
+end
+
+"""
+    _tip(m, i, drho) -> (h_t, S_t)
+
+Column `i`'s plume tip at density difference `drho`: the height
+`h_t = h_e + tip_height·H` (`h_e` the entry height, where CO2 first enters
+the column) and the CO2 saturation `S_t` of the drainage profile reaching
+it. Below `S_t` the capillary height is taken linear in the saturation,
+`h_t·S/S_t`: the exact height has an unbounded slope at zero CO2 for many
+curves. Both are direct evaluations, no root search. Returns the tuple,
+with AD derivatives in `drho`; for `drho ≤ 0` a zero height.
+"""
+function _tip(m::LayeredFringeModel, i, drho)
+    # no buoyancy (an unphysical state Newton may pass through): no height
+    Jutul.value(drho) > 0 || return (zero(drho), zero(drho) + m.tip_height)
+    Hc, V = _column_extent(m.cells, i)
+    ht = _entry_height(m, i, drho * Jutul.gravity_constant) + m.tip_height * Hc
+    return (ht, _profile_volume(m, i, ht, drho) / V)
+end
+
+# The height at which CO2 first enters column i: the least cell top plus its
+# entry pressure over Δρ g (dg); 0 without entry pressure in the top cell
+function _entry_height(m::LayeredFringeModel, i, dg)
+    c = m.cells
+    he = zero(dg) + Inf
+    for a in _cell_range(c, i)
+        # cells starting below the best so far cannot do better
+        c.z[a] >= Jutul.value(he) && break
+        e = c.z[a] + _table(m, a).entry / dg
+        Jutul.value(e) < Jutul.value(he) && (he = e)
+    end
+    return he
 end
 
 # The root on plain values, then one Newton step with the AD values
@@ -474,7 +534,8 @@ function _fixed_height(m::LayeredFringeModel, i, S, h_max, drho)
     Hc, V = _column_extent(m.cells, i)
     d, hm, v = Jutul.value(drho), Jutul.value(h_max), Jutul.value(S) * V
     F(h) = _interval_integrals(m, i, 0.0, Hc, h, hm, d).co2
-    v >= F(hm) && return z0 + h_max
+    # on the drainage profile (to round-off): the maximum's height
+    v >= F(hm) * (1 - 1e-12) && return z0 + h_max
     co2(h) = _interval_integrals(m, i, 0.0, Hc, h, h_max, drho).co2
     F0 = F(0.0)
     if v <= F0
@@ -563,11 +624,15 @@ _column_brine(::EndpointScaling, m, i, sG, sGmax, h_max, drho, top, Hc, I, rw, r
 # saturation, not a free one, sets the height)
 function _column_brine(::FixedResidual, m, i, sG, sGmax, h_max, drho, top, Hc, I, rw,
                        rg)
-    tip, sm = _settings(m).tip, Jutul.value(sGmax)
-    sm >= tip && return I.krW
-    ratio = sm > 1e-12 * tip ? sG / sGmax : (sm > 0 ? Jutul.value(sG) / sm : 1.0)
-    ht = _layered_newton(m, i, tip, drho)
-    hr = _fixed_height(m, i, tip * ratio, ht, drho)
+    sm = Jutul.value(sGmax)
+    ht, tip = _tip(m, i, drho)
+    sm >= Jutul.value(tip) && return I.krW
+    ratio = sm > 1e-12 * Jutul.value(tip) ? sG / sGmax :
+            (sm > 0 ? Jutul.value(sG) / sm : 1.0)
+    # at S = S_max (an empty column's ray) nothing is trapped: the height is
+    # the maximum profile's, no root search needed
+    hr = ratio isa Float64 && ratio == 1.0 ? ht :
+         _fixed_height(m, i, tip * ratio, ht, drho)
     J = _interval_integrals(m, i, top, Hc, hr, ht, drho)
     return I.kz - (I.kz - J.krW) * sGmax / tip
 end
@@ -582,17 +647,16 @@ end
 # subscale relief), and so does the result.
 function _tip_brine_relperm(m::LayeredFringeModel, i, Sf, Sm, h_max, drho, top, Hc,
                             I)
-    tip = _settings(m).tip
-    sf, sm = Jutul.value(Sf), Jutul.value(Sm)
+    ht, St = _tip(m, i, drho)
+    tip, sf, sm = Jutul.value(St), Jutul.value(Sf), Jutul.value(Sm)
     (sf >= tip && sm >= tip) && return I.krW
-    ht = _layered_newton(m, i, tip, drho)
     at(hf, hm) = _interval_integrals(m, i, top, Hc, hf, hm, drho)
     if all(kw -> kw isa Symbol, m.krw3D)
         # linear krw3D: the deficit is ((1 − C)·kfree + C·kmax)/(1 − r_w)
         C = m.res_gas / (1 - m.res_water)
         Kt = at(ht, ht).kfree
-        Kf = sf < tip ? Kt * Sf / tip : I.kfree
-        Km = sm < tip ? Kt * Sm / tip : I.kmax
+        Kf = sf < tip ? Kt * Sf / St : I.kfree
+        Km = sm < tip ? Kt * Sm / St : I.kmax
         return I.kz - ((1 - C) * Kf + C * Km) / (1 - m.res_water)
     elseif sm < tip
         # the whole column below the tip: along the ray to S_max = tip (an
@@ -601,12 +665,12 @@ function _tip_brine_relperm(m::LayeredFringeModel, i, Sf, Sm, h_max, drho, top, 
         # derivatives would overflow (they are scaled by S_max/tip anyway)
         ratio = sm > 1e-12 * tip ? Sf / Sm : (sm > 0 ? sf / sm : 1.0)
         # (below the tip h is linear in S, as everywhere: no solve at tiny S)
-        J = at(_layered_height(m, i, tip * ratio, drho), ht)
-        return I.kz - (I.kz - J.krW) * Sm / tip
+        J = at(_layered_height(m, i, St * ratio, drho), ht)
+        return I.kz - (I.kz - J.krW) * Sm / St
     end
     # only the free profile below the tip
     D0, Dt = I.kz - at(0.0, h_max).krW, I.kz - at(ht, h_max).krW
-    return I.kz - (D0 + (Dt - D0) * Sf / tip)
+    return I.kz - (D0 + (Dt - D0) * Sf / St)
 end
 
 # Each fine cell's average of the actual and the maximum profile (cell

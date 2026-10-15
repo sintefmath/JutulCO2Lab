@@ -1610,12 +1610,22 @@ end
         build(v) = J._vertical_model(v, dom, fl(v))
         uniform = (poro = fill(0.2, 40), perm_x = fill(1e-13, 40))
 
-        # uniform rock: CapillaryFringeTable's heights and krG; krW co2lab's
-        # krW_simple less r_w/(1 − r_w)·(S − S_free) (the integrated brine)
-        for invpc in curves
+        # uniform rock: CapillaryFringeTable's heights and krG above the tip;
+        # krW co2lab's krW_simple less r_w/(1 − r_w)·(S − S_free) (the
+        # integrated brine)
+        for (invpc, entry) in zip(curves, (0.0, pe))
             mu = build(LayeredFringe(mesh, cols; uniform..., invPc3D = invpc, kr3D = 2))
             mc = build(CapillaryFringeTable(; invPc3D = invpc, kr3D = 2))
-            for (s, smax) in ((1e-7, 1e-7), (0.05, 0.05), (0.2, 0.4), (0.79, 0.79))
+
+            # the tip: tip_height·H below the entry height; below it the height
+            # linear in the saturation, meeting the exact one at S_t
+            ht, St = J._tip(mu, 2, drho)
+            @test ht ≈ entry / (drho * g) + 1e-6 * H rtol = 1e-12
+            @test 0 < St < 1e-5
+            @test J._layered_height(mu, 2, St / 3, drho) ≈ ht / 3 rtol = 1e-12
+            @test J._layered_newton(mu, 2, St, drho) ≈ ht rtol = 1e-8
+
+            for (s, smax) in ((0.05, 0.05), (0.2, 0.4), (0.79, 0.79))
                 hu = J._column_heights(mu, 2, s, smax, H, drho, rw, rg)
                 hc = J._column_heights(mc, 2, s, smax, H, drho, rw, rg)
                 @test all(isapprox.(hu, hc; rtol = 1e-12))
