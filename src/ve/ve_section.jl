@@ -48,7 +48,9 @@ Throws an `ArgumentError` for an unknown `along` or a section without cells.
 - A cell is drawn from its top and bottom faces seen side-on: each face's
   corners are split into the half nearer the section's start and the half
   farther along, and each half averaged (the row's front and back). Lateral
-  faces are split by depth the same way.
+  faces are split by depth the same way. Only a face's corners count: nodes
+  on its straight edges (where faces of neighbouring columns do not match)
+  are left out.
 - The direction runs from the row's first to its last pillar (the mean of
   their cells' top-face nodes), so `s` is close to x (or y) on grids aligned
   with the axes; with a single pillar, the x (or y) axis.
@@ -105,9 +107,36 @@ end
 # Cell c's corners in the section's plane: its top and bottom faces side-on,
 # (top left, top right, bottom right, bottom left)
 function _cell_polygon(mesh, ijk, bdir, c, sz)
-    tl, tr = _split_ends(sz.(_face_nodes_toward(mesh, ijk, bdir, c, _TOP)), 1)
-    bl, br = _split_ends(sz.(_face_nodes_toward(mesh, ijk, bdir, c, _BOTTOM)), 1)
+    top = _face_corners(mesh, _face_nodes_toward(mesh, ijk, bdir, c, _TOP))
+    bottom = _face_corners(mesh, _face_nodes_toward(mesh, ijk, bdir, c, _BOTTOM))
+    tl, tr = _split_ends(sz.(top), 1)
+    bl, br = _split_ends(sz.(bottom), 1)
     return (tl, tr, br, bl)
+end
+
+# A face's corners: its nodes that do not lie between two others. Where
+# neighbouring columns' faces do not match, the mesh has extra nodes on a
+# face's straight edges (not always listed in order along the edge); averaged
+# in, they would pull the face's ends seen side-on towards its middle. All
+# nodes if fewer than three corners remain (a degenerate face).
+function _face_corners(mesh, nodes)
+    pts = mesh.node_points
+    # one node per point: a point listed twice would count as between itself
+    v = unique(n -> pts[n], nodes)
+    between(k) = any(_on_segment(pts[v[a]], pts[v[k]], pts[v[b]])
+                     for a in eachindex(v), b in eachindex(v) if a != k != b != a)
+    corners = [v[k] for k in eachindex(v) if !between(k)]
+    return length(corners) >= 3 ? corners : collect(nodes)
+end
+
+# Whether point b lies on the segment from a to c, to a tolerance relative to
+# its length
+function _on_segment(a, b, c; tol = 1e-6)
+    ac = c - a
+    L2 = dot(ac, ac)
+    L2 == 0 && return false
+    t = dot(b - a, ac) / L2
+    return -tol <= t <= 1 + tol && norm(b - a - t * ac) <= tol * sqrt(L2)
 end
 
 # The faces of the section's cells that lie in its plane (top, bottom, lateral
@@ -122,24 +151,24 @@ function _section_segments(mesh, ijk, bdir, columns, cells, along, sz)
             d, o = _interior_face_direction(mesh, ijk, c, f)
             (d in dirs && !(f in seen)) || continue
             push!(seen, f)
-            push!(segments, _side_on(mesh.faces.faces_to_nodes[f], d, sz))
+            push!(segments, _side_on(mesh, mesh.faces.faces_to_nodes[f], d, sz))
             push!(kind, _section_face_kind(f, c, o, columns, sealed, leaky))
         end
         # boundary faces: a block's outline
         for f in mesh.boundary_faces.cells_to_faces[c]
             bdir[f] in dirs || continue
             nodes = mesh.boundary_faces.faces_to_nodes[f]
-            push!(segments, _side_on(nodes, bdir[f], sz))
+            push!(segments, _side_on(mesh, nodes, bdir[f], sz))
             push!(kind, :outline)
         end
     end
     return (segments, kind)
 end
 
-# A face side-on: a top or bottom face split along the section, a lateral one
-# by depth
-_side_on(nodes, dir, sz) =
-    _split_ends(sz.(collect(nodes)), dir in (_TOP, _BOTTOM) ? 1 : 2)
+# A face side-on, from its corners: a top or bottom face split along the
+# section, a lateral one by depth
+_side_on(mesh, nodes, dir, sz) =
+    _split_ends(sz.(_face_corners(mesh, nodes)), dir in (_TOP, _BOTTOM) ? 1 : 2)
 
 # The kind of interior face f between cell c and cell o: a barrier, inside one
 # VE block, or a block's outline

@@ -1151,6 +1151,37 @@ end
         @test_throws ArgumentError ve_section(mesh, cols; along = :i, index = 5)
     end
 
+    @testset "cross-sections where neighbouring columns do not match" begin
+        # 3 × 1 × 2 cells, 5 m layers; each column's corners offset in depth by
+        # off[i][ii + 1][jj + 1] (ii: left/right, jj: front/back). Columns 1 and
+        # 2 tilt oppositely at their shared pillars, so their layers' edges
+        # cross there and the mesh gets extra nodes on the cells' edges.
+        off = (((0.0, 0.0), (0.0, 4.0)), ((3.0, 1.0), (2.0, 2.0)),
+               ((0.0, 0.0), (0.0, 0.0)))
+        coord = Float64[]
+        for j in 0:1, i in 0:3
+            append!(coord, [i * 100.0, j * 100.0, 0.0, i * 100.0, j * 100.0, 2000.0])
+        end
+        zc = [1000.0 + 5.0 * (k - 1 + s) + off[i][ii + 1][jj + 1]
+              for k in 1:2 for s in (0, 1) for jj in 0:1 for i in 1:3 for ii in 0:1]
+        grid = Dict("cartDims" => [3, 1, 2], "COORD" => coord, "ZCORN" => zc,
+                    "ACTNUM" => fill(true, 3, 1, 2))
+        mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+        @test any(length(mesh.faces.faces_to_nodes[f]) > 4
+                  for f in 1:number_of_faces(mesh))
+
+        # each cell drawn with its corners at its pillars, at the mean of the
+        # front and back corners' depths
+        cols, _ = ve_columns(mesh; below_holes = :stack)
+        sec = ve_section(mesh, cols; along = :i, index = 1)
+        depth(i, ii, k) = 1000.0 + 5.0 * (k - 1) + sum(off[i][ii + 1]) / 2
+        expected(i, k) = ((100.0(i - 1), depth(i, 0, k)), (100.0i, depth(i, 1, k)),
+                          (100.0i, depth(i, 1, k + 1)), (100.0(i - 1), depth(i, 0, k + 1)))
+        ijk = [cell_ijk(mesh, c) for c in sec.cells]
+        @test all(all(all(sec.polygons[n][q] .≈ expected(ijk[n][1], ijk[n][3])[q])
+                      for q in 1:4) for n in eachindex(sec.cells))
+    end
+
     @testset "hybrid grid: blocks and face categories" begin
         J = JutulCO2Lab
         nc(m) = number_of_cells(m)
