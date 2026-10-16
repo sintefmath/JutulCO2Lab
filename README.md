@@ -34,37 +34,36 @@ returned objects are listed in dependency order in `STRUCTURES.md`.
 
 ## Installation
 
-JutulCO2Lab currently needs a Jutul with fixes not yet in a Jutul release
-accepted by JutulDarcy, and a pinned JutulDarcy and GeoEnergyIO. Put the
-checkouts side by side:
+JutulCO2Lab runs on Jutul 0.5 and JutulDarcy 0.4 (ForwardDiff 1). It needs
+two checkouts until fixes are released: JutulDarcy 0.4.0 with a well-flux fix
+(branch `well-flux-ad-ties`, sintefmath/JutulDarcy.jl#326), and GeoEnergyIO
+1.2.0 with two corner-point fixes (#72, #73). Jutul comes from the registry.
+Put the checkouts side by side:
 
 ```
 <parent>/
   JutulCO2Lab/            this repository
-  Jutul.jl-fork/          Jutul, branch co2lab-jutul-merge
-  JutulDarcy.jl/          JutulDarcy at ef1cfca5 (0.3.12 + two fixes)
-  GeoEnergyIO.jl-fork/    GeoEnergyIO, branch co2lab-jutul-merge
+  JutulDarcy.jl/          JutulDarcy, branch well-flux-ad-ties
+  GeoEnergyIO.jl-fork/    GeoEnergyIO, branch co2lab-jutul-merge-1.2
   mrst-data/              data sets for most examples (below)
 ```
 
 ```
 cd <parent>
 git clone https://github.com/sintefmath/JutulCO2Lab.git
-git clone -b co2lab-jutul-merge https://github.com/Oddan/Jutul.jl.git Jutul.jl-fork
-git clone -b co2lab-jutul-merge https://github.com/Oddan/GeoEnergyIO.jl.git GeoEnergyIO.jl-fork
-git clone https://github.com/sintefmath/JutulDarcy.jl.git JutulDarcy.jl
-git -C JutulDarcy.jl checkout ef1cfca5
+git clone -b well-flux-ad-ties https://github.com/sintefmath/JutulDarcy.jl.git JutulDarcy.jl
+git clone -b co2lab-jutul-merge-1.2 https://github.com/Oddan/GeoEnergyIO.jl.git GeoEnergyIO.jl-fork
 ```
 
-Then, with Julia 1.12, use the three checkouts in the package's and the
+Then, with Julia 1.12, use the two checkouts in the package's and the
 examples' environments, and run the tests (several minutes):
 
 ```
 cd <parent>/JutulCO2Lab
 julia --project=. -e 'using Pkg; Pkg.develop([PackageSpec(path = p) for p in
-    ("../Jutul.jl-fork", "../JutulDarcy.jl", "../GeoEnergyIO.jl-fork")])'
+    ("../JutulDarcy.jl", "../GeoEnergyIO.jl-fork")])'
 julia --project=examples -e 'using Pkg; Pkg.develop([PackageSpec(path = p) for p in
-    (".", "../Jutul.jl-fork", "../JutulDarcy.jl", "../GeoEnergyIO.jl-fork")])'
+    (".", "../JutulDarcy.jl", "../GeoEnergyIO.jl-fork")])'
 julia --threads=8 --project=. -e 'using Pkg; Pkg.test()'
 ```
 
@@ -73,11 +72,10 @@ ends with a toolchain smoke test (a small stock immiscible case); if that
 fails, the environment is the problem. Tests comparing with MRST reference
 dumps or needing data sets are skipped when those are missing.
 
-What the forks carry: Jutul 0.4.31 (the version JutulDarcy 0.3.12 accepts)
-plus fixes merged upstream in the Jutul 0.5 line (#358, #360, #380) and
-strided threading of secondary variables (#385); GeoEnergyIO 1.1.34 plus a
-boundary-face fix (#66, in 1.2.0). Once a JutulDarcy release accepts Jutul 0.5,
-registered versions replace them.
+What the branches carry: JutulDarcy 0.4.0 plus the fix of #326 (shut wells
+converged only linearly under ForwardDiff 1); GeoEnergyIO 1.2.0 plus #72 and
+#73 (extra nodes on corner-point edges). Once these are released, registered
+versions replace them.
 
 ### Data sets
 

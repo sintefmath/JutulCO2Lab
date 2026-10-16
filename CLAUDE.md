@@ -129,6 +129,10 @@ thing is, why it exists and how to use it, not how it is implemented.
 - **Poor convergence** (time-step cuts, stalls) points to an error in the
   physics or the code: trace it (which cells, which equations, how the
   iterates move) before changing solver settings.
+- **Branch on plain values:** decide branches (`if`, comparisons, upwinding,
+  clamps) on `_plain(x)`, not on AD values: under ForwardDiff 1 two values
+  that tie are compared by their derivatives, so the branch, and with it the
+  Jacobian, would depend on them.
 - **Test suite:** small and fast; 3D cases with at most 20 cells vertically.
   High resolutions belong in separate comparison scripts.
 - **Plots on geological grids:** depth downward (`zreversed`); Makie's
