@@ -35,15 +35,15 @@ returned objects are listed in dependency order in `STRUCTURES.md`.
 ## Installation
 
 JutulCO2Lab runs on Jutul 0.5 and JutulDarcy 0.4 (ForwardDiff 1). It needs
-two checkouts until fixes are released: JutulDarcy 0.4.0 with a well-flux fix
-(branch `well-flux-ad-ties`, sintefmath/JutulDarcy.jl#326), and GeoEnergyIO
+two checkouts until fixes are released: JutulDarcy `main` from `1a79f300`
+(0.4.0 plus a well-flux fix, sintefmath/JutulDarcy.jl#326), and GeoEnergyIO
 1.2.0 with two corner-point fixes (#72, #73). Jutul comes from the registry.
 Put the checkouts side by side:
 
 ```
 <parent>/
   JutulCO2Lab/            this repository
-  JutulDarcy.jl/          JutulDarcy, branch well-flux-ad-ties
+  JutulDarcy.jl/          JutulDarcy, main (from 1a79f300)
   GeoEnergyIO.jl-fork/    GeoEnergyIO, branch co2lab-jutul-merge-1.2
   mrst-data/              data sets for most examples (below)
 ```
@@ -51,7 +51,7 @@ Put the checkouts side by side:
 ```
 cd <parent>
 git clone https://github.com/sintefmath/JutulCO2Lab.git
-git clone -b well-flux-ad-ties https://github.com/sintefmath/JutulDarcy.jl.git JutulDarcy.jl
+git clone https://github.com/sintefmath/JutulDarcy.jl.git JutulDarcy.jl
 git clone -b co2lab-jutul-merge-1.2 https://github.com/Oddan/GeoEnergyIO.jl.git GeoEnergyIO.jl-fork
 ```
 
@@ -72,10 +72,10 @@ ends with a toolchain smoke test (a small stock immiscible case); if that
 fails, the environment is the problem. Tests comparing with MRST reference
 dumps or needing data sets are skipped when those are missing.
 
-What the branches carry: JutulDarcy 0.4.0 plus the fix of #326 (shut wells
-converged only linearly under ForwardDiff 1); GeoEnergyIO 1.2.0 plus #72 and
-#73 (extra nodes on corner-point edges). Once these are released, registered
-versions replace them.
+What the checkouts carry: JutulDarcy 0.4.0 plus #326, merged but not yet
+released (shut wells converged only linearly under ForwardDiff 1); GeoEnergyIO
+1.2.0 plus #72 and #73 (extra nodes on corner-point edges). Once these are
+released, registered versions replace them.
 
 ### Data sets
 
