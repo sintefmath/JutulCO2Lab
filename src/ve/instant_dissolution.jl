@@ -67,7 +67,7 @@ Jutul.scalarized_primary_variable_type(model, ::DissolvedOrFreeCO2, T = Float64)
 function Jutul.scalarize_primary_variable(model, source_vec, ::DissolvedOrFreeCO2, index;
                                           numeric::Bool = false)
     x = source_vec[index]
-    xval = Jutul.value(x.val)
+    xval = _plain(x.val)
     # numeric: the plain value alone (for the linear algebra)
     return numeric ? xval : BlackOilX(xval, x.phases_present, x.sat_close)
 end
@@ -134,14 +134,14 @@ end
 function _update_co2lab_x(v, x::BlackOilX, dx)
     val = x.val
     if x.phases_present == OilOnly
-        rs = Jutul.value(val) + dx
+        rs = _plain(val) + dx
         # at dis_max the brine is saturated; free CO2 starts at zero
         rs >= v.dis_max && return BlackOilX(replace_value(val, 0.0), OilAndGas, false)
         return BlackOilX(replace_value(val, max(rs, 0.0)), OilOnly, false)
     end
 
     ds = clamp(dx, -v.ds_max, v.ds_max)
-    sg = clamp(Jutul.value(val) + ds, 0.0, 1 - v.res_water)
+    sg = clamp(_plain(val) + ds, 0.0, 1 - v.res_water)
     # free CO2 gone: undersaturated, just below dis_max
     ds < 0 && sg == 0 &&
         return BlackOilX(replace_value(val, v.dis_max - eps()), OilOnly, false)

@@ -159,7 +159,7 @@ Reservoir-volume flux (m³/s) of one phase *into* the column through `bc`
 function _ve_bc_volume_flux(bc, p_ph, mob_ph, rho_ph, mob_t, sat_ph, g)
     dP = bc.pressure - p_ph - rho_ph * g * bc.dz
     # inflow: the boundary's fluid at the column's total mobility (MRST's rule)
-    return dP > 0 ? mob_t * bc.trans * dP * sat_ph : mob_ph * bc.trans * dP
+    return _plain(dP) > 0 ? mob_t * bc.trans * dP * sat_ph : mob_ph * bc.trans * dP
 end
 
 """

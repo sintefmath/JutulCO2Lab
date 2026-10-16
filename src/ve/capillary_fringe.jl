@@ -154,7 +154,7 @@ _table_drho(m::PScaledTable, i, drho) = drho / m.kscale[i]
 # √smax, outgrowing the free CO2, and Newton cycles).
 function _untouched_brine(m::PScaledTable, i, smax, h_max, H, drho)
     drho_g = _table_drho(m, i, drho) * Jutul.gravity_constant
-    if Jutul.value(smax) < m.touched
+    if _plain(smax) < m.touched
         pc_t = _pc_newton(m, m.touched, H, _table_drho(m, i, drho))
         h_t = _max_c(pc_t - m.entry, 0.0) / drho_g * smax / m.touched
     else
@@ -285,7 +285,7 @@ cubic Hermite on the nodes (at `x = 0` with the slope from the right, the
 plume's), linear beyond the last node. `x` may carry AD derivatives.
 """
 function _table_value(m::PScaledTable, Y, dY, x)
-    xv = Jutul.value(x)
+    xv = _plain(x)
     xv < 0 && return zero(x)
     n = length(m.p)
     xv >= m.p[n] && return Y[n] + dY[n] * (x - m.p[n])
@@ -316,7 +316,7 @@ as residual CO2 (endpoint scaling; Nilsen et al. 2016, eq. 17).
 function _free_saturation(sg, sGmax, rw, rg)
     fsg = ((1 - rw) * sg - sGmax * rg) / (1 - rw - rg)
     # drainage (no residual trapping): the saturation itself
-    sg >= sGmax && (fsg = sg)
+    _plain(sg) >= _plain(sGmax) && (fsg = sg)
     return _max_c(fsg, 0.0)
 end
 
@@ -331,7 +331,7 @@ one Newton step with the AD values. Below the tip saturation, linear in `sg`
 from 0 to its value there.
 """
 function _fringe_capillary_pressure(m::PScaledTable, sg, H, drho)
-    sv = Jutul.value(sg)
+    sv = _plain(sg)
     if sv < m.tip
         # the plume tip: linear in the saturation (Pc at the tip keeps Δρ's
         # derivatives)
@@ -342,8 +342,8 @@ end
 
 # The root on plain values, then one Newton step with the AD values
 function _pc_newton(m, sg, H, drho)
-    dP = Jutul.value(drho) * Jutul.gravity_constant * H
-    pc = _solve_pc(m, Jutul.value(sg) * dP, dP)
+    dP = _plain(drho) * Jutul.gravity_constant * H
+    pc = _solve_pc(m, _plain(sg) * dP, dP)
     dPad = drho * Jutul.gravity_constant * H
     F = _SP(m, pc) - _SP(m, pc - dPad) - sg * dPad
     dF = _table_slope(m, m.SP, m.s, pc) - _table_slope(m, m.SP, m.s, pc - dP)

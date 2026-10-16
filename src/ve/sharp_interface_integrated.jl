@@ -82,7 +82,7 @@ end
 # integrateVertically): linear within each cell, at a boundary the slope below
 function _integral(m::SharpInterfaceIntegrated, i, Y, h)
     r = m.pos[i]:(m.pos[i+1] - 1)
-    k = clamp(searchsortedlast(view(m.z, r), Jutul.value(h)), 1, length(r) - 1)
+    k = clamp(searchsortedlast(view(m.z, r), _plain(h)), 1, length(r) - 1)
     a = first(r) + k - 1
     dz = m.z[a+1] - m.z[a]
     dz > 0 || return zero(h) + Y[a+1]
@@ -94,7 +94,7 @@ end
 function _inverse(m::SharpInterfaceIntegrated, i, Y, v)
     r = m.pos[i]:(m.pos[i+1] - 1)
     # the cell where Y passes v; from the top cell at v = 0 (its derivative)
-    k = Jutul.value(v) <= 0 ? 1 : searchsortedlast(view(Y, r), Jutul.value(v))
+    k = _plain(v) <= 0 ? 1 : searchsortedlast(view(Y, r), _plain(v))
     a = first(r) + clamp(k, 1, length(r) - 1) - 1
     dY = Y[a+1] - Y[a]
     # a cell without pore volume: its top

@@ -73,7 +73,7 @@ _free_saturation(::EndpointScaling, s, smax, rw, rg) = _free_saturation(s, smax,
 _fine_kr_saturation(law::EndpointScaling, s, smax, rw, rg) =
     _free_saturation(law, s, smax, rw, rg)
 _fine_kr_saturation(::FixedResidual, s, smax, rw, rg) =
-    (Jutul.value(s) < Jutul.value(smax) && Jutul.value(s) <= rg) ? zero(s) : s
+    (_plain(s) < _plain(smax) && _plain(s) <= rg) ? zero(s) : s
 
 # The saturation a fine cell's capillary pressure is taken at: endpoint
 # scaling's free saturation; with a fixed residual the saturation itself

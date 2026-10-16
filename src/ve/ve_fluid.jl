@@ -316,17 +316,24 @@ end
 
 # ---------------------------------- Formulas ----------------------------------
 
+# The plain value of `x`, every level of AD derivatives removed: what branches
+# decide on.  ForwardDiff (from 1.0) breaks a tie between a value with
+# derivatives and another by their derivatives; co2lab's rules decide on the
+# values, and a tie must take the branch the rule names.
+_plain(x::Jutul.ForwardDiff.Dual) = _plain(Jutul.ForwardDiff.value(x))
+_plain(x) = x
+
 # Clamps with MRST's tie rule for AD max/min: against a constant, a tie keeps
 # the variable and its derivative; between two variables, the second.  Julia's
 # max(x, 0) and min(u, v) break ties the other way.  That matters: a cell just
 # switched to saturated sits at sG = 0 exactly, and a lost derivative there
 # makes Newton overshoot (instantaneous dissolution cycles).
 "`max(x, c)` for a constant `c`; a tie keeps `x`."
-_max_c(x, c) = x < c ? zero(x) + c : x
+_max_c(x, c) = _plain(x) < _plain(c) ? zero(x) + c : x
 "`min(x, c)` for a constant `c`; a tie keeps `x`."
-_min_c(x, c) = x > c ? zero(x) + c : x
+_min_c(x, c) = _plain(x) > _plain(c) ? zero(x) + c : x
 "`min(u, v)` of two variables; a tie keeps `v`."
-_min_v(u, v) = u < v ? u : v
+_min_v(u, v) = _plain(u) < _plain(v) ? u : v
 
 """
     _effective_max(sGmax, sG, rw, rg) -> Real
@@ -343,8 +350,8 @@ _min_v(u, v) = u < v ? u : v
 """
 function _effective_max(sGmax, sG, rw, rg)
     m = _min_c(sGmax, 1 - rw)
-    rg > 0 && return m >= sG ? m : sG
-    return max(m, sG)
+    rg > 0 && return _plain(m) >= _plain(sG) ? m : sG
+    return _plain(m) > _plain(sG) ? m : sG
 end
 
 """

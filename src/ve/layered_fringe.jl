@@ -257,7 +257,7 @@ function _interval_integrals(m::LayeredFringeModel, i, T, B, h, h_max, drho)
     z0 = zero(h) + zero(h_max) + zero(drho)
     free, smax, co2, kf, km, krG, krW = z0, z0, z0, z0, z0, z0, z0
     pv, kz = 0.0, 0.0
-    hv = max(Jutul.value(h), Jutul.value(h_max))
+    hv = max(_plain(h), _plain(h_max))
     # cells below both profiles hold brine only: with brine relperm 1 there,
     # they are summed in one step after the loop (the column's running sums)
     r = _cell_range(c, i)
@@ -353,7 +353,7 @@ function _brine_quadrature(t, krw3D, m, top, bot, h, h_max, dg, p_res)
     # fixed residual) the pressure holding r_g
     ps = m.law isa FixedResidual ? (0.0, t.entry, p_res) : (0.0, t.entry)
     kinks = [z0 + x - e / dg for x in (h, h_max) for e in ps]
-    inside = filter(z -> top < Jutul.value(z) < bot, kinks)
+    inside = filter(z -> top < _plain(z) < bot, kinks)
     cuts = sort!([z0 + top; inside; z0 + bot]; by = Jutul.value)
     return sum(_gl_integral(z -> krw3D(sw(z)), a, b)
                for (a, b) in zip(cuts[1:end-1], cuts[2:end]))
@@ -380,9 +380,9 @@ the derivatives by one Newton step with the AD values; below the tip
 ([`_tip`](@ref)) linear in `S`. Zero for `drho ≤ 0`.
 """
 function _layered_height(m::LayeredFringeModel, i, S, drho)
-    Jutul.value(drho) > 0 || return zero(S) + zero(drho)
+    _plain(drho) > 0 || return zero(S) + zero(drho)
     ht, St = _tip(m, i, drho)
-    Jutul.value(S) < Jutul.value(St) && return ht * S / St
+    _plain(S) < _plain(St) && return ht * S / St
     return _layered_newton(m, i, S, drho)
 end
 
@@ -399,7 +399,7 @@ with AD derivatives in `drho`; for `drho ≤ 0` a zero height.
 """
 function _tip(m::LayeredFringeModel, i, drho)
     # no buoyancy (an unphysical state Newton may pass through): no height
-    Jutul.value(drho) > 0 || return (zero(drho), zero(drho) + m.tip_height)
+    _plain(drho) > 0 || return (zero(drho), zero(drho) + m.tip_height)
     Hc, V = _column_extent(m.cells, i)
     ht = _entry_height(m, i, drho * Jutul.gravity_constant) + m.tip_height * Hc
     return (ht, _profile_volume(m, i, ht, drho) / V)
@@ -412,9 +412,9 @@ function _entry_height(m::LayeredFringeModel, i, dg)
     he = zero(dg) + Inf
     for a in _cell_range(c, i)
         # cells starting below the best so far cannot do better
-        c.z[a] >= Jutul.value(he) && break
+        c.z[a] >= _plain(he) && break
         e = c.z[a] + _table(m, a).entry / dg
-        Jutul.value(e) < Jutul.value(he) && (he = e)
+        _plain(e) < _plain(he) && (he = e)
     end
     return he
 end
@@ -424,11 +424,11 @@ function _layered_newton(m, i, S, drho)
     # no buoyancy (CO2 as dense as brine: an unphysical state Newton may pass
     # through, or Jutul's sparsity detection's placeholder state): no height,
     # as CapillaryFringeTable's
-    Jutul.value(drho) > 0 || return zero(S) + zero(drho)
+    _plain(drho) > 0 || return zero(S) + zero(drho)
     _, V = _column_extent(m.cells, i)
-    h = _solve_layered(m, i, Jutul.value(S) * V, Jutul.value(drho))
+    h = _solve_layered(m, i, _plain(S) * V, _plain(drho))
     F = _profile_volume(m, i, h, drho) - S * V
-    dF = _profile_slope(m, i, h, Jutul.value(drho))
+    dF = _profile_slope(m, i, h, _plain(drho))
     # a full column: h is not determined (any larger one fills it too)
     dF > 0 || return zero(F) + h
     return h - F / dF
@@ -441,7 +441,7 @@ function _profile_volume(m, i, h, drho)
     dg = drho * Jutul.gravity_constant
     v = zero(h) + zero(dg)
     for a in _cell_range(c, i)
-        c.z[a] > Jutul.value(h) && break
+        c.z[a] > _plain(h) && break
         dz = c.z[a+1] - c.z[a]
         dz > 0 || continue
         phiA = (c.V[a+1] - c.V[a]) / dz
@@ -530,9 +530,9 @@ Special cases:
 """
 function _fixed_height(m::LayeredFringeModel, i, S, h_max, drho)
     z0 = zero(S) + zero(h_max) + zero(drho)
-    Jutul.value(drho) > 0 || return z0
+    _plain(drho) > 0 || return z0
     Hc, V = _column_extent(m.cells, i)
-    d, hm, v = Jutul.value(drho), Jutul.value(h_max), Jutul.value(S) * V
+    d, hm, v = _plain(drho), _plain(h_max), _plain(S) * V
     F(h) = _interval_integrals(m, i, 0.0, Hc, h, hm, d).co2
     # on the drainage profile (to round-off): the maximum's height
     v >= F(hm) * (1 - 1e-12) && return z0 + h_max
@@ -555,8 +555,8 @@ end
 # rule's y²: x and y of a round-off trace of CO2 (subnormal, ~1e-316) would
 # square to 0 and make the derivatives NaN, though k/y and x/y are moderate
 function _scaled_ratio(k, x, y)
-    yv = Jutul.value(y)
-    ky, r = k / yv, Jutul.value(x) / yv
+    yv = _plain(y)
+    ky, r = k / yv, _plain(x) / yv
     return ky * x - ky * r * (y - yv)
 end
 
@@ -624,11 +624,11 @@ _column_brine(::EndpointScaling, m, i, sG, sGmax, h_max, drho, top, Hc, I, rw, r
 # saturation, not a free one, sets the height)
 function _column_brine(::FixedResidual, m, i, sG, sGmax, h_max, drho, top, Hc, I, rw,
                        rg)
-    sm = Jutul.value(sGmax)
+    sm = _plain(sGmax)
     ht, tip = _tip(m, i, drho)
-    sm >= Jutul.value(tip) && return I.krW
-    ratio = sm > 1e-12 * Jutul.value(tip) ? sG / sGmax :
-            (sm > 0 ? Jutul.value(sG) / sm : 1.0)
+    sm >= _plain(tip) && return I.krW
+    ratio = sm > 1e-12 * _plain(tip) ? sG / sGmax :
+            (sm > 0 ? _plain(sG) / sm : 1.0)
     # at S = S_max (an empty column's ray) nothing is trapped: the height is
     # the maximum profile's, no root search needed
     hr = ratio isa Float64 && ratio == 1.0 ? ht :
@@ -648,7 +648,7 @@ end
 function _tip_brine_relperm(m::LayeredFringeModel, i, Sf, Sm, h_max, drho, top, Hc,
                             I)
     ht, St = _tip(m, i, drho)
-    tip, sf, sm = Jutul.value(St), Jutul.value(Sf), Jutul.value(Sm)
+    tip, sf, sm = _plain(St), _plain(Sf), _plain(Sm)
     (sf >= tip && sm >= tip) && return I.krW
     at(hf, hm) = _interval_integrals(m, i, top, Hc, hf, hm, drho)
     if all(kw -> kw isa Symbol, m.krw3D)
@@ -690,7 +690,7 @@ end
 # CapillaryFringeTable's)
 function _untouched_brine(m::LayeredFringeModel, i, smax, h_max, H, drho)
     c, touched = m.cells, _settings(m).touched
-    if Jutul.value(smax) < touched
+    if _plain(smax) < touched
         ht = _layered_height(m, i, touched, drho)
         h_t = _touched_depth(m, i, ht, drho) * smax / touched
     else
@@ -709,7 +709,7 @@ function _touched_depth(m::LayeredFringeModel, i, hh, drho)
     d = zero(hh) + zero(dg)
     for a in _cell_range(c, i)
         reach = hh - _table(m, a).entry / dg
-        Jutul.value(reach) > c.z[a] || continue
+        _plain(reach) > c.z[a] || continue
         d = _min_c(reach, c.z[a+1])
     end
     return _max_c(d, 0.0)

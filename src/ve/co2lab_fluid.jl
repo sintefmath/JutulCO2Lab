@@ -93,7 +93,8 @@ end
 # another tag.
 function _with_formulation(sys::StandardBlackOilSystem, f::Symbol)
     P = typeof(sys).parameters
-    T = StandardBlackOilSystem{P[1], P[2], P[3], P[4], f, P[6], P[7], P[8]}
+    # the formulation is the fifth type parameter; the others kept as they are
+    T = StandardBlackOilSystem{P[1:4]..., f, P[6:end]...}
     return T((getfield(sys, k) for k in fieldnames(typeof(sys)))...)
 end
 
@@ -142,7 +143,7 @@ function Jutul.update_primary_variable!(state, v::FineGasSaturation, state_symbo
     for i in eachindex(s)
         t = v.rock_type[i]
         t == 0 && continue
-        k = _crossed_kink(v.kinks[t], old[i], Jutul.value(s[i]))
+        k = _crossed_kink(v.kinks[t], old[i], _plain(s[i]))
         isnothing(k) || (s[i] = replace_value(s[i], k))
     end
     return s
@@ -249,7 +250,7 @@ Modifies: `sGmax`.
 function _update_max_gas_saturation!(sGmax, v::MaxGasSaturation, sG)
     for i in eachindex(sGmax, sG)
         # value: sG may carry derivatives, the stored sGmax must not
-        sGmax[i] = min(max(sGmax[i], Jutul.value(sG[i])), 1 - v.res_water)
+        sGmax[i] = min(max(sGmax[i], _plain(sG[i])), 1 - v.res_water)
     end
     return sGmax
 end
@@ -504,7 +505,7 @@ function _co2_face_fluxes(state, model, ldisc, faces = nothing)
             f = faces[ld.face]
             ψ, λb = _transition_terms(ld.face, state, model, f)
             sgn = ld.self == f.left ? 1 : -1
-            rs = Jutul.upwind(Jutul.SPU(f.left, f.right), state.Rs, ψ[1])
+            rs = Jutul.upwind(Jutul.SPU(f.left, f.right), state.Rs, _plain(ψ[1]))
             out_dis += ρV * rs * λb[1] * sgn * ψ[1]
             in_free -= ρV * λb[2] * sgn * ψ[2]
             continue
@@ -515,7 +516,7 @@ function _co2_face_fluxes(state, model, ldisc, faces = nothing)
         ψ = darcy_permeability_potential_differences(ld.face, state, model,
                                                      Jutul.DefaultFlux(), kgrad, upw)
         bλL = phase_upwind(upw, state.SurfaceVolumeMobilities, 1, ψ[1])
-        rs = Jutul.upwind(upw, state.Rs, ψ[1])
+        rs = Jutul.upwind(upw, state.Rs, _plain(ψ[1]))
         out_dis += ρV * rs * bλL * ψ[1]
 
         # free CO2 counts inflow, hence the sign
@@ -1082,8 +1083,12 @@ function setup_co2lab_state(model; pressure, sG = 0.0, rs = 0.0, forces = nothin
         if g isa JutulDarcy.WellGroup
             # the facility: no rates yet, each BHP at its well's first perforation
             p_bh = [first_perf_pressure(model[w]) for w in g.well_symbols]
-            init[k] = Dict(:TotalSurfaceMassRate => 0.0, :SurfacePhaseRates => 0.0,
-                           :BottomHolePressure => p_bh)
+            init[k] = Dict{Symbol, Any}(:TotalSurfaceMassRate => 0.0,
+                                        :SurfacePhaseRates => 0.0,
+                                        :BottomHolePressure => p_bh)
+            # (JutulDarcy 0.4's facilities also carry component rates)
+            haskey(Jutul.get_primary_variables(m), :SurfaceComponentRates) &&
+                (init[k][:SurfaceComponentRates] = 0.0)
         else
             init[k] = _wellbore_init(m, first_perf_pressure(m), _injected_sg(forces, k))
         end

@@ -112,7 +112,7 @@ function JutulDarcy.component_mass_fluxes!(q, face, state,
     s = kgrad.left == f.left ? 1 : -1
     ρS = reference_densities(model.system)
     rs = JutulDarcy.has_disgas(model.system) ?
-         Jutul.upwind(Jutul.SPU(f.left, f.right), state.Rs, ψ[1]) : 0.0
+         Jutul.upwind(Jutul.SPU(f.left, f.right), state.Rs, _plain(ψ[1])) : 0.0
     # brine; CO2 free and dissolved in the brine
     q = Base.setindex(q, s * ρS[1] * λb[1] * ψ[1], 1)
     q = Base.setindex(q, s * ρS[2] * (λb[2] * ψ[2] + rs * λb[1] * ψ[1]), 2)
@@ -143,7 +143,8 @@ end
 # The potentials (left to right) and each phase's upwind mobility b·kr/μ
 function _transition_terms(face, state, model, f::VEFace)
     ψ = _transition_potentials(face, state, f)
-    λb = ntuple(ph -> _transition_mobility(state, model, f, ψ[ph] >= 0 ? 1 : 2, ph), 2)
+    λb = ntuple(ph -> _transition_mobility(state, model, f, _plain(ψ[ph]) >= 0 ? 1 : 2,
+                                           ph), 2)
     return (ψ, λb)
 end
 
