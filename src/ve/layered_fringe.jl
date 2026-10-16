@@ -493,6 +493,17 @@ function _solve_layered(m, i, v, drho)
     return h
 end
 
+# dh/dS of the drainage relation (_layered_height) at saturation `smax` and its
+# height `hm` (plain values): linear below the tip, else V over the profile's
+# slope
+function _drainage_slope(m, i, smax, hm, drho)
+    ht, St = _tip(m, i, drho)
+    smax < St && return ht / St
+    _, V = _column_extent(m.cells, i)
+    s = _profile_slope(m, i, hm, drho)
+    return s > 0 ? V / s : 0.0
+end
+
 # ------------------------- Vertical-model interface ---------------------------
 
 # Capillary heights of the mobile and of the maximum profile: endpoint scaling
@@ -507,14 +518,14 @@ end
 
 function _column_heights(::FixedResidual, m, i, sG, sGmax, drho, rw, rg)
     h_max = _layered_height(m, i, sGmax, drho)
-    return (_fixed_height(m, i, sG, h_max, drho), h_max)
+    return (_fixed_height(m, i, sG, sGmax, h_max, drho), h_max)
 end
 
 """
-    _fixed_height(m, i, S, h_max, drho) -> Real
+    _fixed_height(m, i, S, S_max, h_max, drho) -> Real
 
 Capillary height of column `i` under a fixed residual, holding the CO2
-saturation `S` after the maximum profile at `h_max`.
+saturation `S` after the maximum profile at `h_max` (of saturation `S_max`).
 
 It is the root of the column's CO2 less `S·V`, which is monotone in the
 height (slope `φ·(s_top − r_g)` ≥ 0 wherever the mobile profile holds more
@@ -522,20 +533,28 @@ than `r_g`).  Solved on plain values to round-off; derivatives by one Newton
 step with the AD values.
 
 Special cases:
-- `S` at or above the maximum profile's CO2: `h_max`.
+- `S` at the maximum profile's CO2 (drainage, to round-off): `h_max`, moving
+  with `S` along the drainage relation, not with `S_max` (which follows `S`
+  there): a Newton step from a drainage state then sees the height's
+  dependence on `S`. Above `S_max` (a maximum not yet updated): `h_max`.
 - `S` below the CO2 at height 0 (all trapped; dissolution can take more):
   linear in `S` from the largest height still holding that much (the mobile
   profile then holds none above `r_g`).
 - `drho ≤ 0`: zero.
 """
-function _fixed_height(m::LayeredFringeModel, i, S, h_max, drho)
-    z0 = zero(S) + zero(h_max) + zero(drho)
+function _fixed_height(m::LayeredFringeModel, i, S, S_max, h_max, drho)
+    z0 = zero(S) + zero(S_max) + zero(h_max) + zero(drho)
     _plain(drho) > 0 || return z0
     Hc, V = _column_extent(m.cells, i)
     d, hm, v = _plain(drho), _plain(h_max), _plain(S) * V
     F(h) = _interval_integrals(m, i, 0.0, Hc, h, hm, d).co2
-    # on the drainage profile (to round-off): the maximum's height
-    v >= F(hm) * (1 - 1e-12) && return z0 + h_max
+    # on the drainage profile (to round-off): the maximum's height, moving with
+    # S along the drainage relation (S above S_max, a maximum not yet updated
+    # as in co2lab's stored states: h_max as it is)
+    if v >= F(hm) * (1 - 1e-12)
+        _plain(S) > _plain(S_max) && return z0 + h_max
+        return z0 + h_max + (S - S_max) * _drainage_slope(m, i, _plain(S_max), hm, d)
+    end
     co2(h) = _interval_integrals(m, i, 0.0, Hc, h, h_max, drho).co2
     F0 = F(0.0)
     if v <= F0
@@ -632,7 +651,7 @@ function _column_brine(::FixedResidual, m, i, sG, sGmax, h_max, drho, top, Hc, I
     # at S = S_max (an empty column's ray) nothing is trapped: the height is
     # the maximum profile's, no root search needed
     hr = ratio isa Float64 && ratio == 1.0 ? ht :
-         _fixed_height(m, i, tip * ratio, ht, drho)
+         _fixed_height(m, i, tip * ratio, tip, ht, drho)
     J = _interval_integrals(m, i, top, Hc, hr, ht, drho)
     return I.kz - (I.kz - J.krW) * sGmax / tip
 end
