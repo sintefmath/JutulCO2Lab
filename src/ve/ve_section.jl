@@ -47,10 +47,12 @@ Throws an `ArgumentError` for an unknown `along` or a section without cells.
 
 - A cell is drawn from its top and bottom faces seen side-on: each face's
   corners are split into the half nearer the section's start and the half
-  farther along, and each half averaged (the row's front and back). Lateral
-  faces are split by depth the same way. Only a face's corners count: nodes
-  on its straight edges (where faces of neighbouring columns do not match)
-  are left out.
+  farther along, and each half averaged (the row's front and back): the
+  cell where it crosses the plane midway between them. Lateral faces are
+  drawn where they cross that plane, so that layers dipping across the
+  section do not stretch them; a partial face that does not reach it is
+  left out. Only a face's corners count: nodes on its straight edges (where
+  faces of neighbouring columns do not match) are left out.
 - The direction runs from the row's first to its last pillar (the mean of
   their cells' top-face nodes), so `s` is close to x (or y) on grids aligned
   with the axes; with a single pillar, the x (or y) axis.
@@ -67,14 +69,16 @@ function ve_section(mesh, columns::VEColumns; along::Symbol = :i, index::Integer
         throw(ArgumentError("no cells in the section at " *
                             "$(along == :i ? :j : :i) = $index"))
 
-    # node positions in the section's plane: along it, and depth
+    # node positions in the section's plane: along it, and depth; and across it
     bdir = _boundary_directions(mesh)
     d = _section_direction(mesh, ijk, bdir, cells, along)
     pts = mesh.node_points
     sz(n) = (d[1] * pts[n][1] + d[2] * pts[n][2], Float64(pts[n][3]))
+    across(n) = -d[2] * pts[n][1] + d[1] * pts[n][2]
 
     polygons = [_cell_polygon(mesh, ijk, bdir, c, sz) for c in cells]
-    segments, kind = _section_segments(mesh, ijk, bdir, columns, cells, along, sz)
+    segments, kind = _section_segments(mesh, ijk, bdir, columns, cells, along,
+                                       sz, across)
 
     # distances from the section's start
     s0 = minimum(p[1] for poly in polygons for p in poly)
@@ -141,24 +145,31 @@ end
 
 # The faces of the section's cells that lie in its plane (top, bottom, lateral
 # along the section) as side-on segments, each once, with their kinds
-function _section_segments(mesh, ijk, bdir, columns, cells, along, sz)
+function _section_segments(mesh, ijk, bdir, columns, cells, along, sz, across)
     lateral = along == :i ? (Int8(1), Int8(2)) : (Int8(3), Int8(4))
     dirs = (lateral..., _TOP, _BOTTOM)
     sealed, leaky, seen = Set(columns.sealed), Set(columns.leaky), Set{Int}()
     segments, kind = NTuple{2, NTuple{2, Float64}}[], Symbol[]
     for c in cells
+        # the cell's middle across the section, where it is drawn
+        top = _face_corners(mesh, _face_nodes_toward(mesh, ijk, bdir, c, _TOP))
+        tm = sum(across, top) / length(top)
         for f in mesh.faces.cells_to_faces[c]
             d, o = _interior_face_direction(mesh, ijk, c, f)
             (d in dirs && !(f in seen)) || continue
             push!(seen, f)
-            push!(segments, _side_on(mesh, mesh.faces.faces_to_nodes[f], d, sz))
+            seg = _side_on(mesh, mesh.faces.faces_to_nodes[f], d, sz, across, tm)
+            isnothing(seg) && continue
+            push!(segments, seg)
             push!(kind, _section_face_kind(f, c, o, columns, sealed, leaky))
         end
         # boundary faces: a block's outline
         for f in mesh.boundary_faces.cells_to_faces[c]
             bdir[f] in dirs || continue
-            nodes = mesh.boundary_faces.faces_to_nodes[f]
-            push!(segments, _side_on(mesh, nodes, bdir[f], sz))
+            seg = _side_on(mesh, mesh.boundary_faces.faces_to_nodes[f], bdir[f], sz,
+                           across, tm)
+            isnothing(seg) && continue
+            push!(segments, seg)
             push!(kind, :outline)
         end
     end
@@ -166,9 +177,32 @@ function _section_segments(mesh, ijk, bdir, columns, cells, along, sz)
 end
 
 # A face side-on, from its corners: a top or bottom face split along the
-# section, a lateral one by depth
-_side_on(mesh, nodes, dir, sz) =
-    _split_ends(sz.(_face_corners(mesh, nodes)), dir in (_TOP, _BOTTOM) ? 1 : 2)
+# section; a lateral one where it crosses the cell's middle across the
+# section, tm, where the cell is drawn: `nothing` if it does not reach it (a
+# partial face), split by depth if it has no extent across the section
+function _side_on(mesh, nodes, dir, sz, across, tm)
+    corners = _face_corners(mesh, nodes)
+    dir in (_TOP, _BOTTOM) && return _split_ends(sz.(corners), 1)
+    t = across.(corners)
+    lo, hi = extrema(t)
+    hi - lo > 1e-9 * max(1.0, abs(hi)) || return _split_ends(sz.(corners), 2)
+    hits = _plane_crossings(sz.(corners), t, tm)
+    isempty(hits) && return nothing
+    return (argmin(last, hits), argmax(last, hits))
+end
+
+# Where the polygon with corners p (as (s, z)) and across-section coordinates t
+# crosses t = tm, by linear interpolation along its edges
+function _plane_crossings(p, t, tm)
+    hits = NTuple{2, Float64}[]
+    for k in eachindex(p)
+        l = mod1(k + 1, length(p))
+        (t[k] - tm) * (t[l] - tm) <= 0 && t[k] != t[l] || continue
+        w = (tm - t[k]) / (t[l] - t[k])
+        push!(hits, p[k] .+ w .* (p[l] .- p[k]))
+    end
+    return hits
+end
 
 # The kind of interior face f between cell c and cell o: a barrier, inside one
 # VE block, or a block's outline

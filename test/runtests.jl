@@ -1182,6 +1182,30 @@ end
                       for q in 1:4) for n in eachindex(sec.cells))
     end
 
+    @testset "cross-sections of layers dipping across the section" begin
+        # 3 × 1 × 4 cells, 0.5 m layers dipping 4 m from the row's front to its
+        # back: a cell's top at the front lies below its bottom at the back
+        coord = Float64[]
+        for j in 0:1, i in 0:3
+            append!(coord, [i * 100.0, j * 100.0, 0.0, i * 100.0, j * 100.0, 2000.0])
+        end
+        zc = [1000.0 + 0.2 * (i + ii) + 0.5 * (k - 1 + s) + 4.0 * jj
+              for k in 1:4 for s in (0, 1) for jj in 0:1 for i in 1:3 for ii in 0:1]
+        grid = Dict("cartDims" => [3, 1, 4], "COORD" => coord, "ZCORN" => zc,
+                    "ACTNUM" => fill(true, 3, 1, 4))
+        mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+        cols, _ = ve_columns(mesh; below_holes = :stack)
+        sec = ve_section(mesh, cols; along = :i, index = 1)
+
+        # every lateral face drawn from a cell corner to a cell corner, both
+        # in the section's plane midway between the row's front and back
+        corners = [p for poly in sec.polygons for p in poly]
+        on_corner(p) = any(all(p .≈ q) for q in corners)
+        lateral = [g for g in sec.segments if g[1][1] ≈ g[2][1]]
+        @test length(lateral) == 4 * 4
+        @test all(on_corner(g[1]) && on_corner(g[2]) for g in lateral)
+    end
+
     @testset "hybrid grid: blocks and face categories" begin
         J = JutulCO2Lab
         nc(m) = number_of_cells(m)
