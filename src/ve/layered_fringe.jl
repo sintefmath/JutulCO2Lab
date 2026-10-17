@@ -559,7 +559,8 @@ function _fixed_height(m::LayeredFringeModel, i, S, S_max, h_max, drho)
     F0 = F(0.0)
     if v <= F0
         F0 > 0 || return z0
-        return _scaled_ratio(_plateau_end(F, F0, hm), S * V, co2(zero(hm)))
+        hp = _plateau_end(m, i, h_max, drho * Jutul.gravity_constant)
+        return _scaled_ratio(hp, S * V, co2(zero(hm)))
     end
     h = _monotone_root(F, v, 0.0, hm)
     # the slope by central differences within [0, h_max]
@@ -579,18 +580,21 @@ function _scaled_ratio(k, x, y)
     return ky * x - ky * r * (y - yv)
 end
 
-# The largest height at which the column's CO2 F (nondecreasing) is still F0,
-# its value at 0, within [0, hm] (plain values; bisection)
-function _plateau_end(F, F0, hm)
-    tol = 1e-12 * max(F0, eps())
-    F(hm) <= F0 + tol && return hm
-    lo, hi = 0.0, hm
-    for _ in 1:100
-        mid = (lo + hi) / 2
-        F(mid) <= F0 + tol ? (lo = mid) : (hi = mid)
-        hi - lo <= 4eps(hi) && break
+# The largest plume height at which column i still holds only its residual
+# CO2 (the plateau of its CO2 in the height): where the mobile saturation at
+# the top of the first cell reaches r_g, z_a + p_res/(Δρ g), at most h_max.
+# With the AD values of `dg` (Δρ g) and `h_max`; the minimum chosen on plain
+# values
+function _plateau_end(m::LayeredFringeModel, i, h_max, dg)
+    c = m.cells
+    hp = zero(dg) + zero(h_max) + Inf
+    for a in _cell_range(c, i)
+        # cells starting below the best so far cannot do better
+        c.z[a] >= _plain(hp) && break
+        e = c.z[a] + m.p_res[m.cell_type[a]] / dg
+        _plain(e) < _plain(hp) && (hp = e)
     end
-    return lo
+    return _plain(hp) < _plain(h_max) ? hp : zero(hp) + h_max
 end
 
 # The root of F(h) = v for F nondecreasing with F(lo) < v < F(hi) (plain
