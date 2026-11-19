@@ -78,7 +78,9 @@ function johansen_mesh(model::Symbol = :sector; co2lab_compatible::Bool = false)
     # co2lab_compatible: no connections across pinched-out layers, as MRST
     mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(
         grid; process_pinch = !co2lab_compatible)
-    return (mesh = mesh, columns = first(ve_columns(mesh)), grid = grid)
+    # cells below holes discarded, as co2lab's topSurfaceGrid
+    columns, _ = ve_columns(mesh; below_holes = :discard)
+    return (mesh = mesh, columns = columns, grid = grid)
 end
 
 # The layers `layers` of a grid section as a new section (co2lab's cutGrdecl):
@@ -224,9 +226,10 @@ function johansen_ve_domain(; min_perm::Real = 0.11, kwargs...)
     # the largest connected piece only, as co2lab's G(1)
     grid["ACTNUM"] = _largest_piece(grid)
     mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
-    # cells below holes dropped, then the columns of the trimmed mesh
-    columns, discarded = ve_columns(mesh)
-    mesh = ve_trim(mesh, discarded)
+    # cells below holes dropped, as co2lab's topSurfaceGrid; then the columns
+    # of the trimmed mesh
+    columns, discarded = ve_columns(mesh; below_holes = :discard)
+    mesh = remove_cells(mesh, discarded)
     columns, _ = ve_columns(mesh)
 
     at(key) = [grid[key][cell_ijk(mesh, c)...] for c in 1:number_of_cells(mesh)]

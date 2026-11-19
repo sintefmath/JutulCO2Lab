@@ -10,7 +10,7 @@
 #   two cells (`_logical_direction`).
 # - Boundary faces have only one cell, so their direction is read from the
 #   mesh's `:direction` tags: Jutul sets them for its corner-point grids,
-#   `ve_mesh_from_mrst` from MRST's face tags, and `ve_trim` carries them
+#   `ve_mesh_from_mrst` from MRST's face tags, and `remove_cells` carries them
 #   over. Connectivity alone cannot tell: at a fault, pieces of one side of a
 #   cell share edges just like two different sides do.
 #
@@ -66,7 +66,7 @@ end
 
 Direction (1..6) of every boundary face, from the mesh's `:direction` entity
 tags (set by Jutul's corner-point processing, [`ve_mesh_from_mrst`](@ref) or
-[`ve_trim`](@ref)). Returns a new vector; throws if any face has no tag.
+[`remove_cells`](@ref)). Returns a new vector; throws if any face has no tag.
 """
 function _boundary_directions(mesh)
     dirs = zeros(Int8, length(mesh.boundary_faces.neighbors))
@@ -78,7 +78,7 @@ function _boundary_directions(mesh)
 
     any(==(0), dirs) &&
         error("mesh has boundary faces without a :direction tag (Jutul corner-point " *
-              "grids and ve_mesh_from_mrst / ve_trim provide them)")
+              "grids and ve_mesh_from_mrst / remove_cells provide them)")
     return dirs
 end
 
@@ -200,7 +200,9 @@ has fine faces but no neighbour at all.
 
 # Fields
 
+- `column`: the column (coarse cell) the entry belongs to.
 - `direction`: 1..4 = left, right, lower, upper (logical i−, i+, j−, j+).
+- `neighbour`: the column beyond the side; 0 for an outer side.
 - `interior_faces`: fine interior faces shared with `neighbour`; together
   they are the `CoarseMesh`'s coarse face between the two columns. Empty for
   an outer side.
@@ -231,7 +233,7 @@ split each side by the column on the other side of its faces. The basis of
 # Arguments
 
 - `mesh`: the 3D mesh, carrying boundary face directions
-  ([`ve_mesh_from_mrst`](@ref), [`ve_trim`](@ref)).
+  ([`ve_mesh_from_mrst`](@ref), [`remove_cells`](@ref)).
 - `columns`: its column partition ([`ve_columns`](@ref)); every cell must
   belong to a column (trim the mesh first).
 
@@ -303,7 +305,7 @@ function _collect_side_faces!(acc, mesh, columns, ijk, bdir, c)
     for f in mesh.faces.cells_to_faces[c]
         d, o = _interior_face_direction(mesh, ijk, c, f)
         oc = columns.partition[o]
-        oc == 0 && error("cell $o is in no column; trim the mesh first (ve_trim)")
+        oc == 0 && error("cell $o is in no column; remove it from the mesh first (remove_cells)")
         # vertical faces: inside the column, or towards a stacked column (sealed)
         d in (_TOP, _BOTTOM) && continue
         oc == col && error("lateral face $f inside column $col")

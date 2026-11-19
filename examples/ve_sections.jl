@@ -49,7 +49,7 @@ println(nc - number_of_cells(mesh), " cells without net rock removed")
 # -------------------------------- 3. Barriers ---------------------------------
 
 # Transmissibility multipliers on the faces between layers, under some
-# pillars: a leaky shale drape (0.01, between layers 4 and 5, i = 45-55) and a
+# pillars: a leaky shale drape (0.001, between layers 4 and 5, i = 45-55) and a
 # sealing layer (0, between layers 17 and 18, i = 5-12); 1 elsewhere
 ijk = [cell_ijk(mesh, c) for c in 1:number_of_cells(mesh)]
 N = mesh.faces.neighbors
@@ -57,18 +57,18 @@ function multiplier(f)
     a, b = ijk[N[f][1]], ijk[N[f][2]]
     a[1:2] == b[1:2] || return 1.0
     k = minmax(a[3], b[3])
-    45 <= a[1] <= 55 && k == (4, 5) && return 0.01
+    45 <= a[1] <= 55 && k == (4, 5) && return 0.001
     5 <= a[1] <= 12 && k == (17, 18) && return 0.0
     return 1.0
 end
 mult = multiplier.(1:number_of_faces(mesh))
 
-# The columns: faces with a multiplier below 0.1 and cells with vertical
-# permeability below 0.1 mD are barriers (thresholds chosen here, no
-# defaults); each stretch between barriers and holes a VE column of its own
-# (:stack); the pillars i = 56-58 around a well site fine 3D cells
-columns, _ = ve_columns(mesh; below_holes = :stack,
-                        transmissibility_multiplier = mult, barrier_multiplier = 0.1,
+# The columns: cells, and faces with their multiplier, of vertical
+# permeability below 0.1 mD are barriers (threshold chosen here, no default;
+# the drape: 0.001 · 20 mD); each stretch between barriers and holes a VE
+# column of its own (:stack); the pillars i = 56-58 around a well site fine
+# 3D cells
+columns, _ = ve_columns(mesh; below_holes = :stack, transmissibility_multiplier = mult,
                         perm_z = net.perm_z, barrier_perm_z = 0.1mD,
                         is_ve = ve_except_pillars(mesh, (i, j) -> 56 <= i <= 58))
 println(count(columns.is_ve), " VE columns and ", count(!, columns.is_ve),

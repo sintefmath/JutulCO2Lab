@@ -50,29 +50,28 @@ show_figure(fig, "tsg_grid")
 # ---------------------------- 2. Columns ---------------------------------------
 
 # A column is a vertically connected stack of cells in one pillar. The hole in
-# pillars (3, 1) and (3, 2) disconnects the cell below it: by default, as in
-# co2lab, cells below a hole are discarded (unlike co2lab, a hole is a missing
-# face between cells, not a gap in the logical k index).
-columns, discarded = ve_columns(mesh)
-println("\ncolumns: ", number_of_columns(columns), "; discarded cells: ", discarded)
-for c in 1:number_of_columns(columns)
-    cells = column_cells(columns, c)
+# pillars (3, 1) and (3, 2) disconnects the cell below it: by default that part
+# becomes a column of its own, in the same pillar ("stacked"), connected to its
+# neighbours by the transition flux (a hole is a missing face between cells,
+# not a gap in the logical k index).
+stacked, _ = ve_columns(mesh)
+println("\ncolumns: ", number_of_columns(stacked))
+for c in 1:number_of_columns(stacked)
+    cells = column_cells(stacked, c)
     @printf("  column %d: pillar %s, cells %s (top to bottom)\n", c,
-            columns.column_ij[c], join(cells, ", "))
+            stacked.column_ij[c], join(cells, ", "))
 end
 
-# The discarded cells are then removed from the mesh (ve_trim) before the
-# columns are formed again.
-mesh = ve_trim(mesh, discarded)
+# co2lab instead discards the cells below a hole (below_holes = :discard, for
+# comparisons with co2lab); they are then removed from the mesh
+# (remove_cells) before the columns are formed again. The rest of this
+# example uses this co2lab-style grid.
+columns, discarded = ve_columns(mesh; below_holes = :discard)
+println("with below_holes = :discard, discarded cells: ", discarded)
+mesh = remove_cells(mesh, discarded)
 columns, _ = ve_columns(mesh)
-println("after ve_trim: ", number_of_cells(mesh), " cells in ",
+println("after remove_cells: ", number_of_cells(mesh), " cells in ",
         number_of_columns(columns), " columns")
-
-# Alternatively the part below a hole becomes a column of its own, in the same
-# pillar ("stacked"), connected to its neighbours by the transition flux.
-untrimmed = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(section(.!cut))
-stacked, _ = ve_columns(untrimmed; below_holes = :stack)
-println("with below_holes = :stack: ", number_of_columns(stacked), " columns")
 
 # ------------------------- 3. The top surface ----------------------------------
 

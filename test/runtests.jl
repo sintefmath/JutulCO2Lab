@@ -602,12 +602,12 @@ end
             check!(rep, ":stack: columns", number_of_columns(ck),
                    length(iv(d["keep"]["columnPos"])) - 1 + 4; tol = exact)
 
-            _, disc = ve_columns(mesh)
+            _, disc = ve_columns(mesh; below_holes = :discard)
             # MRST lists discarded cells in column-major matrix order; compare as sets
             check!(rep, "discarded cells", disc, sort(iv(d["discard"]["discarded"]));
                    tol = exact)
 
-            trimmed = ve_trim(mesh, disc)
+            trimmed = remove_cells(mesh, disc)
             check!(rep, "trimmed logical index map", trimmed.cell_map,
                    iv(d["discard"]["indexMap_out"]); tol = exact)
 
@@ -903,7 +903,8 @@ end
                  sort([cell_ijk(m, c) for c in m.faces.neighbors[f]]) ==
                  [(1, 1, 1), (1, 1, 2)])
         cols, disc = @test_logs (:warn, r"below_holes = :discard") ve_columns(
-            m; transmissibility_multiplier = _multipliers(m, [f]))
+            m; transmissibility_multiplier = _multipliers(m, [f]),
+            below_holes = :discard)
         @test pillar_ks(m, cols) == [[1], [1, 2, 3], [1, 2, 3]] && length(disc) == 2
         cols, disc = ve_columns(m; transmissibility_multiplier = _multipliers(m, [f]),
                                 below_holes = :stack)
@@ -918,9 +919,9 @@ end
         # a shale missing from the grid in pillars 1-2 (k = 2), ending before 3
         full = _cp_mesh(3, 3, layered)
         shale = [c for c in 1:nc(full) if cell_ijk(full, c) in ((1, 1, 2), (2, 1, 2))]
-        m = ve_trim(full, shale)
+        m = remove_cells(full, shale)
 
-        cols, disc = ve_columns(m)
+        cols, disc = ve_columns(m; below_holes = :discard)
         @test pillar_ks(m, cols) == [[1], [1], [1, 2, 3]] && length(disc) == 2
 
         cols, disc = ve_columns(m; below_holes = :stack)
@@ -970,7 +971,8 @@ end
         hyb, _ = ve_columns(m; is_ve = [true; fill(false, nc(m) - 1)])
         @test count(hyb.is_ve) == 1 &&
               all(length(column_cells(hyb, b)) == 1 for b in findall(!, hyb.is_ve))
-        @test first(ve_columns(m; is_ve = fill(true, nc(m)))).pos == [1, 2, 3, 6]
+        all_ve, _ = ve_columns(m; is_ve = fill(true, nc(m)), below_holes = :discard)
+        @test all_ve.pos == [1, 2, 3, 6]
         @test_throws ArgumentError ve_columns(m; below_holes = :bridge)
 
         # VE/fine branch points: compiled away for all-VE domains
@@ -1055,13 +1057,14 @@ end
         Tf = JutulDarcy.reservoir_transmissibility(
             reservoir_domain(mesh; permeability = perm, porosity = poro))
 
-        # between k = 1 and 2: pillar 1 sealed (0), pillar 2 a barrier (0.01
-        # below the threshold 0.1), pillar 3 not (0.5)
+        # between k = 1 and 2: pillar 1 sealed (0), pillar 2 a barrier (0.01:
+        # effective vertical permeability 1e-15, below the threshold 1e-14),
+        # pillar 3 not (0.5: 5e-14)
         m = ones(nf)
         f1, f2, f3 = (face((i, 1, 1), (i, 1, 2)) for i in 1:3)
         m[[f1, f2, f3]] = [0.0, 0.01, 0.5]
-        cols, _ = ve_columns(mesh; transmissibility_multiplier = m,
-                             barrier_multiplier = 0.1, below_holes = :stack)
+        cols, _ = ve_columns(mesh; transmissibility_multiplier = m, perm_z = perm,
+                             barrier_perm_z = 1e-14, below_holes = :stack)
         @test nk(cols) == [[1], [2, 3], [1], [2, 3], [1, 2, 3]]
         @test cols.sealed == [f1] && cols.leaky == [f2] && cols.multiplier == m
 
@@ -1095,12 +1098,25 @@ end
         cols, _ = ve_columns(mesh; perm_z = kz, barrier_perm_z = 1e-16)
         @test nk(cols)[1:3] == [[1], [2], [3]] && cols.is_ve[1:3] == [true, false, true]
 
+        # cells of 1e-13 and 1e-14 (neither a barrier), equally thick: the
+        # harmonic mean 1.8e-14 passes, times the multiplier 0.5 it does not
+        kz = copy(perm)
+        kz[findfirst(==((3, 1, 2)), ijk)] = 1e-14
+        m1 = copy(m)
+        m1[f3] = 1.0
+        cols, _ = ve_columns(mesh; transmissibility_multiplier = m1, perm_z = kz,
+                             barrier_perm_z = 1e-14, below_holes = :stack)
+        @test f3 ∉ cols.leaky && all(cols.is_ve)
+        cols, _ = ve_columns(mesh; transmissibility_multiplier = m, perm_z = kz,
+                             barrier_perm_z = 1e-14, below_holes = :stack)
+        @test f3 in cols.leaky
+
         # thresholds need their data; :discard with barriers warns
-        @test_throws ArgumentError ve_columns(mesh; barrier_multiplier = 0.1)
         @test_throws ArgumentError ve_columns(mesh; barrier_perm_z = 1e-16)
         @test_throws ArgumentError ve_columns(mesh; transmissibility_multiplier = m[2:end])
         @test_logs (:warn, r"below_holes = :discard") ve_columns(
-            mesh; transmissibility_multiplier = m, barrier_multiplier = 0.1)
+            mesh; transmissibility_multiplier = m, perm_z = perm, barrier_perm_z = 1e-14,
+            below_holes = :discard)
     end
 
     @testset "cross-sections (ve_section)" begin
@@ -1117,7 +1133,8 @@ end
         m[face((1, 1, 1), (1, 1, 2))] = 0.0
         m[face((2, 1, 1), (2, 1, 2))] = 0.01
         cols, _ = ve_columns(mesh; transmissibility_multiplier = m,
-                             barrier_multiplier = 0.1, below_holes = :stack,
+                             perm_z = fill(1e-13, nc), barrier_perm_z = 1e-14,
+                             below_holes = :stack,
                              is_ve = [ijk[c][1] != 3 for c in 1:nc])
         sec = ve_section(mesh, cols; along = :i, index = 1)
         @test sort(sec.cells) == 1:nc && all(sec.direction .≈ (1.0, 0.0))
@@ -1280,7 +1297,8 @@ end
                ijk[N[f][1]][1:2] == ijk[N[f][2]][1:2] &&
                minmax(ijk[N[f][1]][3], ijk[N[f][2]][3]) == (2, 3)]
         cols, _ = ve_columns(slope; transmissibility_multiplier = _multipliers(slope,
-                             lay, 0.01), barrier_multiplier = 0.1, below_holes = :stack)
+                             lay, 0.01), perm_z = fill(1e-13, nc(slope)),
+                             barrier_perm_z = 1e-14, below_holes = :stack)
         d = dom(slope, cols).domain
         @test count(==(J._FACE_VE_VERTICAL), d[:face_category]) == 4
         @test all(d[:transmissibilities][d[:face_category] .== J._FACE_VE_VERTICAL] .> 0)

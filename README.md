@@ -133,10 +133,13 @@ JutulDarcy is patched.
    folds it into porosity and permeability and removes the cells without
    net rock (holes).
 2. *Columns*: `ve_columns` → `VEColumns`, the partition of fine cells into
-   columns (vertically connected stretches of a pillar); `ve_trim` removes
-   discarded cells. Barriers cut pillars: faces with transmissibility
-   multipliers below `barrier_multiplier`, cells with `perm_z` below
-   `barrier_perm_z` (made fine 3D cells); thresholds chosen explicitly.
+   columns (vertically connected stretches of a pillar). Below a hole the
+   rest of the pillar is a column of its own (`below_holes = :stack`, the
+   default); with `:discard`, as co2lab, it is dropped, and `remove_cells`
+   removes the discarded cells. Barriers cut pillars: cells with `perm_z` below
+   `barrier_perm_z` (made fine 3D cells), and faces whose effective vertical
+   permeability (transmissibility multiplier times the cells' harmonic mean
+   `perm_z`) is below it; threshold chosen explicitly.
 3. *VE domain*: `ve_domain` → a `CoarseMesh` over the 3D mesh, wrapped by
    `reservoir_domain`, with thickness-averaged rock, the caprock datum as
    `:gdz`, and `:column_height`, `:rugosity`, `:is_ve`, `:pillar_columns`.

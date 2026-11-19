@@ -10,9 +10,7 @@
              ntg_min = 0.0) -> NamedTuple
 
 Fold net-to-gross into the rock of a 3D mesh and remove the cells without net
-rock: the first step for a formation whose data give net-to-gross. The VE
-domain ([`ve_domain`](@ref)), the vertical models and a 3D model then all take
-the net rock; no net-to-gross is passed on.
+rock.
 
 # Arguments
 
@@ -28,7 +26,7 @@ the net rock; no net-to-gross is passed on.
 
 The NamedTuple `(mesh, cells, poro, perm_x, perm_y, perm_z)`:
 
-- `mesh`: the mesh without the removed cells ([`ve_trim`](@ref)); `mesh`
+- `mesh`: the mesh without the removed cells ([`remove_cells`](@ref)); `mesh`
   itself, not a copy, when no cell is removed.
 - `cells`: the kept cells, as indices into the given `mesh` (for other
   per-cell data).
@@ -52,8 +50,8 @@ value.
   directions. JutulDarcy's `net_to_gross` scales lateral transmissibility
   only, also then.
 - A removed cell is a hole, with no flow through it in any direction:
-  [`ve_columns`](@ref) cuts the pillar there (with `below_holes = :stack`,
-  a column above it and one below).
+  [`ve_columns`](@ref) cuts the pillar there (by default a column above it
+  and one below).
 - co2lab averages porosity and net-to-gross over a column separately and
   multiplies the averages; that misses the pore volume where net-to-gross
   varies within a column. The average of the product, as here, is exact.
@@ -70,7 +68,7 @@ function net_rock(mesh; poro, perm_x, perm_y = nothing, perm_z = nothing, ntg,
 
     # cells with net rock kept, the others removed from the mesh
     cells = findall(>(ntg_min), ntg)
-    trimmed = ve_trim(mesh, setdiff(1:nc, cells))
+    trimmed = remove_cells(mesh, setdiff(1:nc, cells))
 
     # pore volume and lateral flow scale with net-to-gross; a given vertical
     # permeability is effective already
@@ -424,18 +422,23 @@ Made by [`ve_boundary_sides`](@ref); boundary conditions are set on them
 
 # Fields
 
+- `column`: the column (coarse cell) the side belongs to.
 - `direction`: 1..4 = `:left`, `:right`, `:lower`, `:upper` (Jutul's
   direction tags: logical i−, i+, j−, j+).
-- `edge_depth`: caprock depth along the side, the mean depth of the two
+- `edge_depth`: caprock depth (m) along the side, the mean depth of the two
   top-face nodes bounding it (co2lab's `Gt.faces.z`, without co2lab's
   averaging of nodes across pillar offsets). For a fine cell of a hybrid
   grid: the depth of the side's centroid.
 - `edge_midpoint`: (x, y) midpoint of that top edge (fine cell: of the side's
   centroid).
-- `area`, `centroid`, `normal`: aggregate of the side's fine boundary faces.
-- `half_trans`: two-point half transmissibility from the column's centroid to
-  the side, `k·A·(c·n)/|c|²`, the same formula family as the `CoarseMesh`'s
-  interior transmissibilities.
+- `area`: the side's area (m²), the sum of its fine boundary faces' areas.
+- `centroid`: the side's centroid (m), area-weighted over its fine faces.
+- `normal`: the side's outward unit normal, area-weighted over its fine
+  faces.
+- `half_trans`: two-point half transmissibility (m³) from the column's
+  centroid to the side, `k·A·(c·n)/|c|²`, the same formula family as the
+  `CoarseMesh`'s interior transmissibilities.
+- `fine_faces`: indices of the side's boundary faces in the 3D mesh.
 - `across_fault`: a column exists at the logical neighbour position (at any
   depth), but no fine face connects to it: a fault with complete offset. Such
   a side is an outer side, as in co2lab's top-surface grid, but physically

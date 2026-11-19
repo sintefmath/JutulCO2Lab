@@ -43,7 +43,7 @@ export Oracle
 # ---------------------------- VE grids and domains ----------------------------
 
 include("ve/vegrid.jl")
-export VEColumns, ve_mesh_from_mrst, ve_columns, ve_trim, ve_column_geometry
+export VEColumns, ve_mesh_from_mrst, ve_columns, remove_cells, ve_column_geometry
 export ve_except_pillars
 export number_of_columns, column_cells
 
