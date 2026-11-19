@@ -842,6 +842,26 @@ function Jutul.convergence_criterion(model::Jutul.SimulationModel, storage,
     return (AbsMax = (errors = (maximum(abs, r),), names = ("sGmax",)),)
 end
 
+# -------------------------------- Face density --------------------------------
+
+"""
+    JutulDarcy.face_average_density(model::CO2LabModel, state, tpfa, phase, ρ)
+
+The phase density at a face, in the gravity term of the two-point flux: the
+plain mean of the two cells' densities, as co2lab (and JutulDarcy for
+black-oil models up to 0.4.0). Returns the mean (a new number).
+
+# Notes
+
+- JutulDarcy 0.4.1 weights black-oil models' face density by saturation,
+  `(s_L ρ_L + s_R ρ_R)/(s_L + s_R)`, as ECLIPSE does. In a VE column the
+  saturation is the column average, not the saturation at the caprock where
+  the CO2 pressure is taken, so co2lab's plain mean is kept.
+"""
+JutulDarcy.face_average_density(model::CO2LabModel, state, tpfa, phase,
+                                ρ = state.PhaseMassDensities) =
+    JutulDarcy.phase_face_average(ρ, tpfa, phase)
+
 # ---------------- Black-oil hooks that assume BlackOilUnknown -----------------
 
 function JutulDarcy.handle_alternate_primary_variable_spec!(init, found, rmodel,
