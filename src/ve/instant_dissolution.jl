@@ -41,6 +41,12 @@ Newton iteration by co2lab's switching rule:
 
 [`setup_co2lab_model`](@ref) installs it as `:CO2X` for instantaneous
 dissolution.
+
+# Fields
+
+- `dis_max`: the saturated dissolved-CO2 ratio `rs`.
+- `res_water`: residual brine saturation; `sG` is capped at `1 − res_water`.
+- `ds_max`: the largest change of `sG` per update (co2lab's `dsMaxAbs`).
 """
 struct DissolvedOrFreeCO2 <: Jutul.ScalarVariable
     dis_max::Float64    # saturated rs
@@ -153,7 +159,17 @@ end
 "`sG` from co2lab's unknown `X`: `X` where saturated, zero elsewhere."
 struct InstantGasSaturation <: Jutul.ScalarVariable end
 
-"`rs` from co2lab's unknown `X`: `dis_max` where saturated, `X` elsewhere."
+"""
+    InstantDissolvedGasRatio
+
+The secondary variable `rs` under instantaneous dissolution, from co2lab's
+unknown `X` ([`DissolvedOrFreeCO2`](@ref)): `dis_max` where saturated, `X`
+elsewhere.
+
+# Fields
+
+- `dis_max`: the saturated dissolved-CO2 ratio `rs`.
+"""
 struct InstantDissolvedGasRatio <: Jutul.ScalarVariable
     dis_max::Float64  # saturated rs
 end

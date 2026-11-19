@@ -14,6 +14,12 @@
 A tabulated phase property, callable as `t(p, T)` (pressure in Pa,
 temperature in K). Made by [`jutuldarcy_property_tables`](@ref), or wraps
 any function of `p` and `T` (e.g. co2lab's sampled tables).
+
+# Fields
+
+- `f`: the property as a function `(p, T) -> value`.
+- `source`: a label for where the table comes from (e.g. `:jutuldarcy`,
+  `:co2lab`).
 """
 struct PhaseTable{F}
     f::F            # (p, T) -> property value
@@ -74,8 +80,17 @@ _tabulated(specs...) = any(s -> s isa PhaseTable, specs)
 # ------------------------------- Jutul variables -------------------------------
 
 """
+    PVTShrinkage
+
 Shrinkage factors `b = ρ(p, T)/ρ_ref` per phase (brine, CO2), at the cell's
 pressure and `Temperature` parameter; each phase tabulated or linear.
+
+# Fields
+
+- `rho_ref`: reference ("surface") densities `ρ_ref` (brine, CO2) (kg/m³);
+  also the reference value of a linear density model.
+- `pvt`: the density model per phase (brine, CO2): a [`PhaseTable`](@ref),
+  or `(c, p_ref)` for co2lab's linear model `ρ_ref·(1 + c·(p − p_ref))`.
 """
 struct PVTShrinkage{R} <: JutulDarcy.PhaseVariables
     rho_ref::NTuple{2, Float64}  # reference ("surface") densities (kg/m³)
@@ -100,6 +115,13 @@ each phase tabulated or linear (`mu_ref` is used for linear ones only).
 The pressure: with `phase_pressures = true` (type parameter `P`; the
 reservoir) each phase's own, as co2lab (CO2 at `p + pcWG`); with `false`
 (wells, which have no capillary pressure) `p`.
+
+# Fields
+
+- `mu_ref`: reference viscosities (brine, CO2) (Pa·s), used by linear phases
+  only.
+- `pvt`: the viscosity model per phase (brine, CO2): a [`PhaseTable`](@ref),
+  or `(c, p_ref)` for co2lab's linear model `mu_ref·(1 + c·(p − p_ref))`.
 """
 struct PVTViscosities{U, P} <: JutulDarcy.PhaseVariables
     mu_ref::NTuple{2, Float64}  # reference viscosities (Pa·s; linear ones)

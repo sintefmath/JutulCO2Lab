@@ -19,6 +19,11 @@ fine 3D cells: the CO2 relperm is the drainage curve at the free saturation
 `((1 − r_w)·s − r_g·s_max)/(1 − r_w − r_g)`. Used as `hysteresis_g` of
 JutulDarcy's `ReservoirRelativePermeabilities`.
 
+# Fields
+
+- `res_water`: residual brine saturation `r_w`.
+- `res_gas`: residual CO2 saturation `r_g`.
+
 # Notes
 
 - The relperm needs a drainage and an imbibition CO2 curve. JutulDarcy uses
@@ -40,6 +45,13 @@ Capillary pressure of fine 3D cells (CO2 relative to brine, Pa) at the free
 CO2 saturation of [`EndpointScalingHysteresis`](@ref): `pc(s_free)`, so
 `pc(0)` where only residual CO2 is left, as the VE models assume. Install it
 as the model's `CapillaryPressure`.
+
+# Fields
+
+- `pc`: the capillary pressure (Pa) as a function of CO2 saturation,
+  evaluated at the free saturation.
+- `res_water`: residual brine saturation `r_w`.
+- `res_gas`: residual CO2 saturation `r_g`.
 
 # Notes
 

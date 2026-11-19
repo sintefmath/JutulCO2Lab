@@ -16,8 +16,16 @@
 # JutulDarcy's fails on a model ours has already changed).
 
 """
+    LinearPoreVolume
+
 Pore volume `StaticFluidVolume·(1 + c·(p − p_ref))`, co2lab's `pvMultR`; set
 with [`set_co2lab_rock_compressibility!`](@ref).
+
+# Fields
+
+- `p_ref`: the reference pressure `p_ref` (Pa), at which the pore volume is
+  the static one.
+- `c`: the rock compressibility `c` (1/Pa).
 """
 struct LinearPoreVolume <: Jutul.ScalarVariable
     p_ref::Float64  # reference pressure (Pa)

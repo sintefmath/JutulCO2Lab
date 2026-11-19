@@ -34,10 +34,14 @@ Build with [`ve_boundary_conditions`](@ref); pass to the simulator as the
 
 # Fields
 
+- `cell`: the reservoir cell the side belongs to: a VE column's block, or a
+  fine cell of a hybrid grid.
+- `pressure`: the boundary pressure, the same for both phases (Pa).
 - `trans`: permeability times geometry (m³), the column's half
   transmissibility to the side.
 - `dz`: caprock-edge depth minus column caprock depth (m, depth positive
   down); for a fine cell of a hybrid grid, side centroid minus cell centroid.
+- `sat`: saturations (brine, CO2) of the inflowing fluid.
 - `carry_dissolved`: with dissolution, whether brine carries its dissolved
   CO2 across (`true`), or co2lab's booking is used (`false`).
 """

@@ -20,7 +20,9 @@
 One rock type's fine-scale curves, an entry of [`FineScaleFluid`](@ref)'s
 `rock_types`.
 
-# Keywords
+# Fields
+
+Each is also a constructor keyword of the same name.
 
 - `invPc3D`: brine saturation as a function of capillary pressure (Pa);
   `nothing`: no capillarity.
@@ -45,6 +47,18 @@ RockCurves(; invPc3D = nothing, kr3D = 3, krw3D = :linear) =
 The fluid described at the fine scale, the single source for a hybrid grid's
 VE blocks and fine cells. Turn it into a VE fluid with
 [`co2lab_ve_fluid`](@ref)`(fluid, mesh, columns; …)`.
+
+# Fields
+
+- `rock_types`: the curves of each rock type ([`RockCurves`](@ref)).
+- `residual`: `(r_w, r_g)`, residual brine and CO2 saturations, for all rock
+  types.
+- `hysteresis`: the hysteresis law ([`HysteresisLaw`](@ref)) of VE blocks and
+  fine cells.
+- `fine_hysteresis`: the fine cells' hysteresis, `:law` or `:killough` (see
+  Keywords).
+- `options`: the PVT and dissolution options of [`co2lab_ve_fluid`](@ref),
+  as given in `kwarg...`.
 
 # Keywords
 
@@ -192,6 +206,20 @@ The constitutive functions of a hybrid grid's fine 3D cells, built from a
 [`FineScaleFluid`](@ref) and each cell's rock type: per rock type, the
 relperms and capillary pressure as tables in the saturation. The imbibition
 curve (from the largest maximum, 1 − r_w) is for Killough's model.
+
+# Fields
+
+- `drain`: per rock type, the CO2 relperm table of the drainage curve.
+- `imb`: per rock type, the CO2 relperm table of the imbibition curve from
+  the largest maximum CO2 saturation, 1 − r_w.
+- `brine`: per rock type, the brine relperm table in the brine saturation.
+- `pc`: per rock type, the capillary pressure table in the CO2 saturation
+  (Pa).
+- `rock_type`: per domain cell, its rock type; 0 for a VE block.
+- `law`: the hysteresis law ([`HysteresisLaw`](@ref)).
+- `killough`: `true` for JutulDarcy's Killough hysteresis instead of `law`.
+- `res_water`: residual brine saturation.
+- `res_gas`: residual CO2 saturation.
 """
 struct FineCellFluid{K, I, L}
     drain::Vector{K}        # per rock type: CO2 relperm, drainage

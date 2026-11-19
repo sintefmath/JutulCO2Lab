@@ -47,6 +47,12 @@ scripts, loaded with [`read_mrst_dump`](@ref).
 
 Access a variable with `d["name"]`; `keys(d)` lists what the dump contains,
 `haskey(d, "name")` tests for one.
+
+# Fields
+
+- `path`: the `.mat` file the dump was read from.
+- `data`: the dump's variables by name, as MAT.jl returns them (`Float64`,
+  column-major, scalars as 1×1 matrices).
 """
 struct MrstDump
     path::String             # file it was read from
@@ -91,6 +97,11 @@ The tolerance of one quantity's comparison in [`check!`](@ref). A value `a`
 passes against the MRST reference `b` when
 
     |a - b| <= atol + rtol * |b|
+
+# Fields
+
+- `rtol`: relative tolerance, scaling the MRST value's magnitude `|b|`.
+- `atol`: absolute tolerance, in the quantity's SI unit.
 """
 struct Tolerance
     rtol::Float64  # relative tolerance
@@ -131,6 +142,20 @@ const STAGE1_TOL = Dict{Symbol, Tolerance}(
 The outcome of one quantity's comparison, returned by [`check!`](@ref).
 `maxabs` and `maxrel` are kept even on a pass, so a gate can be seen drifting
 before it breaks.
+
+# Fields
+
+- `name`: the quantity compared, as shown in the report.
+- `n`: the number of values compared (the Julia side's length).
+- `maxabs`: the largest absolute difference over the finite pairs; `NaN`
+  when the comparison could not be made (length mismatch, empty).
+- `maxrel`: the largest difference relative to the MRST value; `NaN` as
+  for `maxabs`.
+- `tol`: the [`Tolerance`](@ref) applied.
+- `ok`: whether every pair was within `tol` (false for any non-finite pair,
+  length mismatch or empty comparison).
+- `note`: a remark shown in the report: the caller's note and/or why the
+  check failed; empty if none.
 """
 struct CheckResult
     name::String     # quantity compared
@@ -153,6 +178,13 @@ one table, with a PASS/FAIL line ([`passed`](@ref)).
 - `title`: the report's heading.
 - `mrst`: optionally the [`MrstDump`](@ref) compared against, to record the
   MRST commit it was made from.
+
+# Fields
+
+- `title`: the report's heading.
+- `results`: one [`CheckResult`](@ref) per [`check!`](@ref), in call order.
+- `sources`: the [`SourceInfo`](@ref) of Jutul and JutulDarcy, then of MRST
+  if a dump was given.
 
 The header records the commit and dirty state of the loaded Jutul and
 JutulDarcy checkouts ([`source_provenance`](@ref)); construction warns if

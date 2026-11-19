@@ -41,7 +41,17 @@ const CO2LabModel = Jutul.SimulationModel{<:Any, <:CO2LabSystem}
 const CO2LabNoDissolutionModel =
     Jutul.SimulationModel{<:Any, <:CO2LabNoDissolutionSystem}
 
-"Saturated dissolved-gas ratio, constant (co2lab's `rsSat` / `dis_max`)."
+"""
+    ConstantRs
+
+Saturated dissolved-gas ratio, constant (co2lab's `rsSat` / `dis_max`): a
+callable `rs_sat(p)` that ignores the pressure.
+
+# Fields
+
+- `value`: the saturated `rs` (surface volume of CO2 per surface volume of
+  brine).
+"""
 struct ConstantRs
     value::Float64  # saturated rs (surface volume CO2 per surface volume brine)
 end
@@ -117,6 +127,13 @@ Why: at a relperm kink plain Newton cycles, one side seeing no CO2 outflow
 and the other its full slope (cf. Wang and Tchelepi 2013, trust-region
 Newton). The next iteration continues from the kink, so the converged
 solution is unchanged.
+
+# Fields
+
+- `kinks`: per rock type, the sorted CO2 saturations where the fine cells'
+  curves kink.
+- `rock_type`: per cell, the rock type of a fine cell (index into `kinks`),
+  0 for a VE block.
 """
 struct FineGasSaturation <: Jutul.ScalarVariable
     kinks::Vector{Vector{Float64}}  # per rock type: saturations where curves kink
@@ -196,6 +213,12 @@ co2lab's `sGmax`, the largest CO2 saturation reached, between 0 and
   are projected as in co2lab's `updateState`: `sG ≤ 1 − res_water`, `sGmax`
   into `[sG, 1 − res_water]`, then `sG ≥ sGmax·res_gas` (CO2 cannot fall
   below the residual its maximum left).
+
+# Fields
+
+- `res_water`: residual brine saturation; `sGmax ≤ 1 − res_water`.
+- `res_gas`: residual CO2 saturation (0 without hysteresis); with hysteresis
+  `sG ≥ sGmax·res_gas`.
 """
 struct MaxGasSaturation <: Jutul.ScalarVariable
     res_water::Float64  # residual brine: sGmax ≤ 1 − res_water
@@ -288,6 +311,12 @@ end
 Linear shrinkage factors per phase (brine, CO2), co2lab's linear PVT:
 `b = b_ref·(1 + c·(p − p_ref))`, with `b` = reservoir density / surface
 density. `p_ref` may be given as one number for both phases.
+
+# Fields
+
+- `b_ref`: shrinkage factor `b` at `p_ref`, per phase (brine, CO2).
+- `c`: compressibility (1/Pa), per phase.
+- `p_ref`: reference pressure (Pa), per phase.
 """
 struct LinearShrinkage <: PhaseVariables
     b_ref::NTuple{2, Float64}  # b at p_ref, per phase
@@ -297,7 +326,15 @@ end
 LinearShrinkage(b_ref, c, p_ref::Real) = LinearShrinkage(b_ref, c, (p_ref, p_ref))
 "Black-oil phase mass densities `b·ρ_ref`; brine includes its dissolved CO2."
 struct BlackOilDensities <: PhaseVariables end
-"Constant viscosities per phase (brine, CO2)."
+"""
+    ConstantViscosities
+
+Constant phase viscosities, independent of pressure.
+
+# Fields
+
+- `mu`: viscosities (Pa·s), per phase (brine, CO2).
+"""
 struct ConstantViscosities <: PhaseVariables
     mu::NTuple{2, Float64}  # viscosities (Pa·s), per phase
 end
@@ -442,6 +479,17 @@ dissolution: `d/dt(M_dis) + div(F_dis) − η = 0` per cell.
 - `is_ve`: per cell, true for VE columns; `nothing` means all VE. Fine 3D
   cells of a hybrid grid dissolve instantaneously instead: co2lab's rate law
   is an upscaled phenomenon, the convective mixing below a segregated plume.
+
+# Fields
+
+- `flow_discretization`: the two-point connectivity (faces and stencil).
+- `dis_rate`: co2lab's `dis_rate`, the rate-driven dissolution rate.
+- `dis_max`: the saturated dissolved-CO2 ratio `rs`.
+- `vertical`: the vertical model (column-specific), giving the brine the CO2
+  has touched.
+- `is_ve`: per cell, `true` for VE columns; `nothing` means all VE.
+- `faces`: per face, its `VEFace` (for the transition faces' fluxes), or
+  `nothing` if the domain has no transition faces.
 """
 struct DissolvedCO2Equation{D, M, V, F} <: Jutul.JutulEquation
     flow_discretization::D  # faces and stencil (TPFA)
@@ -614,6 +662,11 @@ residual, with derivatives with respect to both reservoir and well.
 
 - One perforation per cell, as co2lab's VE wells; several perforations in
   one cell would each be counted on their own.
+
+# Fields
+
+- `reservoir_cells`: the perforated reservoir cells.
+- `well_cells`: the well cell of each perforation, in the same order.
 """
 struct DissolutionWellSupplyCT{I <: AbstractVector} <: Jutul.AdditiveCrossTerm
     reservoir_cells::I  # perforated reservoir cells
@@ -696,6 +749,16 @@ CO2 consumed by dissolution ([`_residual_depletion`](@ref)).
 - `dissolution`: the dissolved-CO2 law ([`DissolvedCO2Equation`](@ref)),
   `InstantDissolution()` for instantaneous dissolution, or `nothing` (no
   dissolution: no depletion).
+
+# Fields
+
+- `flow_discretization`: the two-point connectivity (faces and matrix
+  pattern).
+- `res_water`: residual brine saturation.
+- `res_gas`: residual CO2 saturation.
+- `dissolution`: the dissolved-CO2 law, `InstantDissolution()`, or `nothing`.
+- `faces`: per face, its `VEFace` (for the transition faces' fluxes), or
+  `nothing` if the domain has no transition faces.
 """
 struct HysteresisEquation{D, E, F} <: Jutul.JutulEquation
     flow_discretization::D  # faces and matrix pattern

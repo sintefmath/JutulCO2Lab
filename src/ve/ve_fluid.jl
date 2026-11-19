@@ -79,6 +79,13 @@ SharpInterfaceIntegrated(::Any, ::VEColumns)).
 Per column `c`, one entry per boundary of its fine cells, top first, at
 `pos[c]:pos[c+1]-1`: the depth below the caprock and the integrals from the
 caprock down to that boundary.
+
+- `pos`: column offsets into the other fields: column `c` is
+  `pos[c]:pos[c+1]-1`.
+- `z`: depth of each boundary below the caprock (m).
+- `V`: pore volume from the caprock down to the boundary, `∫ φ·area dz` (m³).
+- `K`: x-permeability integrated from the caprock down to the boundary,
+  `∫ k_x dz` (m³).
 """
 struct SharpInterfaceIntegrated <: VerticalModel
     pos::Vector{Int}    # column c: entries pos[c]:pos[c+1]-1, one per cell boundary
@@ -267,10 +274,21 @@ Settings of co2lab's VE fluid, with all defaults resolved; build with
 
 # Fields
 
-- `rho_pvt`, `mu_pvt`: per phase `(c, p_ref)` (linear; `(0.0, 0.0)` for
+- `vertical`: the vertical model as specified (a [`VerticalModel`](@ref));
+  grid-specific data is built from it for each model.
+- `res_water`: residual brine saturation.
+- `res_gas`: residual CO2 saturation.
+- `krw`: brine relperm endpoint, in the residual-CO2 zone.
+- `krg`: CO2 relperm endpoint, in the plume.
+- `rho_ref`: reference ("surface") densities (kg/m³).
+- `rho_pvt`: density model per phase: `(c, p_ref)` (linear; `(0.0, 0.0)` for
   constant) or a [`PhaseTable`](@ref).
-- `dissolution`, `dis_rate`, `dis_max`: as the keywords of
-  [`co2lab_ve_fluid`](@ref).
+- `mu_ref`: reference viscosities (Pa·s; `NaN` for a phase given by a table).
+- `mu_pvt`: viscosity model per phase, as `rho_pvt`.
+- `dissolution`: whether CO2 dissolves into brine.
+- `dis_rate`: co2lab's dissolution rate; 0 or `Inf` means instantaneous
+  dissolution.
+- `dis_max`: the saturated dissolved-CO2 ratio `rs`.
 - `fine`: the fluid of a hybrid grid's fine 3D cells (a `FineScaleFluid` with
   its rock type per cell, from [`co2lab_ve_fluid`](@ref)`(::FineScaleFluid,
   …)`), or `nothing`.
@@ -496,6 +514,14 @@ _is_ve(is_ve::AbstractVector{Bool}, i) = is_ve[i]
 Capillary heights per column (m), from the vertical model: row 1 `h`, row 2
 `h_max`.  For a sharp interface the plume thickness, `Pc/(Δρ g)` in general.
 Zero in fine cells (`is_ve` false), where nothing reads them.
+
+# Fields
+
+- `vertical`: the vertical model, built for the domain's columns.
+- `res_water`: residual brine saturation.
+- `res_gas`: residual CO2 saturation.
+- `is_ve`: per domain cell, `true` for a VE column, `false` for a fine 3D
+  cell; `nothing` when all cells are VE columns.
 """
 struct PlumeHeights{M <: VerticalModel, V} <: Jutul.VectorVariables
     vertical::M         # vertical model (column-specific)
@@ -547,6 +573,18 @@ end
 """
 Upscaled relative permeabilities (brine, CO2) of the VE columns, from the
 vertical model.  In fine cells (`is_ve` false), the 3D relperm `fine`.
+
+# Fields
+
+- `vertical`: the vertical model, built for the domain's columns.
+- `krw`: brine relperm endpoint, in the residual-CO2 zone.
+- `krg`: CO2 relperm endpoint, in the plume.
+- `res_water`: residual brine saturation.
+- `res_gas`: residual CO2 saturation.
+- `is_ve`: per domain cell, `true` for a VE column, `false` for a fine 3D
+  cell; `nothing` when all cells are VE columns.
+- `fine`: the fine cells' fluid (a `FineCellFluid`), or `nothing` without
+  fine cells.
 """
 struct VERelPerm{M <: VerticalModel, V, F} <: JutulDarcy.AbstractRelativePermeabilities
     vertical::M         # vertical model (column-specific)
@@ -605,6 +643,13 @@ end
 VE capillary pressure `pcWG = (ρ_brine − ρ_CO2)·g·h` (Pa), added to the brine
 pressure to give the CO2 pressure.  In fine cells (`is_ve` false), the
 capillary pressure of `fine`.
+
+# Fields
+
+- `is_ve`: per domain cell, `true` for a VE column, `false` for a fine 3D
+  cell; `nothing` when all cells are VE columns.
+- `fine`: the fine cells' fluid (a `FineCellFluid`), or `nothing` without
+  fine cells.
 """
 struct VECapillaryPressure{V, F} <: JutulDarcy.AbstractCapillaryPressure
     is_ve::V  # per cell, true for VE columns; nothing: all VE
@@ -648,6 +693,12 @@ phase (brine, CO2).
 - `P = true` (reservoir): at the phase pressures, as co2lab's viscosities
   (unlike its densities); CO2 at `p + pcWG`.
 - `P = false` (wells, which have no capillary pressure): at `p`.
+
+# Fields
+
+- `mu_ref`: reference viscosities `μ_ref` per phase (Pa·s).
+- `pvt`: `(c, p_ref)` per phase, compressibility (1/Pa) and reference
+  pressure (Pa); `c = 0` for a constant viscosity.
 
 Built by `LinearViscosities(mu_ref, pvt; phase_pressures = true)`.
 """

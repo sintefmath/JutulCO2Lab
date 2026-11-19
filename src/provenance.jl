@@ -18,8 +18,11 @@ an `OracleReport`. Shown as `"name commit"`, plus `" (dirty)"` if dirty.
 
 # Fields
 
-- `commit`: `"unknown"` when the directory is not a git repository or git is
-  unavailable, `"not loaded"` for a package that is not loaded.
+- `name`: the source tree's name (`"Jutul"`, `"JutulDarcy"` or `"MRST"`).
+- `dir`: the checkout directory; empty when unknown or not loaded.
+- `commit`: the short (8-character) commit hash of `HEAD`; `"unknown"` when
+  the directory is not a git repository or git is unavailable, `"not
+  loaded"` for a package that is not loaded.
 - `dirty`: whether tracked files have uncommitted changes; `missing` when
   unknown.
 """

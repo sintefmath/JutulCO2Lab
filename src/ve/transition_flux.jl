@@ -25,6 +25,21 @@
 
 One face of a VE or hybrid grid, with what a transition face's flux needs.
 Built from a [`ve_domain`](@ref)'s face data; `VEFlux` holds one per face.
+
+# Fields
+
+- `left`: the face's left cell (block).
+- `right`: the face's right cell (block).
+- `category`: the face category, 0–5 as in [`ve_domain`](@ref); 3–5 are
+  transition faces.
+- `depth`: the common depth (m) at which a transition face compares the two
+  sides' potentials; `NaN` for other faces.
+- `interval`: the depth interval `(t_L, b_L, t_R, b_R)` (m) of each side's
+  cells at the face, measured below that side's block top; `NaN` for
+  non-transition faces.
+- `zref`: the reference depths (m) of the left and right cells: a VE block's
+  caprock, a fine cell's centroid.
+- `is_ve`: whether the left and right cells are VE blocks.
 """
 struct VEFace{T}
     left::Int                # left cell
@@ -69,6 +84,11 @@ JutulDarcy's fused two-point assembly passes it to `component_mass_fluxes!`
 for each half-face, so transition faces get their own flux and all others
 the stock one. The assembly, its speed and the sparsity pattern are
 unchanged.
+
+# Fields
+
+- `faces`: one [`VEFace`](@ref) per face of the grid, in the domain's face
+  order.
 """
 struct VEFlux{T} <: Jutul.FluxType
     faces::Vector{VEFace{T}}  # every face of the grid, in the domain's order

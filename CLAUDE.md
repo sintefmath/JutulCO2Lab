@@ -101,9 +101,9 @@ thing is, why it exists and how to use it, not how it is implemented.
   Small or internal ones may use the compact form: the summary, then
   "Returns ...".  Do not inflate a short docstring into sections.
 - **Types:** what the type represents and which model or step uses it;
-  abstract types name the family's purpose and concrete subtypes.  Fields
-  are explained by their inline comments, or under `# Fields` when a line is
-  not enough.
+  abstract types name the family's purpose and concrete subtypes.  Every
+  field is described under `# Fields`, one bullet each (that is what `?`
+  shows); the inline comments are brief reminders for readers of the code.
 - **Writing:** short paragraphs (about four lines at most), else bullets or a
   heading; units on physical quantities; cross-references as
   `` [`name`](@ref) ``.  Keep every fact a user needs (defaults, units,

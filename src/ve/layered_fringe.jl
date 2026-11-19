@@ -83,6 +83,21 @@ the fringe's profile, cell by cell, with the hysteresis law's residual CO2.
 
 A new `LayeredFringe`, valid only for this grid.
 
+# Fields
+
+- `cells`: the columns' layers ([`SharpInterfaceIntegrated`](@ref)): per
+  column, the cell boundaries' depths and the integrals of pore volume and
+  x-permeability down to them.
+- `fringes`: per rock type, its curves and table settings, as a
+  [`CapillaryFringeTable`](@ref).
+- `krw3D`: per rock type, the fine-scale brine relperm function, or
+  `:linear`.
+- `cell_type`: the rock type of each cell, indexed as the entries of `cells`
+  (the last entry of each column unused).
+- `law`: the hysteresis law ([`HysteresisLaw`](@ref)).
+- `tip_height`: the plume tip, as a fraction of the column height (see
+  Arguments).
+
 # Notes
 
 - Caprock rugosity (the domain's `:rugosity`, `dh` per column) is the height
@@ -180,6 +195,25 @@ end
 The built form of [`LayeredFringe`](@ref) for a domain and fluid, made by
 [`setup_co2lab_model`](@ref): the columns' rock, a fringe table per rock type,
 the residual saturations and the hysteresis law.
+
+# Fields
+
+- `cells`: the columns' layers ([`SharpInterfaceIntegrated`](@ref)): per
+  column, the cell boundaries' depths and the integrals of pore volume and
+  x-permeability down to them.
+- `tables`: per rock type, its fringe table of integrals over capillary
+  pressure (a `PScaledTable`).
+- `krw3D`: per rock type, the fine-scale brine relperm function, or
+  `:linear`.
+- `cell_type`: the rock type of each cell, indexed as the entries of `cells`
+  (the last entry of each column unused).
+- `res_water`: residual brine saturation.
+- `res_gas`: residual CO2 saturation.
+- `law`: the hysteresis law ([`HysteresisLaw`](@ref)).
+- `p_res`: per rock type, the capillary pressure (Pa) at which the drainage
+  CO2 saturation reaches `res_gas` (0 if the fringe holds it from its tip on,
+  or `res_gas` is 0).
+- `tip_height`: the plume tip, as a fraction of the column height.
 """
 struct LayeredFringeModel{T, W, L} <: VerticalModel
     cells::SharpInterfaceIntegrated  # per column: cell boundaries, ∫φ·area, ∫k_x dz

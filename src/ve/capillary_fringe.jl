@@ -37,7 +37,10 @@ and brine, with one fine-scale capillary curve for the whole formation. Give
 it to [`co2lab_ve_fluid`](@ref) as `vertical`; it is grid-independent, and
 [`setup_co2lab_model`](@ref) builds the table for the model's domain.
 
-# Keywords (makeVEFluid's options of the same names)
+# Fields
+
+Each is also a constructor keyword of the same name, and makeVEFluid's option
+of that name.
 
 - `invPc3D`: fine-scale brine saturation as a function of capillary pressure
   (Pa); or `(C, alpha)` for co2lab's
@@ -88,6 +91,24 @@ CapillaryFringeTable(; invPc3D, kr3D = 3, tolerance = 1e-6, tip_saturation = 1e-
 The built form of [`CapillaryFringeTable`](@ref) for one domain: the column
 integrals over capillary pressure as a cubic Hermite table, shared by all
 columns (over `J`, with each column's `kscale`, under Leverett scaling).
+
+# Fields
+
+- `p`: the table's nodes, capillary pressure (Pa), or `J` under Leverett
+  scaling, from 0 to the upper limit.
+- `SP`: integral of the fine-scale CO2 saturation over `p`, at each node.
+- `s`: its derivative, the fine-scale CO2 saturation at each node.
+- `krP`: integral of the fine-scale CO2 relperm over `p`, at each node.
+- `kr`: its derivative, the fine-scale CO2 relperm at each node.
+- `invpc`: fine-scale brine saturation as a function of capillary pressure
+  (or of `J`).
+- `kscale`: per column, the Leverett factor `σ√(φ/k)` (Pa); 1 without
+  Leverett scaling.
+- `tip`: tip saturation: below this free CO2 saturation, Pc is linear in it.
+- `entry`: entry pressure (or `J`): the fine-scale CO2 saturation is positive
+  above it; 0 without entry pressure.
+- `touched`: maximum CO2 saturation below which the depth of brine touched
+  by CO2 is linear in it.
 """
 struct PScaledTable{F} <: VerticalModel
     p::Vector{Float64}       # nodes (capillary pressure, Pa; or J), 0 to Pmax
