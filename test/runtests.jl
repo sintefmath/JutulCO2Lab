@@ -21,7 +21,7 @@ function _cp_mesh(nx, nz, top; actnum = fill(true, nx, 1, nz))
           for jj in 1:2 for ii in 1:2nx]
     grid = Dict("cartDims" => [nx, 1, nz], "COORD" => coord, "ZCORN" => zc,
                 "ACTNUM" => actnum)
-    return JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+    return JutulCO2Lab._mesh_from_grid_section(grid)
 end
 
 # Transmissibility multipliers of `mesh`'s faces: `value` on `faces` (default
@@ -44,7 +44,7 @@ function _cp_mesh_pillars(nx, nz, top)
           for jj in 1:2 for ii in 1:2nx]
     grid = Dict("cartDims" => [nx, 1, nz], "COORD" => coord, "ZCORN" => zc,
                 "ACTNUM" => fill(true, nx, 1, nz))
-    return JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+    return JutulCO2Lab._mesh_from_grid_section(grid)
 end
 
 # --------------------- Helpers: a stand-in vertical model ---------------------
@@ -142,7 +142,8 @@ function _ve_well_vs_mrst_runs(d, ref_rate, ref_bhp, ref_src)
             # a CO2 source term at this rate instead of the well
             model = setup_co2lab_model(ve.domain; fluid = fluid,
                                        rock_compressibility = rc)
-            src(q) = [SourceTerm(col, q; fractional_flow = [0.0, 1.0])]
+            src(q) = [SourceTerm(col, q; fractional_flow = [0.0, 1.0],
+                                  type = StandardVolumeSource)]
             f_on = setup_reservoir_forces(model; bc = bc, sources = src(target))
             f_off = setup_reservoir_forces(model; bc = bc, sources = src(0.0))
         else
@@ -521,8 +522,8 @@ end
             for s in srcs
                 @test isdir(s.dir)
                 @test s.commit != "not loaded"
-                # Both are git checkouts here; an 8-char hex hash, not "unknown".
-                @test occursin(r"^[0-9a-f]{8}$", s.commit)
+                # a git checkout's 8-char hex hash, or a registered release's version
+                @test occursin(r"^([0-9a-f]{8}|v\d+\.\d+\.\d+)$", s.commit)
                 @test s.dirty isa Bool
             end
 
@@ -836,7 +837,7 @@ end
 
             grid = Dict("cartDims" => [nx, ny, nz], "COORD" => coord, "ZCORN" => zc,
                         "ACTNUM" => fill(true, nx, ny, nz))
-            mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+            mesh = JutulCO2Lab._mesh_from_grid_section(grid)
 
             cols, disc = ve_columns(mesh)
             @test number_of_columns(cols) == 6 && isempty(disc)
@@ -1183,7 +1184,7 @@ end
               for k in 1:2 for s in (0, 1) for jj in 0:1 for i in 1:3 for ii in 0:1]
         grid = Dict("cartDims" => [3, 1, 2], "COORD" => coord, "ZCORN" => zc,
                     "ACTNUM" => fill(true, 3, 1, 2))
-        mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+        mesh = JutulCO2Lab._mesh_from_grid_section(grid)
         @test any(length(mesh.faces.faces_to_nodes[f]) > 4
                   for f in 1:number_of_faces(mesh))
 
@@ -1210,7 +1211,7 @@ end
               for k in 1:4 for s in (0, 1) for jj in 0:1 for i in 1:3 for ii in 0:1]
         grid = Dict("cartDims" => [3, 1, 4], "COORD" => coord, "ZCORN" => zc,
                     "ACTNUM" => fill(true, 3, 1, 4))
-        mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+        mesh = JutulCO2Lab._mesh_from_grid_section(grid)
         cols, _ = ve_columns(mesh; below_holes = :stack)
         sec = ve_section(mesh, cols; along = :i, index = 1)
 
@@ -2363,11 +2364,13 @@ end
                              state0 = setup_co2lab_state(model; pressure = p0,
                                                          forces = on),
                              parameters = setup_parameters(model))
-            sim, cfg = setup_co2lab_simulator(case; info_level = -1)
+            # a tight mass-balance tolerance: with the default (1e-7 per step)
+            # the residuals left at convergence add up to ~1e-4 over the run
+            sim, cfg = setup_co2lab_simulator(case; info_level = -1, tol_mb = 1e-9)
             M = simulate_reservoir(case; simulator = sim,
                                    config = cfg).states[end][:TotalMasses][2, :]
             injected = 10 * 30 * 86400.0 * q * fl.rho_ref[2]
-            @test abs(sum(M) - injected) / injected < 1e-4
+            @test abs(sum(M) - injected) / injected < 1e-5
             colb(b) = column(cols.cells[cols.pos[b]])
             return sum(M[b] for b in eachindex(M) if colb(b) < 3)
         end
@@ -2892,7 +2895,7 @@ end
             ztop = reshape(cb[3, :], nx + 1, ny + 1)
             @test all(b.grid["ACTNUM"][i, j, 1] <= all(ztop[i:i+1, j:j+1] .> 0)
                       for i in 1:nx, j in 1:ny)
-            m = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(b.grid)
+            m = JutulCO2Lab._mesh_from_grid_section(b.grid)
             @test number_of_cells(m) == count(b.grid["ACTNUM"])
 
             # Jurassic formations use the Jurassic top; rock maps on all layers
@@ -3019,7 +3022,7 @@ end
         grid = sloping_aquifer_grid(; nx = 12, ny = 6, nz = 6, length = 1200.0,
                                     width = 600.0, thickness = 12.0, slope = 0.01,
                                     traps = ((0.5, 0.4, 6.0),))
-        m = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+        m = JutulCO2Lab._mesh_from_grid_section(grid)
         ijk = [cell_ijk(m, c) for c in 1:number_of_cells(m)]
         patch(i, j) = 4 <= i <= 8 && 2 <= j <= 5
         N = get_neighborship(m)

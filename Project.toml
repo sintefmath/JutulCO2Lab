@@ -25,6 +25,9 @@ JutulCO2LabMakieExt = "Makie"
 
 [compat]
 GLMakie = "0.13.15"
+GeoEnergyIO = "1.2.2"
+Jutul = "0.5.4"
+JutulDarcy = "0.4.1"
 Makie = "0.24"
 PrecompileTools = "1"
 julia = "1.10"

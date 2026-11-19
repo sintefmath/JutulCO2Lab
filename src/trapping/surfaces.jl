@@ -156,6 +156,6 @@ function surface_mesh(x::AbstractVector, y::AbstractVector, top::AbstractMatrix;
     active = [all(defined[i:i+1, j:j+1]) for i in 1:nx, j in 1:ny, _ in 1:1]
     grid = Dict("cartDims" => (nx, ny, 1), "COORD" => coord, "ZCORN" => zcorn,
                 "ACTNUM" => active)
-    mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+    mesh = _mesh_from_grid_section(grid)
     return (mesh = mesh, columns = first(ve_columns(mesh)))
 end

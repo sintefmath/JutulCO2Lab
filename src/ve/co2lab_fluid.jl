@@ -1203,7 +1203,8 @@ end
 
 """
     setup_co2lab_simulator(case; dissolved_co2_tolerance = 1e-6,
-                           hysteresis_tolerance = 1e-6, kwarg...) -> (sim, cfg)
+                           hysteresis_tolerance = 1e-6, precond = :cpr,
+                           kwarg...) -> (sim, cfg)
 
 JutulDarcy's `setup_reservoir_simulator`, plus tolerances for co2lab's
 extra equations when the model has them.
@@ -1215,6 +1216,8 @@ extra equations when the model has them.
   CNV).
 - `hysteresis_tolerance`: for the hysteresis equation (a saturation;
   co2lab's default `nonlinearTolerance` is 1e-6 on it).
+- `precond`: the preconditioner, as for `setup_reservoir_simulator`; default
+  `:cpr` (see Notes).
 - `kwarg...`: passed on to `setup_reservoir_simulator`.
 
 # Returns
@@ -1222,10 +1225,18 @@ extra equations when the model has them.
 `(sim, cfg)`: a new `Simulator` and its `JutulConfig`, with
 `cfg[:tolerances][:Reservoir][:dissolved_co2]` and `[:hysteresis]` set when
 the model has those equations.
+
+# Notes
+
+- JutulDarcy's default preconditioner for models with wells, `:cprw`, maps
+  each well equation onto the reservoir's block for block. It fails
+  ("Jacobian alignment failed") when the reservoir has more unknowns per cell
+  than the wells, as with co2lab's hysteresis or dissolution, so `:cpr` is
+  the default here.
 """
 function setup_co2lab_simulator(case; dissolved_co2_tolerance = 1e-6,
-                                hysteresis_tolerance = 1e-6, kwarg...)
-    sim, cfg = setup_reservoir_simulator(case; kwarg...)
+                                hysteresis_tolerance = 1e-6, precond = :cpr, kwarg...)
+    sim, cfg = setup_reservoir_simulator(case; precond, kwarg...)
 
     eqs, tol = case.model[:Reservoir].equations, cfg[:tolerances][:Reservoir]
     haskey(eqs, :dissolved_co2) && (tol[:dissolved_co2] = dissolved_co2_tolerance)

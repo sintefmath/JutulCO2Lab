@@ -20,7 +20,7 @@ function _trap_case_mesh(e)
         return (m.mesh, m.columns)
     elseif startswith(name, "sleipner")
         grid = sleipner_grid_section(; min_perm = 0.0)
-        mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+        mesh = JutulCO2Lab._mesh_from_grid_section(grid)
         return (mesh, first(ve_columns(mesh)))
     elseif name == "Huginfmwest/south"
         return _hugin_west_south(c)
@@ -47,7 +47,7 @@ function _faulted_mesh(throw)
     zcorn = [top(a, b) + 20.0 * (c - 1) for c in 1:2 for b in 1:2ny for a in 1:2nx]
     grid = Dict("cartDims" => (nx, ny, 1), "COORD" => coord, "ZCORN" => zcorn,
                 "ACTNUM" => fill(true, nx, ny, 1))
-    mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+    mesh = JutulCO2Lab._mesh_from_grid_section(grid)
     return (mesh, first(ve_columns(mesh)))
 end
 
@@ -98,7 +98,7 @@ function _sine_mesh()
              for c in 1:2 for b in 1:2ny for a in 1:2nx]
     grid = Dict("cartDims" => (nx, ny, 1), "COORD" => coord, "ZCORN" => zcorn,
                 "ACTNUM" => fill(true, nx, ny, 1))
-    mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+    mesh = JutulCO2Lab._mesh_from_grid_section(grid)
     return (mesh, first(ve_columns(mesh)))
 end
 

@@ -1,9 +1,10 @@
 # Source provenance for oracle reports: which commits of Jutul, JutulDarcy and
 # MRST a comparison ran against.
 #
-# Why: Jutul and JutulDarcy are `dev`-ed from local checkouts, for which
+# Why: Jutul and JutulDarcy may be `dev`-ed from local checkouts, for which
 # Manifest.toml records no commit. So every `OracleReport` records the commit
-# and dirty state of each checkout when it is made.
+# and dirty state of each checkout when it is made, or the version of a
+# registered release.
 #
 # Record-only by design: nothing here fails a gate; a dirty checkout gives a
 # warning, not an error.
@@ -20,16 +21,17 @@ an `OracleReport`. Shown as `"name commit"`, plus `" (dirty)"` if dirty.
 
 - `name`: the source tree's name (`"Jutul"`, `"JutulDarcy"` or `"MRST"`).
 - `dir`: the checkout directory; empty when unknown or not loaded.
-- `commit`: the short (8-character) commit hash of `HEAD`; `"unknown"` when
-  the directory is not a git repository or git is unavailable, `"not
-  loaded"` for a package that is not loaded.
+- `commit`: the short (8-character) commit hash of `HEAD` for a git
+  checkout; `"v<version>"` for a registered release of a loaded package;
+  `"unknown"` when neither is known, `"not loaded"` for a package that is not
+  loaded.
 - `dirty`: whether tracked files have uncommitted changes; `missing` when
   unknown.
 """
 struct SourceInfo
     name::String                 # package
     dir::String                  # checkout directory
-    commit::String               # short commit hash ("unknown" if none)
+    commit::String               # short commit hash, or v<version> of a release
     dirty::Union{Bool, Missing}  # uncommitted changes (missing if unknown)
 end
 
@@ -83,15 +85,21 @@ Provenance of the Jutul and JutulDarcy source trees currently loaded.
 
 # Returns
 
-A new vector of [`SourceInfo`](@ref), Jutul first. A package that is not
-loaded has commit `"not loaded"` and `dirty` `missing`.
+A new vector of [`SourceInfo`](@ref), Jutul first. A git checkout has its
+commit; a registered release its version (`"v0.5.9"`), not dirty. A package
+that is not loaded has commit `"not loaded"` and `dirty` `missing`.
 """
 function source_provenance()
     infos = SourceInfo[]
     for id in TRACKED_PACKAGES
         if haskey(Base.loaded_modules, id)
-            dir = pkgdir(Base.loaded_modules[id])
-            push!(infos, _git_source_info(id.name, dir))
+            mod = Base.loaded_modules[id]
+            info = _git_source_info(id.name, pkgdir(mod))
+            # not a git checkout: a registered release, identified by its version
+            if info.commit == "unknown" && !isnothing(pkgversion(mod))
+                info = SourceInfo(id.name, info.dir, "v$(pkgversion(mod))", false)
+            end
+            push!(infos, info)
         else
             push!(infos, SourceInfo(id.name, "", "not loaded", missing))
         end

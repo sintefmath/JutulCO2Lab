@@ -114,7 +114,7 @@ function sloping_aquifer(; nz::Integer = 5, ny::Integer = 1, co2_rho = nothing,
                          co2_mu = nothing, kwargs...)
     grid = sloping_aquifer_grid(; nz, ny, kwargs...)
     nx = grid["cartDims"][1]
-    mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+    mesh = _mesh_from_grid_section(grid)
     columns, _ = ve_columns(mesh)
     nc = number_of_cells(mesh)
     ve = ve_domain(mesh, columns; perm_x = fill(400 * 1e-3 * _mrst_darcy(), nc),

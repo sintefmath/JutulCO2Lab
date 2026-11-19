@@ -58,8 +58,9 @@ deck is not in [`johansen_data_directory`](@ref).
 # Notes
 
 - The full-field model has inactive zero-thickness layers between active
-  ones. GeoEnergyIO connects cells across them (pinch-out processing, by
-  default even without a `PINCH` keyword), so a column continues below.
+  ones. Cells are connected across them (pinch-out processing, with
+  `PINCH 0.001 GAP Inf TOPBOT TOP` as the deck has no `PINCH` keyword), so a
+  column continues below.
   MRST does not, and co2lab's `topSurfaceGrid` then drops the cells below
   the gap; `co2lab_compatible = true` gives MRST's behaviour.
 """
@@ -76,8 +77,7 @@ function johansen_mesh(model::Symbol = :sector; co2lab_compatible::Bool = false)
     end
     grid = _cut_layers(grid, m.layers)
     # co2lab_compatible: no connections across pinched-out layers, as MRST
-    mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(
-        grid; process_pinch = !co2lab_compatible)
+    mesh = _mesh_from_grid_section(grid; process_pinch = !co2lab_compatible)
     # cells below holes discarded, as co2lab's topSurfaceGrid
     columns, _ = ve_columns(mesh; below_holes = :discard)
     return (mesh = mesh, columns = columns, grid = grid)
@@ -225,7 +225,7 @@ function johansen_ve_domain(; min_perm::Real = 0.11, kwargs...)
     grid = johansen_grid_section(; min_perm)
     # the largest connected piece only, as co2lab's G(1)
     grid["ACTNUM"] = _largest_piece(grid)
-    mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
+    mesh = _mesh_from_grid_section(grid)
     # cells below holes dropped, as co2lab's topSurfaceGrid; then the columns
     # of the trimmed mesh
     columns, discarded = ve_columns(mesh; below_holes = :discard)

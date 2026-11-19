@@ -34,36 +34,25 @@ returned objects are listed in dependency order in `STRUCTURES.md`.
 
 ## Installation
 
-JutulCO2Lab runs on Jutul 0.5 and JutulDarcy 0.4 (ForwardDiff 1). It needs
-two checkouts until fixes are released: JutulDarcy `main` from `1a79f300`
-(0.4.0 plus a well-flux fix, sintefmath/JutulDarcy.jl#326), and GeoEnergyIO
-1.2.0 with two corner-point fixes (#72, #73). Jutul comes from the registry.
-Put the checkouts side by side:
+JutulCO2Lab runs on the registered releases of Jutul (0.5.4 or later 0.5),
+JutulDarcy (0.4.1 or later 0.4) and GeoEnergyIO (1.2.2 or later 1.2), with
+ForwardDiff 1. Put the repository and the data sets side by side:
 
 ```
 <parent>/
   JutulCO2Lab/            this repository
-  JutulDarcy.jl/          JutulDarcy, main (from 1a79f300)
-  GeoEnergyIO.jl-fork/    GeoEnergyIO, branch co2lab-jutul-merge-1.2
   mrst-data/              data sets for most examples (below)
 ```
+
+Then, with Julia 1.12, instantiate the package's and the examples'
+environments and run the tests (several minutes):
 
 ```
 cd <parent>
 git clone https://github.com/sintefmath/JutulCO2Lab.git
-git clone https://github.com/sintefmath/JutulDarcy.jl.git JutulDarcy.jl
-git clone -b co2lab-jutul-merge-1.2 https://github.com/Oddan/GeoEnergyIO.jl.git GeoEnergyIO.jl-fork
-```
-
-Then, with Julia 1.12, use the two checkouts in the package's and the
-examples' environments, and run the tests (several minutes):
-
-```
-cd <parent>/JutulCO2Lab
-julia --project=. -e 'using Pkg; Pkg.develop([PackageSpec(path = p) for p in
-    ("../JutulDarcy.jl", "../GeoEnergyIO.jl-fork")])'
-julia --project=examples -e 'using Pkg; Pkg.develop([PackageSpec(path = p) for p in
-    (".", "../JutulDarcy.jl", "../GeoEnergyIO.jl-fork")])'
+cd JutulCO2Lab
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
+julia --project=examples -e 'using Pkg; Pkg.develop(path = "."); Pkg.instantiate()'
 julia --threads=8 --project=. -e 'using Pkg; Pkg.test()'
 ```
 
@@ -71,11 +60,6 @@ julia --threads=8 --project=. -e 'using Pkg; Pkg.test()'
 ends with a toolchain smoke test (a small stock immiscible case); if that
 fails, the environment is the problem. Tests comparing with MRST reference
 dumps or needing data sets are skipped when those are missing.
-
-What the checkouts carry: JutulDarcy 0.4.0 plus #326, merged but not yet
-released (shut wells converged only linearly under ForwardDiff 1); GeoEnergyIO
-1.2.0 plus #72 and #73 (extra nodes on corner-point edges). Once these are
-released, registered versions replace them.
 
 ### Data sets
 

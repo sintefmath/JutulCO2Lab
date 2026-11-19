@@ -113,6 +113,22 @@ function ve_mesh_from_mrst(G::AbstractDict)
     return _set_boundary_directions!(mesh, _mrst_boundary_directions(G, mesh))
 end
 
+"""
+    _mesh_from_grid_section(grid; process_pinch = true) -> UnstructuredMesh
+
+GeoEnergyIO's `mesh_from_grid_section` with pinch-out processing by default:
+a grid without a `PINCH` keyword gets `PINCH 0.001 GAP Inf TOPBOT TOP`, so
+cells across a zero-thickness layer stay connected (a pinched-out layer does
+not cut a column). GeoEnergyIO processes pinch-outs only when the keyword is
+given, as ECLIPSE. Returns the new mesh; `grid` itself is not changed.
+"""
+function _mesh_from_grid_section(grid; process_pinch::Bool = true)
+    if process_pinch && !haskey(grid, "PINCH")
+        grid = merge(grid, Dict("PINCH" => [0.001, "GAP", Inf, "TOPBOT", "TOP"]))
+    end
+    return JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid; process_pinch)
+end
+
 # ---------------------------- Columns and trimming ----------------------------
 
 """

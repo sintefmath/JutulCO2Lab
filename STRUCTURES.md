@@ -197,7 +197,7 @@ Constants: `MRST_YEAR` (MRST's year, 365.2425 days, in seconds; internal).
 | # | Name | File | What it is | Depends on |
 |---|---|---|---|---|
 | 32 | **`MrstDump`** | `oracle.jl` | a loaded MRST export (`read_mrst_dump`) | — |
-| 33 | **`SourceInfo`** | `provenance.jl` | commit and dirty state of one source tree | — |
+| 33 | **`SourceInfo`** | `provenance.jl` | commit and dirty state of one source tree (a git checkout), or the version of a registered release | — |
 | 34 | **`Tolerance`** | `oracle.jl` | relative and absolute tolerance; pass if `|a − b| ≤ atol + rtol·|b|` | — |
 | 35 | `CheckResult` | `oracle.jl` | outcome of one comparison | 34 |
 | 36 | **`OracleReport`** | `oracle.jl` | titled list of results plus provenance | 35, 33; records the MRST commit from 32 |
