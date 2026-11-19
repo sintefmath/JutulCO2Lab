@@ -96,9 +96,10 @@ Jutul's direction names in MRST's face-tag order), `_TOP`, `_BOTTOM`
 | # | Name | File | What it is | Depends on |
 |---|---|---|---|---|
 | 23 | `ConstantRs` | `co2lab_fluid.jl` | co2lab's constant saturated `rsSat` | — |
-| 24 | `CO2LabSystem` (alias) | `co2lab_fluid.jl` | JutulDarcy's `StandardBlackOilSystem` with formulation tag `:co2lab`; the variables of C attach to it | 23 when dissolution is on |
+| 24 | `CO2LabSystem` (alias) | `co2lab_fluid.jl` | JutulDarcy's `StandardBlackOilSystem` with formulation tag `:co2lab` or `:co2lab_compatible` (the latter also takes co2lab's plain-mean face density, for comparisons); the variables of C attach to it | 23 when dissolution is on |
 | 25 | `CO2LabNoDissolutionSystem` (alias) | `co2lab_fluid.jl` | 24 without dissolved gas | 24 |
 | 26 | `CO2LabModel`, `CO2LabNoDissolutionModel` (aliases) | `co2lab_fluid.jl` | `SimulationModel`s of 24 / 25, for method dispatch | 24, 25 |
+| 26a | `CO2LabCompatibleSystem`, `CO2LabCompatibleModel` (aliases) | `co2lab_fluid.jl` | 24 with the tag `:co2lab_compatible` (`setup_co2lab_model(...; co2lab_compatible = true)`), and its `SimulationModel`s: co2lab's plain-mean face density | 24 |
 | 27 | *co2lab model* (`MultiModel`) | `co2lab_fluid.jl` | `:Reservoir` (26, with C), one submodel per well, `:Facility` | 4, 8, rock compressibility, well domains (`setup_co2lab_model`) |
 
 ## E. Wells and results

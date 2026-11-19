@@ -5,8 +5,8 @@
 # treats both sides as virtual cells over the face's depth interval:
 #
 # - each side's phase pressures are carried hydrostatically, with the face's
-#   mean phase densities, to one common depth and compared there (no separate
-#   gravity term, no mixing of datums);
+#   phase densities (as JutulDarcy's two-point flux), to one common depth and
+#   compared there (no separate gravity term, no mixing of datums);
 # - each phase takes the upwind side's mobility over its interval: a VE block's
 #   relperms integrated over the interval by its vertical model, a fine cell's
 #   own.
@@ -17,8 +17,8 @@
 # Phase pressures at depth x of cell c, with z_c its reference depth (a VE
 # block's caprock, a fine cell's centroid), P its brine pressure there and Pc
 # its capillary pressure: brine P + ρ_W g (x − z_c), CO2 P + Pc + ρ_G g (x − z_c),
-# ρ the face's mean of the two sides' densities. For a VE block that is the
-# brine continuous through the column and the CO2 at P + Δρ g h at the caprock.
+# ρ the face's phase density. For a VE block that is the brine continuous
+# through the column and the CO2 at P + Δρ g h at the caprock.
 
 """
     VEFace{T}
@@ -140,12 +140,12 @@ function JutulDarcy.component_mass_fluxes!(q, face, state,
 end
 
 # −T (Φ_R − Φ_L) per phase (brine, CO2), both at the common depth; each phase
-# carried there with the face's mean density (as JutulDarcy's two-point flux),
-# which keeps a compressible fluid's discrete hydrostatic equilibrium exact
-function _transition_potentials(face, state, f::VEFace)
+# carried there with the face density of JutulDarcy's two-point flux, which
+# keeps a compressible fluid's discrete hydrostatic equilibrium exact
+function _transition_potentials(face, state, model, f::VEFace)
     T = state.Transmissibilities[face]
-    ρ = state.PhaseMassDensities
-    ρf = ntuple(ph -> (ρ[ph, f.left] + ρ[ph, f.right]) / 2, 2)
+    tpfa = Jutul.TPFA(f.left, f.right, 1)
+    ρf = ntuple(ph -> JutulDarcy.face_average_density(model, state, tpfa, ph), 2)
     pl = _phase_pressures_at(state, f.left, f.depth - f.zref[1], ρf)
     pr = _phase_pressures_at(state, f.right, f.depth - f.zref[2], ρf)
     return (-T * (pr[1] - pl[1]), -T * (pr[2] - pl[2]))
@@ -162,7 +162,7 @@ end
 
 # The potentials (left to right) and each phase's upwind mobility b·kr/μ
 function _transition_terms(face, state, model, f::VEFace)
-    ψ = _transition_potentials(face, state, f)
+    ψ = _transition_potentials(face, state, model, f)
     λb = ntuple(ph -> _transition_mobility(state, model, f, _plain(ψ[ph]) >= 0 ? 1 : 2,
                                            ph), 2)
     return (ψ, λb)

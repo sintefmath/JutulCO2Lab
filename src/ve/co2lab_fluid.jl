@@ -6,7 +6,8 @@
 # its choice of unknowns and, with rate-driven dissolution, one extra
 # conservation law. JutulDarcy's black-oil masses, fluxes and wells read Rs
 # from the state whether or not it is an unknown, so the system type stays
-# StandardBlackOilSystem, re-tagged with formulation :co2lab.
+# StandardBlackOilSystem, re-tagged with formulation :co2lab (or
+# :co2lab_compatible, which also keeps co2lab's plain-mean face density).
 #
 # The unknowns follow the configuration, as in co2lab:
 #   always                         p, sG
@@ -31,15 +32,23 @@ import JutulDarcy: StandardBlackOilSystem, BlackOilSystem, reference_densities,
 # ----------------------------------- System -----------------------------------
 
 "All systems with co2lab's formulation (two phases, no vaporised brine)."
-const CO2LabSystem = StandardBlackOilSystem{<:Any, Nothing, <:Any, <:Any, :co2lab}
+const CO2LabSystem = Union{
+    StandardBlackOilSystem{<:Any, Nothing, <:Any, <:Any, :co2lab},
+    StandardBlackOilSystem{<:Any, Nothing, <:Any, <:Any, :co2lab_compatible}}
 "co2lab's formulation with dissolution off (no dissolved gas: `rs_max = nothing`)."
-const CO2LabNoDissolutionSystem =
-    StandardBlackOilSystem{Nothing, Nothing, <:Any, <:Any, :co2lab}
+const CO2LabNoDissolutionSystem = Union{
+    StandardBlackOilSystem{Nothing, Nothing, <:Any, <:Any, :co2lab},
+    StandardBlackOilSystem{Nothing, Nothing, <:Any, <:Any, :co2lab_compatible}}
+"co2lab's formulation tagged for comparisons with co2lab (`co2lab_compatible`)."
+const CO2LabCompatibleSystem =
+    StandardBlackOilSystem{<:Any, Nothing, <:Any, <:Any, :co2lab_compatible}
 "A model on a co2lab system."
 const CO2LabModel = Jutul.SimulationModel{<:Any, <:CO2LabSystem}
 "A model on a co2lab system without dissolution."
 const CO2LabNoDissolutionModel =
     Jutul.SimulationModel{<:Any, <:CO2LabNoDissolutionSystem}
+"A model on a co2lab system tagged for comparisons with co2lab."
+const CO2LabCompatibleModel = Jutul.SimulationModel{<:Any, <:CO2LabCompatibleSystem}
 
 """
     ConstantRs
@@ -78,9 +87,10 @@ liquid phase, CO2 as its vapour phase. Used by
 - `reference_densities`: surface densities `(brine, CO2)` (kg/m³).
 - `rs_sat`: saturated dissolved-CO2 ratio (surface volume of CO2 per
   surface volume of brine); turns dissolution on. `nothing`: off.
-- `formulation`: `:co2lab`, or `:varswitch` for the same fluid in
-  JutulDarcy's equilibrium formulation (the wellbores, when dissolution is
-  on).
+- `formulation`: `:co2lab`; `:co2lab_compatible`, the same with co2lab's
+  plain-mean face density (for comparisons with co2lab); or `:varswitch` for
+  the same fluid in JutulDarcy's equilibrium formulation (the wellbores, when
+  dissolution is on).
 
 # Returns
 
@@ -845,20 +855,21 @@ end
 # -------------------------------- Face density --------------------------------
 
 """
-    JutulDarcy.face_average_density(model::CO2LabModel, state, tpfa, phase, ρ)
+    JutulDarcy.face_average_density(model::CO2LabCompatibleModel, state, tpfa,
+                                    phase, ρ) -> Real
 
-The phase density at a face, in the gravity term of the two-point flux: the
-plain mean of the two cells' densities, as co2lab (and JutulDarcy for
-black-oil models up to 0.4.0). Returns the mean (a new number).
+The phase density at a face, in the gravity term of the two-point flux, for
+comparisons with co2lab: the plain mean of the two cells' densities, as
+co2lab. Returns the mean (a new number).
 
 # Notes
 
-- JutulDarcy 0.4.1 weights black-oil models' face density by saturation,
-  `(s_L ρ_L + s_R ρ_R)/(s_L + s_R)`, as ECLIPSE does. In a VE column the
-  saturation is the column average, not the saturation at the caprock where
-  the CO2 pressure is taken, so co2lab's plain mean is kept.
+- Other co2lab models take JutulDarcy's black-oil face density, weighted by
+  saturation, `(s_L ρ_L + s_R ρ_R)/(s_L + s_R)` (ECLIPSE's): a phase absent
+  from one cell adds no head of its own there. The two differ only where a
+  phase is absent on one side, or by the cells' density difference.
 """
-JutulDarcy.face_average_density(model::CO2LabModel, state, tpfa, phase,
+JutulDarcy.face_average_density(model::CO2LabCompatibleModel, state, tpfa, phase,
                                 ρ = state.PhaseMassDensities) =
     JutulDarcy.phase_face_average(ρ, tpfa, phase)
 
@@ -892,8 +903,8 @@ end
 """
     setup_co2lab_model(domain; wells = [], fluid = co2lab_ve_fluid(),
                        rock_compressibility = (reference_pressure = 100e5,
-                                               compressibility = 1e-10))
-        -> MultiModel
+                                               compressibility = 1e-10),
+                       co2lab_compatible = false) -> MultiModel
 
 VE reservoir model with co2lab's formulation and fluid, plus wells: the
 model a co2lab simulation runs. Start it with [`setup_co2lab_state`](@ref)
@@ -911,6 +922,10 @@ and simulate with [`setup_co2lab_simulator`](@ref).
   [`set_co2lab_rock_compressibility!`](@ref), co2lab's linear pore-volume
   multiplier (default: makeVEFluid's defaults); `nothing` keeps the pore
   volume constant (e.g. to use JutulDarcy's `set_rock_compressibility!`).
+- `co2lab_compatible`: `true` takes co2lab's plain-mean face density in the
+  gravity term of the fluxes, for comparisons with co2lab; default `false`,
+  JutulDarcy's saturation-weighted one (see
+  [`JutulDarcy.face_average_density`](@ref)).
 
 # Returns
 
@@ -954,10 +969,11 @@ The fluid decides the unknowns and equations:
 """
 function setup_co2lab_model(domain; wells = [], fluid::CO2LabVEFluid = co2lab_ve_fluid(),
                             rock_compressibility = (reference_pressure = 100e5,
-                                                    compressibility = 1e-10))
+                                                    compressibility = 1e-10),
+                            co2lab_compatible::Bool = false)
     # the column-specific vertical model, built once (fringe tables)
     m = _vertical_model(fluid.vertical, domain, fluid)
-    model = _co2lab_multimodel(domain, wells, fluid, m)
+    model = _co2lab_multimodel(domain, wells, fluid, m; co2lab_compatible)
     rmodel = model[:Reservoir]
     # instantaneous dissolution: co2lab's switching unknown replaces sG and rs
     instantaneous_dissolution(fluid) && _set_instant_dissolution!(rmodel, fluid)
@@ -1043,18 +1059,22 @@ function _set_max_gas_saturation!(rmodel, fluid::CO2LabVEFluid)
 end
 
 """
-    _co2lab_multimodel(domain, wells, fluid, vertical) -> MultiModel
+    _co2lab_multimodel(domain, wells, fluid, vertical;
+                       co2lab_compatible = false) -> MultiModel
 
-The bare `MultiModel`: the reservoir in co2lab's formulation (with
+The bare `MultiModel`: the reservoir in co2lab's formulation, tagged
+`:co2lab_compatible` if asked (with
 dissolution also the dissolved-CO2 law, using the column-specific vertical
 model `vertical`) and the wells (with dissolution in JutulDarcy's
 equilibrium formulation). Returns a new `MultiModel`.
 """
-function _co2lab_multimodel(domain, wells, fluid::CO2LabVEFluid, vertical)
+function _co2lab_multimodel(domain, wells, fluid::CO2LabVEFluid, vertical;
+                            co2lab_compatible::Bool = false)
     rho_ref = fluid.rho_ref
     # nothing: no dissolved CO2 at all (rs is then not even a variable)
     rs_sat = fluid.dissolution ? fluid.dis_max : nothing
-    sys = co2lab_system(reference_densities = rho_ref, rs_sat = rs_sat)
+    formulation = co2lab_compatible ? :co2lab_compatible : :co2lab
+    sys = co2lab_system(; reference_densities = rho_ref, rs_sat, formulation)
     # transition faces: every face a VEFace, given to the flux (VEFlux)
     faces = _ve_faces(domain)
     # without dissolution one system serves reservoir and wells alike

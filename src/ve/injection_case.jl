@@ -12,7 +12,7 @@ const MRST_YEAR = 365.2425 * 86400
                          temperature = nothing, rugosity = 0.0, rho_w = nothing,
                          well_radius = 0.3, outside_distance = 100e3,
                          pore_compressibility = 1e-10, dissolved = :carry,
-                         well_volume = 1.0) -> NamedTuple
+                         well_volume = 1.0, co2lab_compatible = false) -> NamedTuple
 
 co2lab-demo's `exploreSimulation` launch, without its GUI: CO2 injected into
 a VE formation from several wells, then left to migrate. Run it with
@@ -44,6 +44,8 @@ a VE formation from several wells, then left to migrate. Run it with
 - `dissolved`: how brine crossing an open side books its dissolved CO2
   ([`ve_boundary_conditions`](@ref); `:co2lab` for comparisons).
 - `well_volume`: wellbore volume as a multiple of JutulDarcy's default.
+- `co2lab_compatible`: co2lab's face density, for comparisons with co2lab
+  (as [`setup_co2lab_model`](@ref)). Default `false`.
   co2lab's wells have none; `1e-3` comes close, for comparisons.
 
 # Returns
@@ -82,7 +84,7 @@ function setup_injection_case(a, wells; fluid, boundary = :open,
                               temperature = nothing, rugosity = 0.0, rho_w = nothing,
                               well_radius = 0.3, outside_distance = 100e3,
                               pore_compressibility = 1e-10, dissolved::Symbol = :carry,
-                              well_volume = 1.0)
+                              well_volume = 1.0, co2lab_compatible::Bool = false)
     ve = _injection_formation(a.ve, temperature, rugosity)
     g = Jutul.gravity_constant
     sides, _ = ve_boundary_sides(a.mesh, a.columns, ve.domain)
@@ -100,7 +102,7 @@ function setup_injection_case(a, wells; fluid, boundary = :open,
     rock = (reference_pressure = sum(p0) / length(p0),
             compressibility = pore_compressibility)
     model = setup_co2lab_model(ve.domain; wells = vewells, fluid,
-                               rock_compressibility = rock)
+                               rock_compressibility = rock, co2lab_compatible)
     # injection: each well at its mass rate, in the fluid's reference volumes
     rate(w) = TotalRateTarget(w[2] / fluid.rho_ref[2])
     inj = Dict(Symbol("I$k") => co2_injector_control(rate(w), fluid)
