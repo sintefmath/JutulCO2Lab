@@ -127,7 +127,7 @@ function atlas_mesh(name::AbstractString; coarsening::Integer = 1,
     grid = s.grid
     # the largest connected piece only, as co2lab's G(1)
     grid["ACTNUM"] = _largest_piece(grid)
-    mesh = _mesh_from_grid_section(grid)
+    mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
     columns, _ = ve_columns(mesh)
     return (mesh = mesh, columns = columns, grid = grid, petro = s.petro)
 end
@@ -159,14 +159,14 @@ function grid_section_subset(grid, mesh, keep::AbstractVector{Bool})
         active[cell_ijk(mesh, c)...] = true
     end
     sub = merge(grid, Dict("ACTNUM" => active))
-    m = _mesh_from_grid_section(sub)
+    m = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(sub)
     return (mesh = m, columns = first(ve_columns(m)), grid = sub)
 end
 
 # A new ACTNUM (Array{Bool, 3}) keeping only the largest connected piece of
 # the section's mesh (co2lab: the processGRDECL piece with most cells)
 function _largest_piece(grid)
-    mesh = _mesh_from_grid_section(grid)
+    mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
     # pieces connected through faces
     N = get_neighborship(mesh)
     g = Graphs.SimpleGraph(number_of_cells(mesh))

@@ -30,7 +30,7 @@ johansen_data_directory() = joinpath(atlas_data_directory(), "Johansen")
 # ------------------------------- The grids ------------------------------------
 
 """
-    johansen_mesh(model = :sector; co2lab_compatible = false) -> NamedTuple
+    johansen_mesh(model = :sector) -> NamedTuple
 
 The Johansen formation's layers in one of the NPD models, as a mesh with
 columns (no rock), cut from the deck as co2lab's `trapsJohansen` cuts them
@@ -40,8 +40,6 @@ columns (no rock), cut from the deck as co2lab's `trapsJohansen` cuts them
 
 - `model`: `:sector` (NPD5, deck layers 6–11) or `:full_field` (deck layers
   10–14); otherwise an `ArgumentError`.
-- `co2lab_compatible`: mesh without connections across pinched-out layers,
-  as MRST (see Notes). Default `false`.
 
 # Returns
 
@@ -58,13 +56,12 @@ deck is not in [`johansen_data_directory`](@ref).
 # Notes
 
 - The full-field model has inactive zero-thickness layers between active
-  ones. Cells are connected across them (pinch-out processing, with
-  `PINCH 0.001 GAP Inf TOPBOT TOP` as the deck has no `PINCH` keyword), so a
-  column continues below.
-  MRST does not, and co2lab's `topSurfaceGrid` then drops the cells below
-  the gap; `co2lab_compatible = true` gives MRST's behaviour.
+  ones. The deck has no `PINCH` keyword, so, as in ECLIPSE and MRST, cells
+  are not connected across them: the cells below such a layer are discarded,
+  as by co2lab's `topSurfaceGrid`. To connect across, set `grid["PINCH"]`
+  and mesh the returned `grid` again.
 """
-function johansen_mesh(model::Symbol = :sector; co2lab_compatible::Bool = false)
+function johansen_mesh(model::Symbol = :sector)
     haskey(_JOHANSEN_MODELS, model) ||
         throw(ArgumentError("model must be :sector or :full_field, got :$model"))
     m = _JOHANSEN_MODELS[model]
@@ -76,8 +73,7 @@ function johansen_mesh(model::Symbol = :sector; co2lab_compatible::Bool = false)
         JutulDarcy.GeoEnergyIO.parse_grdecl_file(path)
     end
     grid = _cut_layers(grid, m.layers)
-    # co2lab_compatible: no connections across pinched-out layers, as MRST
-    mesh = _mesh_from_grid_section(grid; process_pinch = !co2lab_compatible)
+    mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
     # cells below holes discarded, as co2lab's topSurfaceGrid
     columns, _ = ve_columns(mesh; below_holes = :discard)
     return (mesh = mesh, columns = columns, grid = grid)
@@ -225,7 +221,7 @@ function johansen_ve_domain(; min_perm::Real = 0.11, kwargs...)
     grid = johansen_grid_section(; min_perm)
     # the largest connected piece only, as co2lab's G(1)
     grid["ACTNUM"] = _largest_piece(grid)
-    mesh = _mesh_from_grid_section(grid)
+    mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
     # cells below holes dropped, as co2lab's topSurfaceGrid; then the columns
     # of the trimmed mesh
     columns, discarded = ve_columns(mesh; below_holes = :discard)

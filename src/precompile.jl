@@ -19,7 +19,7 @@
     @compile_workload begin
         # as atlas_mesh: the largest piece, meshed, its columns
         grid["ACTNUM"] = _largest_piece(grid)
-        mesh = _mesh_from_grid_section(grid)
+        mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
         columns, _ = ve_columns(mesh)
         s = trap_surface(mesh, columns)
         for method in (:node, :cell)

@@ -11,7 +11,7 @@ using SparseArrays
 
 # An nx x 1 x nz corner-point grid built by Jutul, 100 m cells in x; layer k of
 # pillar i spans depths top(i, k)..top(i, k + 1).
-function _cp_mesh(nx, nz, top; actnum = fill(true, nx, 1, nz))
+function _cp_mesh(nx, nz, top; actnum = fill(true, nx, 1, nz), pinch = false)
     coord = Float64[]
     for j in 0:1, i in 0:nx
         append!(coord, [i * 100.0, j * 100.0, 0.0, i * 100.0, j * 100.0, 2000.0])
@@ -19,9 +19,11 @@ function _cp_mesh(nx, nz, top; actnum = fill(true, nx, 1, nz))
 
     zc = [top((ii + 1) ÷ 2, k + s) for k in 1:nz for s in (0, 1)
           for jj in 1:2 for ii in 1:2nx]
-    grid = Dict("cartDims" => [nx, 1, nz], "COORD" => coord, "ZCORN" => zc,
-                "ACTNUM" => actnum)
-    return JutulCO2Lab._mesh_from_grid_section(grid)
+    grid = Dict{String, Any}("cartDims" => [nx, 1, nz], "COORD" => coord,
+                             "ZCORN" => zc, "ACTNUM" => actnum)
+    # pinch: connect across zero-thickness layers (ECLIPSE's default PINCH)
+    pinch && (grid["PINCH"] = [0.001, "GAP", Inf, "TOPBOT", "TOP"])
+    return JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
 end
 
 # Transmissibility multipliers of `mesh`'s faces: `value` on `faces` (default
@@ -44,7 +46,7 @@ function _cp_mesh_pillars(nx, nz, top)
           for jj in 1:2 for ii in 1:2nx]
     grid = Dict("cartDims" => [nx, 1, nz], "COORD" => coord, "ZCORN" => zc,
                 "ACTNUM" => fill(true, nx, 1, nz))
-    return JutulCO2Lab._mesh_from_grid_section(grid)
+    return JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
 end
 
 # --------------------- Helpers: a stand-in vertical model ---------------------
@@ -837,7 +839,7 @@ end
 
             grid = Dict("cartDims" => [nx, ny, nz], "COORD" => coord, "ZCORN" => zc,
                         "ACTNUM" => fill(true, nx, ny, nz))
-            mesh = JutulCO2Lab._mesh_from_grid_section(grid)
+            mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
 
             cols, disc = ve_columns(mesh)
             @test number_of_columns(cols) == 6 && isempty(disc)
@@ -891,12 +893,16 @@ end
         pillar_ks(m, cols) = [[cell_ijk(m, c)[3] for c in column_cells(cols, col)]
                               for col in 1:number_of_columns(cols)]
 
-        # a pinched-out layer in pillar 1 (zero thickness): its cells above and
-        # below share a face, so no cut (co2lab would discard k = 3 there)
+        # a pinched-out layer in pillar 1 (zero thickness): with PINCH its cells
+        # above and below share a face, so no cut (co2lab would discard k = 3
+        # there); without, as GeoEnergyIO by default, they do not
         pinched(i, k) = i == 1 && k >= 3 ? layered(i, k - 1) : layered(i, k)
-        m = _cp_mesh(3, 3, pinched)
+        m = _cp_mesh(3, 3, pinched; pinch = true)
         cols, disc = ve_columns(m)
         @test isempty(disc) && pillar_ks(m, cols) == [[1, 3], [1, 2, 3], [1, 2, 3]]
+        m = _cp_mesh(3, 3, pinched)
+        cols, disc = ve_columns(m)
+        @test isempty(disc) && pillar_ks(m, cols) == [[1], [3], [1, 2, 3], [1, 2, 3]]
 
         # a sealed face cuts: pillar 1 split between k = 1 and 2
         m = _cp_mesh(3, 3, layered)
@@ -1184,7 +1190,7 @@ end
               for k in 1:2 for s in (0, 1) for jj in 0:1 for i in 1:3 for ii in 0:1]
         grid = Dict("cartDims" => [3, 1, 2], "COORD" => coord, "ZCORN" => zc,
                     "ACTNUM" => fill(true, 3, 1, 2))
-        mesh = JutulCO2Lab._mesh_from_grid_section(grid)
+        mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
         @test any(length(mesh.faces.faces_to_nodes[f]) > 4
                   for f in 1:number_of_faces(mesh))
 
@@ -1211,7 +1217,7 @@ end
               for k in 1:4 for s in (0, 1) for jj in 0:1 for i in 1:3 for ii in 0:1]
         grid = Dict("cartDims" => [3, 1, 4], "COORD" => coord, "ZCORN" => zc,
                     "ACTNUM" => fill(true, 3, 1, 4))
-        mesh = JutulCO2Lab._mesh_from_grid_section(grid)
+        mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
         cols, _ = ve_columns(mesh; below_holes = :stack)
         sec = ve_section(mesh, cols; along = :i, index = 1)
 
@@ -2897,7 +2903,7 @@ end
             ztop = reshape(cb[3, :], nx + 1, ny + 1)
             @test all(b.grid["ACTNUM"][i, j, 1] <= all(ztop[i:i+1, j:j+1] .> 0)
                       for i in 1:nx, j in 1:ny)
-            m = JutulCO2Lab._mesh_from_grid_section(b.grid)
+            m = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(b.grid)
             @test number_of_cells(m) == count(b.grid["ACTNUM"])
 
             # Jurassic formations use the Jurassic top; rock maps on all layers
@@ -3024,7 +3030,7 @@ end
         grid = sloping_aquifer_grid(; nx = 12, ny = 6, nz = 6, length = 1200.0,
                                     width = 600.0, thickness = 12.0, slope = 0.01,
                                     traps = ((0.5, 0.4, 6.0),))
-        m = JutulCO2Lab._mesh_from_grid_section(grid)
+        m = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
         ijk = [cell_ijk(m, c) for c in 1:number_of_cells(m)]
         patch(i, j) = 4 <= i <= 8 && 2 <= j <= 5
         N = get_neighborship(m)

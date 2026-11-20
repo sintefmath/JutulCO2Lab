@@ -128,7 +128,7 @@ The NamedTuple `(mesh, columns, ve, grid, sides)`, all new:
 """
 function sleipner_ve_domain(; min_perm::Real = 200.0)
     grid = sleipner_grid_section(; min_perm)
-    mesh = _mesh_from_grid_section(grid)
+    mesh = JutulDarcy.GeoEnergyIO.mesh_from_grid_section(grid)
     # cells below holes dropped, as co2lab's topSurfaceGrid; then the columns
     # of the trimmed mesh
     columns, discarded = ve_columns(mesh; below_holes = :discard)
