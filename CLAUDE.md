@@ -13,8 +13,9 @@ returned object.
   run lines with paths from outside the package.  Case studies built on the
   package live in their own repositories, not here.
 - **Manifests are local.**  `Manifest.toml` and `examples/Manifest.toml` are
-  ignored: each checkout `dev`s its sibling Jutul, JutulDarcy and GeoEnergyIO
-  checkouts (see `README.md`).
+  ignored: each checkout resolves the registered Jutul, JutulDarcy and
+  GeoEnergyIO releases within `Project.toml`'s compat bounds (see
+  `README.md`).
 - **Commits:** short subject; the body says what changed and why.  Push only
   when asked.
 

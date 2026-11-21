@@ -30,6 +30,20 @@ Each is also a constructor keyword of the same name.
   `β` for `s^β`.
 - `krw3D`: brine relperm as a function of brine saturation, or `:linear` for
   `(s_w − r_w)/(1 − r_w)`.
+
+# Notes
+
+- **Performance:** the curves are evaluated in the simulator's innermost
+  loops (the capillary fringe's quadrature, every Newton iteration, with AD
+  numbers). A curve that reads a non-constant global variable, e.g. a
+  parameter from a script's `settings`, is type-unstable and can make a run
+  many times slower. Give the parameters to the curve as typed values
+  instead: build it inside a function, or in a `let` block, so that the
+  closure captures them, e.g.
+
+      kr3D = let n = settings.n_g
+          s -> s^n
+      end
 """
 struct RockCurves{P, K, W}
     invPc3D::P  # brine saturation of capillary pressure (Pa), or nothing

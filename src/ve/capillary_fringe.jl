@@ -123,6 +123,26 @@ struct PScaledTable{F} <: VerticalModel
     touched::Float64         # max. saturation below which the touched depth is linear
 end
 
+"""
+    BrineTable
+
+A fringe's fine-scale brine relperm integrated over capillary pressure,
+`WP(p) = ∫₀^p krw3D(1 − sg(u)) du`, as a cubic Hermite table: the brine
+counterpart of [`PScaledTable`](@ref)'s `krP`. A `LayeredFringe` with a
+fixed residual integrates a function `krw3D` over a column from it.
+
+# Fields
+
+- `p`: the table's nodes, capillary pressure (Pa), from 0 to the upper limit.
+- `WP`: the integral of the fine-scale brine relperm over `p`, at each node.
+- `w`: its derivative, the fine-scale brine relperm at each node.
+"""
+struct BrineTable
+    p::Vector{Float64}   # nodes (capillary pressure, Pa), 0 to Pmax
+    WP::Vector{Float64}  # integral of the fine-scale brine relperm over p
+    w::Vector{Float64}   # its derivative: the fine-scale brine relperm
+end
+
 # ------------------------------- Building tables ------------------------------
 
 # co2lab's fringe for `domain` and `fluid`: its table; refuses caprock rugosity
@@ -152,6 +172,15 @@ function _fringe_table(spec::CapillaryFringeTable, domain, fluid)
     t = _adaptive_table(sg, kr3D, pmax, spec.tolerance)
     return PScaledTable(t..., invpc, kscale, spec.tip_saturation,
                         _entry_pressure(sg, pmax), spec.touched_saturation)
+end
+
+# The brine relperm krw3D of fringe table t integrated over capillary
+# pressure, on nodes refined for both the CO2 saturation and the brine relperm
+# to `rtol`. Returns a new BrineTable.
+function _brine_table(t::PScaledTable, krw3D, rtol)
+    sg(p) = 1 - t.invpc(max(p, 0.0))
+    p, _, _, WP, w = _adaptive_table(sg, s -> krw3D(1 - s), t.p[end], rtol)
+    return BrineTable(p, WP, w)
 end
 
 # Throws if the domain has caprock rugosity: the fringe models (like co2lab's)
@@ -301,25 +330,31 @@ end
 """
     _table_value(m, Y, dY, x) -> Real
 
-The table `Y` (`m.SP` or `m.krP`, derivatives `dY`) at `x`: 0 for `x < 0`,
-cubic Hermite on the nodes (at `x = 0` with the slope from the right, the
-plume's), linear beyond the last node. `x` may carry AD derivatives.
+The table `Y` (`m.SP`, `m.krP` or a `BrineTable`'s `WP`, derivatives `dY`)
+at `x`: 0 for `x < 0`, cubic Hermite on the nodes (at `x = 0` with the slope
+from the right, the plume's), linear beyond the last node. `x` may carry AD
+derivatives. A NaN `x` (a diverged Newton iterate) gives NaN, so that the
+simulator cuts the step instead of failing here.
 """
-function _table_value(m::PScaledTable, Y, dY, x)
+function _table_value(m::Union{PScaledTable, BrineTable}, Y, dY, x)
     xv = _plain(x)
+    isnan(xv) && return zero(x) + NaN
     xv < 0 && return zero(x)
     n = length(m.p)
     xv >= m.p[n] && return Y[n] + dY[n] * (x - m.p[n])
-    k = searchsortedlast(m.p, xv)
+    # + 0.0: −0.0 is located as 0.0 (searchsortedlast sorts it before 0.0)
+    k = searchsortedlast(m.p, xv + 0.0)
     return _hermite(m.p[k], m.p[k+1], Y[k], Y[k+1], dY[k], dY[k+1], x)
 end
 
 "The derivative of `_table_value` at the plain value `x`."
 function _table_slope(m::PScaledTable, Y, dY, x)
+    isnan(x) && return NaN
     x < 0 && return 0.0
     n = length(m.p)
     x >= m.p[n] && return dY[n]
-    k = searchsortedlast(m.p, x)
+    # + 0.0: −0.0 is located as 0.0 (searchsortedlast sorts it before 0.0)
+    k = searchsortedlast(m.p, x + 0.0)
     return _hermite_slope(m.p[k], m.p[k+1], Y[k], Y[k+1], dY[k], dY[k+1], x)
 end
 

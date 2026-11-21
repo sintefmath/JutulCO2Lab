@@ -205,6 +205,10 @@ the residual saturations and the hysteresis law.
   pressure (a `PScaledTable`).
 - `krw3D`: per rock type, the fine-scale brine relperm function, or
   `:linear`.
+- `brine`: per rock type, the brine relperm integrated over capillary
+  pressure (a `BrineTable`) for a fixed residual and a function `krw3D`;
+  `nothing` otherwise (closed form for `:linear`, quadrature for endpoint
+  scaling).
 - `cell_type`: the rock type of each cell, indexed as the entries of `cells`
   (the last entry of each column unused).
 - `res_water`: residual brine saturation.
@@ -215,10 +219,11 @@ the residual saturations and the hysteresis law.
   or `res_gas` is 0).
 - `tip_height`: the plume tip, as a fraction of the column height.
 """
-struct LayeredFringeModel{T, W, L} <: VerticalModel
+struct LayeredFringeModel{T, W, B, L} <: VerticalModel
     cells::SharpInterfaceIntegrated  # per column: cell boundaries, ∫φ·area, ∫k_x dz
     tables::Vector{T}                # per rock type: integrals over capillary pressure
     krw3D::Vector{W}                 # per rock type: brine relperm, or :linear
+    brine::Vector{B}                 # per rock type: brine relperm table, or nothing
     cell_type::Vector{Int}           # rock type of cell a of `cells`
     res_water::Float64               # residual brine saturation
     res_gas::Float64                 # residual CO2 saturation
@@ -232,7 +237,11 @@ function _vertical_model(spec::LayeredFringe, domain, fluid)
     _vertical_model(spec.cells, domain, fluid)
     tables = [_fringe_table(f, domain, fluid) for f in spec.fringes]
     p_res = [_residual_pressure(t, fluid.res_gas) for t in tables]
-    return LayeredFringeModel(spec.cells, tables, spec.krw3D, spec.cell_type,
+    # the brine relperm as a table where the fixed residual's integral uses it
+    tabulate(kw) = spec.law isa FixedResidual && !(kw isa Symbol)
+    brine = [tabulate(kw) ? _brine_table(t, kw, f.tolerance) : nothing
+             for (t, kw, f) in zip(tables, spec.krw3D, spec.fringes)]
+    return LayeredFringeModel(spec.cells, tables, spec.krw3D, brine, spec.cell_type,
                               fluid.res_water, fluid.res_gas, spec.law, p_res,
                               spec.tip_height)
 end
@@ -262,8 +271,9 @@ _settings(m::LayeredFringeModel) = first(m.tables)
 # Column i's cells, as indices a into m.cells (the cell from z[a] to z[a+1])
 _cell_range(c::SharpInterfaceIntegrated, i) = c.pos[i]:(c.pos[i+1] - 2)
 
-# ∫ of table Y (SP or krP) over depths [a, b] for capillary height h: the
-# integral of the fine-scale quantity over that depth range (dg = Δρ g)
+# ∫ of table Y (SP, krP or a BrineTable's WP) over depths [a, b] for capillary
+# height h: the integral of the fine-scale quantity over that depth range
+# (dg = Δρ g)
 function _depth_integral(t, Y, dY, h, a, b, dg)
     return (_table_value(t, Y, dY, dg * (h - a)) - _table_value(t, Y, dY, dg * (h - b))) /
            dg
@@ -367,20 +377,41 @@ _brine_relperm_full(kw::Symbol) = 1.0
 _brine_relperm_full(kw) = kw(1.0)
 
 # ∫ krw3D(1 − s(z)) dz over [top, bot] of cell a (`s` the actual profile's
-# ∫ s dz there): linear, (s_w − r_w)/(1 − r_w), in closed form
+# ∫ s dz there): linear, (s_w − r_w)/(1 − r_w), in closed form; a function by
+# the hysteresis law
 function _brine_integral(m::LayeredFringeModel, a, top, bot, s, h, h_max, dg)
     kw = _krw(m, a)
     kw isa Symbol && return (bot - top) - s / (1 - m.res_water)
-    return _brine_quadrature(_table(m, a), kw, m, top, bot, h, h_max, dg,
-                             m.p_res[m.cell_type[a]])
+    return _brine_integral(m.law, m, kw, a, top, bot, h, h_max, dg)
+end
+
+# Endpoint scaling mixes the two profiles at every depth: by quadrature
+_brine_integral(::EndpointScaling, m, kw, a, top, bot, h, h_max, dg) =
+    _brine_quadrature(_table(m, a), kw, m, top, bot, h, h_max, dg,
+                      m.p_res[m.cell_type[a]])
+
+# A fixed residual: the stretches of `_cell_integrals`, each from one profile
+# or constant, so from the brine table: the free profile's brine down to
+# h − d_r, 1 − r_g in the swept zone, the old profile's down to h_max, brine
+# alone below
+function _brine_integral(::FixedResidual, m, kw, a, top, bot, h, h_max, dg)
+    bt = m.brine[m.cell_type[a]]
+    clip(x) = _min_c(_max_c(x, top), bot)
+    dr = m.p_res[m.cell_type[a]] / dg
+    b, e, d = clip(h - dr), clip(h_max - dr), clip(h_max)
+    return _depth_integral(bt, bt.WP, bt.w, h, top, b, dg) +
+           kw(1 - m.res_gas) * (e - b) +
+           _depth_integral(bt, bt.WP, bt.w, h_max, e, d, dg) + kw(1.0) * (bot - d)
 end
 
 # A function krw3D: Gauss–Legendre between the profiles' kinks (where the
 # capillary pressure of either reaches 0 or the entry pressure). The kinks
 # carry their AD derivatives: the saturation may jump there (an entry
 # pressure, no capillarity), and the moving jump is part of the derivative.
+# Below a profile's zero capillary pressure it holds no CO2, as in the tables
+# (not the saturation at p = 0⁺, which may be positive)
 function _brine_quadrature(t, krw3D, m, top, bot, h, h_max, dg, p_res)
-    sg(p) = 1 - t.invpc(_max_c(p, 0.0))
+    sg(p) = _plain(p) < 0 ? zero(p) : 1 - t.invpc(p)
     sw(z) = 1 - _local_co2(m.law, m, sg(dg * (h - z)), sg(dg * (h_max - z)))
     z0 = zero(h) + zero(h_max) + zero(dg)
     # where a profile's capillary pressure reaches 0, the entry pressure or (a

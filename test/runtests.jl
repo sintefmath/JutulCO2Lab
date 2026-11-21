@@ -1942,6 +1942,42 @@ end
             end
         end
 
+        # a fixed residual with a function krw3D: the brine relperm from the
+        # brine table, against quadrature of the fine profile (CO2 none below a
+        # profile's zero capillary pressure). Brooks-Corey curves with Pc 0 up
+        # to a critical saturation c: c = r_g (the residual from the fringe's
+        # foot, p_res = 0) and c < r_g (p_res inside the Brooks-Corey part)
+        for c in (rg, 0.1)
+            bc_pc(p) = p < pe ? 1 - c : 1 - c - (1 - rw - c) * (1 - (p / pe)^(-0.55))
+            eff(sg) = clamp((sg - c) / (1 - rw - c), 0.0, 1.0)
+            bc_kw(sw) = 0.5 * (1 - eff(1 - sw))^4
+            bc_kg(sg) = 0.9 * eff(sg)^2 * (1 - (1 - eff(sg))^5)
+            m = build(LayeredFringe(mesh, cols; poro, perm_x = perm, invPc3D = bc_pc,
+                                    kr3D = bc_kg, krw3D = bc_kw,
+                                    hysteresis = FixedResidual()))
+            @test all(b -> b isa J.BrineTable, m.brine)
+            @test (m.p_res[1] == 0) == (c == rg)
+            # a diverged iterate's arguments: −0.0 as 0.0, NaN as NaN (no error)
+            t = m.tables[1]
+            @test J._table_value(t, t.SP, t.s, -0.0) == J._table_value(t, t.SP, t.s, 0.0)
+            @test isnan(J._table_value(t, t.SP, t.s, NaN))
+            @test isnan(J._table_slope(t, t.SP, t.s, NaN))
+            sg(p) = p < 0 ? 0.0 : 1 - bc_pc(p)
+            for (h, hmax) in ((0.5, 3.0), (6.0, 9.0), (7.0, 7.0), (2.0, 15.0))
+                loc(zz) = max(sg(drho * g * (h - zz)),
+                              min(rg, sg(drho * g * (hmax - zz))))
+                for (T, B) in ((0.0, H), (3.3, 11.7))
+                    I = J._interval_integrals(m, 2, T, B, h, hmax, drho)
+                    ref = quad(zz -> kx(zz) * bc_kw(1 - loc(zz)), T, B)
+                    @test I.krW ≈ ref rtol = 1e-5
+                end
+            end
+            # the derivative in h, AD against central differences
+            kw_of(hh) = J._interval_integrals(m, 2, 0.0, H, hh, 9.0, drho).krW
+            d = Jutul.ForwardDiff.derivative(kw_of, 6.0)
+            @test d ≈ (kw_of(6.0 + 1e-6) - kw_of(6.0 - 1e-6)) / 2e-6 rtol = 1e-5
+        end
+
         # zero capillarity: the integrated sharp interface (its brine endpoint
         # in the residual zone that of the linear krw3D, 1 − r_g/(1 − r_w))
         sharp = build(LayeredFringe(mesh, cols; poro, perm_x = perm,
