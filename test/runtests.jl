@@ -1972,6 +1972,15 @@ end
                     @test I.krW ≈ ref rtol = 1e-5
                 end
             end
+            # an empty column's brine relperm: the brine curve's endpoint, not 1
+            # (both laws: the tip formulas count the deficit from brine alone)
+            m_es = build(LayeredFringe(mesh, cols; poro, perm_x = perm, invPc3D = bc_pc,
+                                       kr3D = bc_kg, krw3D = bc_kw))
+            for mm in (m, m_es)
+                kr0 = J._column_relperm(mm, 2, 0.0, 0.0, 0.0, 0.0, H, drho, 0.0, 1.0,
+                                        1.0, rw, rg)
+                @test kr0[1] ≈ bc_kw(1.0) rtol = 1e-12
+            end
             # the derivative in h, AD against central differences
             kw_of(hh) = J._interval_integrals(m, 2, 0.0, H, hh, 9.0, drho).krW
             d = Jutul.ForwardDiff.derivative(kw_of, 6.0)

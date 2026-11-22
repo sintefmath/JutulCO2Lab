@@ -722,16 +722,23 @@ function _column_brine(::FixedResidual, m, i, sG, sGmax, h_max, drho, top, Hc, I
     hr = ratio isa Float64 && ratio == 1.0 ? ht :
          _fixed_height(m, i, tip * ratio, tip, ht, drho)
     J = _interval_integrals(m, i, top, Hc, hr, ht, drho)
-    return I.kz - (I.kz - J.krW) * sGmax / tip
+    W0 = _brine_alone(m, i, top, Hc, drho)
+    return W0 - (W0 - J.krW) * sGmax / tip
 end
+
+# The brine relperm (times ∫ k dz) over [top, Hc] of column i holding no CO2:
+# each cell's brine curve at s_w = 1 (1 for the linear curve, k_rw^end for a
+# curve with an endpoint), not 1 throughout
+_brine_alone(m::LayeredFringeModel, i, top, Hc, drho) =
+    _interval_integrals(m, i, top, Hc, 0.0, 0.0, drho).krW
 
 # The brine relperm (times ∫ k dz) below the tip saturation. There h is linear
 # in S, so the profile at h holds CO2 ∝ S², not S, and the integrated brine
-# relperm would have no slope at S = 0. Its deficit (∫ k dz less it) is taken
-# linear in each profile's saturation instead, exact at the tip: for the
-# linear krw3D the deficit is linear in the profiles' CO2, so this is exact
-# (co2lab's krW_simple in a homogeneous column); for another krw3D to first
-# order. `I` holds the integrals over the depths [top, Hc] (below the
+# relperm would have no slope at S = 0. Its deficit (the brine-only value less
+# it) is taken linear in each profile's saturation instead, exact at the tip:
+# for the linear krw3D the deficit is linear in the profiles' CO2, so this is
+# exact (co2lab's krW_simple in a homogeneous column); for another krw3D to
+# first order. `I` holds the integrals over the depths [top, Hc] (below the
 # subscale relief), and so does the result.
 function _tip_brine_relperm(m::LayeredFringeModel, i, Sf, Sm, h_max, drho, top, Hc,
                             I)
@@ -754,7 +761,8 @@ function _tip_brine_relperm(m::LayeredFringeModel, i, Sf, Sm, h_max, drho, top, 
         ratio = sm > 1e-12 * tip ? Sf / Sm : (sm > 0 ? sf / sm : 1.0)
         # (below the tip h is linear in S, as everywhere: no solve at tiny S)
         J = at(_layered_height(m, i, St * ratio, drho), ht)
-        return I.kz - (I.kz - J.krW) * Sm / St
+        W0 = _brine_alone(m, i, top, Hc, drho)
+        return W0 - (W0 - J.krW) * Sm / St
     end
     # only the free profile below the tip
     D0, Dt = I.kz - at(0.0, h_max).krW, I.kz - at(ht, h_max).krW
