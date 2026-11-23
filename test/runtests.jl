@@ -1987,6 +1987,46 @@ end
             @test d ≈ (kw_of(6.0 + 1e-6) - kw_of(6.0 - 1e-6)) / 2e-6 rtol = 1e-5
         end
 
+        # brine alone below the entry pressure (drainage; entry depth ~1 m): the
+        # cells above a profile's zero capillary pressure but within its entry
+        # depth are summed as brine only, their integrals and AD derivatives
+        # those of every cell's table integrals
+        pe_pc(p) = p < pe ? 1.0 : 1 - rg - (1 - rw - rg) * (1 - (p / pe)^(-0.55))
+        pe_eff(sg) = clamp((sg - rg) / (1 - rw - rg), 0.0, 1.0)
+        pe_kw(sw) = 0.5 * (1 - pe_eff(1 - sw))^4
+        pe_kg(sg) = 0.9 * pe_eff(sg)^2 * (1 - (1 - pe_eff(sg))^5)
+        function all_cells(m, T, B, h, hm, dr)
+            c, dg = m.cells, dr * g
+            co2, krW = zero(h + hm + dr), zero(h + hm + dr)
+            for a in J._cell_range(c, 2)
+                top, bot = max(c.z[a], T), min(c.z[a+1], B)
+                bot > top || continue
+                dz = c.z[a+1] - c.z[a]
+                s = J._cell_integrals(m.law, m, a, top, bot, h, hm, dg)[3]
+                co2 += (c.V[a+1] - c.V[a]) / dz * s
+                krW += (c.K[a+1] - c.K[a]) / dz * J._brine_integral(m, a, top, bot, s,
+                                                                    h, hm, dg)
+            end
+            return [co2, krW]
+        end
+        for law in (FixedResidual(), J.EndpointScaling())
+            m = build(LayeredFringe(mesh, cols; poro, perm_x = perm, invPc3D = pe_pc,
+                                    kr3D = pe_kg, krw3D = pe_kw, hysteresis = law))
+            @test m.tables[1].entry ≈ pe rtol = 1e-6
+            for (h, hm) in ((6.5, 8.5), (6.5, 6.5), (0.6, 0.6), (0.0, 0.0)),
+                (T, B) in ((0.0, H), (3.3, 11.7))
+                ints(x) = (I = J._interval_integrals(m, 2, T, B, x...); [I.co2, I.krW])
+                x = [h, hm, drho]
+                @test ints(x) ≈ all_cells(m, T, B, x...) rtol = 1e-12 atol = 1e-25
+                @test Jutul.ForwardDiff.jacobian(ints, x) ≈
+                      Jutul.ForwardDiff.jacobian(x -> all_cells(m, T, B, x...), x) rtol =
+                      1e-10 atol = 1e-25
+            end
+            # the profile's CO2 volume: the same with and without the shortcut
+            v = J._profile_volume(m, 2, 6.5, drho)
+            @test v ≈ all_cells(m, 0.0, H, 6.5, 6.5, drho)[1] rtol = 1e-12
+        end
+
         # zero capillarity: the integrated sharp interface (its brine endpoint
         # in the residual zone that of the linear krw3D, 1 − r_g/(1 − r_w))
         sharp = build(LayeredFringe(mesh, cols; poro, perm_x = perm,

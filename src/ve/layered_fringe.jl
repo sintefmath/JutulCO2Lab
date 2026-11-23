@@ -313,9 +313,11 @@ function _interval_integrals(m::LayeredFringeModel, i, T, B, h, h_max, drho)
         dz = c.z[a+1] - c.z[a]
         phiA, k = (c.V[a+1] - c.V[a]) / dz, (c.K[a+1] - c.K[a]) / dz
         pv, kz = pv + phiA * (bot - top), kz + k * (bot - top)
-        # below both profiles: brine only (the top cell of an empty column
-        # counts, for the slope at S = 0)
-        if top > hv
+        # below both profiles' CO2 (their capillary pressure below the cell's
+        # entry pressure): brine only, its integrals exactly constant there
+        # (without entry pressure the top cell of an empty column counts, for
+        # the slope at S = 0)
+        if top > hv - _entry_depth(m, a, dg)
             krW += k * (bot - top) * _brine_relperm_full(_krw(m, a))
             continue
         end
@@ -337,6 +339,12 @@ function _interval_integrals(m::LayeredFringeModel, i, T, B, h, h_max, drho)
     return (free = free, max = smax, co2 = co2, kfree = kf, kmax = km, krG = krG,
             krW = krW, pv = pv, kz = kz)
 end
+
+# How far above a profile's zero capillary pressure cell a's rock takes in CO2:
+# its entry pressure over Δρ g (dg, plain value), 0 without entry pressure or
+# buoyancy
+_entry_depth(m::LayeredFringeModel, a, dg) =
+    _plain(dg) > 0 ? _table(m, a).entry / _plain(dg) : 0.0
 
 # The last cell of the range `r` (indices into the cell boundaries of `c`)
 # whose top is not below depth `hv`: the cells after it lie below both
@@ -508,7 +516,8 @@ function _profile_volume(m, i, h, drho)
     for a in _cell_range(c, i)
         c.z[a] > _plain(h) && break
         dz = c.z[a+1] - c.z[a]
-        dz > 0 || continue
+        # (a cell whose top lies below the profile's CO2 holds none)
+        (dz > 0 && c.z[a] <= _plain(h) - _entry_depth(m, a, dg)) || continue
         phiA = (c.V[a+1] - c.V[a]) / dz
         t = _table(m, a)
         v += phiA * _depth_integral(t, t.SP, t.s, h, c.z[a], c.z[a+1], dg)
