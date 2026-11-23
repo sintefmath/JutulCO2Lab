@@ -1,5 +1,8 @@
 # JutulCO2Lab
 
+> [!NOTE]
+> This code is an early preview - under active development! Use at your own risk :-)
+
 Vertical-equilibrium (VE) CO2 storage simulation on
 [Jutul](https://github.com/sintefmath/Jutul.jl) /
 [JutulDarcy](https://github.com/sintefmath/JutulDarcy.jl): a reimplementation
