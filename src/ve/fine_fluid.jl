@@ -274,16 +274,24 @@ function _fine_cell_fluid(fine, domain)
 end
 
 # The capillary pressure as a function of CO2 saturation (the inverse of
-# invPc3D); at zero CO2 the entry pressure, the limit from above
+# invPc3D); at zero CO2 the entry pressure, the limit from above; from the
+# curve's last saturation on, the lowest pressure reaching it (a cap below
+# pmax, not the doubling's overshoot)
 _capillary_of_co2(::Nothing, rw) = sg -> 0.0
 function _capillary_of_co2(invpc, rw)
     sgp(p) = 1 - invpc(max(p, 0.0))
     pmax = _upper_capillary_pressure(invpc, rw, 0.0)
     pe = _entry_pressure(sgp, pmax)
+    s_end, lo, hi = sgp(pmax), pe, pmax
+    for _ in 1:100
+        mid = (lo + hi) / 2
+        sgp(mid) < s_end ? (lo = mid) : (hi = mid)
+    end
+    p_end = hi
     return function (sg)
         sg <= 0 && return pe
-        sg >= sgp(pmax) && return pmax
-        lo, hi = pe, pmax
+        sg >= s_end && return p_end
+        lo, hi = pe, p_end
         for _ in 1:100
             mid = (lo + hi) / 2
             sgp(mid) < sg ? (lo = mid) : (hi = mid)
