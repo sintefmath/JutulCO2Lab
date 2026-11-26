@@ -40,7 +40,8 @@
     LayeredFringe(mesh, columns; poro, perm_x, invPc3D, kr3D = 3, krw3D = :linear,
                   rock_type = nothing, hysteresis = EndpointScaling(), perm_y = nothing,
                   geometry = ve_column_geometry(mesh, columns), tolerance = 1e-6,
-                  tip_height = 1e-6, touched_saturation = 1e-3) -> LayeredFringe
+                  tip_height = 1e-6, touched_saturation = 1e-3,
+                  max_plume_height = Inf) -> LayeredFringe
 
 Vertical model for a capillary fringe in VE columns whose rock varies with
 depth: co2lab's `'P-scaled table'` fringe combined with the layers of
@@ -78,6 +79,14 @@ the fringe's profile, cell by cell, with the hysteresis law's residual CO2.
   linear in the saturation (the exact height has an unbounded slope at zero
   CO2 for many curves).  Default `1e-6`.
 - `tolerance`, `touched_saturation`: as for [`CapillaryFringeTable`](@ref).
+- `max_plume_height`: a cap on the capillary height (m), e.g. the
+  formation's thickness: above the saturation whose profile reaches it, the
+  height is taken linear in the saturation, with its slope at the cap.
+  Near full saturation (`1 − r_w`) the exact height grows without bound (in a
+  thin column, kilometres for the last few per cent), where Newton's
+  iterates jump between metres and kilometres; real plume heights stay below
+  the formation's thickness, so converged states below the cap are
+  unchanged. Default `Inf`: no cap.
 
 # Returns
 
@@ -116,6 +125,7 @@ struct LayeredFringe{W, L <: HysteresisLaw} <: VerticalModel
     cell_type::Vector{Int}                   # rock type of cell a of `cells`
     law::L                                   # hysteresis law
     tip_height::Float64                      # plume tip, fraction of column height
+    max_height::Float64                      # cap on the capillary height (m)
 end
 
 function LayeredFringe(mesh, columns::VEColumns; poro, perm_x, invPc3D, kr3D = 3,
@@ -123,7 +133,7 @@ function LayeredFringe(mesh, columns::VEColumns; poro, perm_x, invPc3D, kr3D = 3
                        hysteresis::HysteresisLaw = EndpointScaling(), perm_y = nothing,
                        geometry = ve_column_geometry(mesh, columns),
                        tolerance = 1e-6, tip_height = 1e-6,
-                       touched_saturation = 1e-3)
+                       touched_saturation = 1e-3, max_plume_height = Inf)
     types = something(rock_type, ones(Int, number_of_cells(mesh)))
     n = maximum(types)
     curves = [_per_type(x, n) for x in (invPc3D, kr3D, krw3D)]
@@ -140,8 +150,9 @@ function LayeredFringe(mesh, columns::VEColumns; poro, perm_x, invPc3D, kr3D = 3
                                     touched_saturation)
                for (pc, kr) in zip(curves[1], curves[2])]
     krw = [kw for kw in curves[3]]
+    max_plume_height > 0 || throw(ArgumentError("max_plume_height must be positive"))
     return LayeredFringe(cells, fringes, krw, _cell_types(cells, columns, types),
-                         hysteresis, Float64(tip_height))
+                         hysteresis, Float64(tip_height), Float64(max_plume_height))
 end
 
 # One value per rock type: a vector as given, a single value for all n
@@ -230,6 +241,7 @@ struct LayeredFringeModel{T, W, B, L} <: VerticalModel
     law::L                           # hysteresis law
     p_res::Vector{Float64}           # per rock type: capillary pressure where s = r_g
     tip_height::Float64              # plume tip, fraction of column height
+    max_height::Float64              # cap on the capillary height (m; Inf: none)
 end
 
 # The model belongs to its grid; the tables as CapillaryFringeTable's
@@ -243,7 +255,7 @@ function _vertical_model(spec::LayeredFringe, domain, fluid)
              for (t, kw, f) in zip(tables, spec.krw3D, spec.fringes)]
     return LayeredFringeModel(spec.cells, tables, spec.krw3D, brine, spec.cell_type,
                               fluid.res_water, fluid.res_gas, spec.law, p_res,
-                              spec.tip_height)
+                              spec.tip_height, spec.max_height)
 end
 
 # The capillary pressure at which table t's drainage CO2 saturation reaches
@@ -450,13 +462,35 @@ The capillary height of column `i` whose drainage profile holds the CO2
 saturation `S` (pore-volume weighted), at density difference `drho`: the root
 of `Σ φA ∫ s dz − S·V` over the column. Solved on plain values to round-off,
 the derivatives by one Newton step with the AD values; below the tip
-([`_tip`](@ref)) linear in `S`. Zero for `drho ≤ 0`.
+([`_tip`](@ref)) linear in `S`; above the saturation reaching the cap
+`max_height`, linear in `S` from there ([`_capped_height`](@ref)). Zero for
+`drho ≤ 0`.
 """
 function _layered_height(m::LayeredFringeModel, i, S, drho)
     _plain(drho) > 0 || return zero(S) + zero(drho)
     ht, St = _tip(m, i, drho)
     _plain(S) < _plain(St) && return ht * S / St
-    return _layered_newton(m, i, S, drho)
+    h = _layered_newton(m, i, S, drho)
+    _plain(h) > m.max_height || return h
+    return _capped_height(m, i, S, drho)
+end
+
+"""
+    _capped_height(m, i, S, drho) -> Real
+
+Column `i`'s capillary height above the cap: `h_cap + (S − S_cap)·V/s'`, with
+`S_cap` the saturation of the drainage profile reaching `h_cap =
+m.max_height` and `s'` that profile's slope there (pore volume of CO2 per
+metre): continuous with the exact height and its slope at the cap, linear
+beyond it. Derivatives through `S` and `drho`.
+"""
+function _capped_height(m::LayeredFringeModel, i, S, drho)
+    hc = m.max_height
+    _, V = _column_extent(m.cells, i)
+    s_cap = _profile_volume(m, i, hc, drho) / V
+    slope = _profile_slope(m, i, hc, _plain(drho))
+    slope > 0 || return zero(S) + zero(drho) + hc
+    return hc + (S - s_cap) * (V / slope)
 end
 
 """
@@ -574,7 +608,8 @@ function _drainage_slope(m, i, smax, hm, drho)
     ht, St = _tip(m, i, drho)
     smax < St && return ht / St
     _, V = _column_extent(m.cells, i)
-    s = _profile_slope(m, i, hm, drho)
+    # above the cap the height is linear, with the slope at the cap
+    s = _profile_slope(m, i, min(hm, m.max_height), drho)
     return s > 0 ? V / s : 0.0
 end
 

@@ -109,7 +109,8 @@ end
 
 """
     co2lab_ve_fluid(fluid::FineScaleFluid, mesh, columns; poro, perm_x,
-                    perm_y = nothing, rock_type = nothing, dis_rate = 0.0)
+                    perm_y = nothing, rock_type = nothing, dis_rate = 0.0,
+                    max_plume_height = Inf)
         -> CO2LabVEFluid
 
 The VE fluid of a fine-scale `fluid` on the blocks of `columns`: its curves
@@ -127,6 +128,8 @@ upscaled over each column, with residual, PVT and dissolution taken from
   `fluid.rock_types`); `nothing`: rock type 1 everywhere.
 - `dis_rate`: co2lab's upscaled dissolution rate, for VE blocks (fine cells
   dissolve instantaneously).
+- `max_plume_height`: [`LayeredFringe`](@ref)'s cap on the capillary height
+  (m), e.g. the formation's thickness; default `Inf`, none.
 
 # Returns
 
@@ -140,7 +143,8 @@ Its field `fine` carries `(fluid, rock_type)` for the hybrid grid's fine
 cells.
 """
 function co2lab_ve_fluid(fluid::FineScaleFluid, mesh, columns::VEColumns; poro, perm_x,
-                         perm_y = nothing, rock_type = nothing, dis_rate = 0.0)
+                         perm_y = nothing, rock_type = nothing, dis_rate = 0.0,
+                         max_plume_height = Inf)
     types = collect(Int, something(rock_type, ones(Int, number_of_cells(mesh))))
     maximum(types) <= length(fluid.rock_types) ||
         throw(ArgumentError("rock_type beyond the fluid's $(length(fluid.rock_types))"))
@@ -155,7 +159,7 @@ function co2lab_ve_fluid(fluid::FineScaleFluid, mesh, columns::VEColumns; poro, 
                                  invPc3D = [r.invPc3D for r in rc],
                                  kr3D = [r.kr3D for r in rc],
                                  krw3D = [r.krw3D for r in rc],
-                                 hysteresis = fluid.hysteresis)
+                                 hysteresis = fluid.hysteresis, max_plume_height)
         krmax = (-1.0, -1.0)
     end
     ve = co2lab_ve_fluid(; vertical, residual = (rw, rg), krmax, dis_rate,
