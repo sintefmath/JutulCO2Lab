@@ -222,19 +222,27 @@ co2lab's `sGmax`, the largest CO2 saturation reached, between 0 and
   [`HysteresisEquation`](@ref). After every Newton update `sG` and `sGmax`
   are projected as in co2lab's `updateState`: `sG ≤ 1 − res_water`, `sGmax`
   into `[sG, 1 − res_water]`, then `sG ≥ sGmax·res_gas` (CO2 cannot fall
-  below the residual its maximum left).
+  below the residual its maximum left). Without dissolution `sGmax` is also
+  kept at least the step's starting `sGmax0` (`max0`), the equation's exact
+  solution being `max(sGmax0, sG)`: an iterate whose `sGmax` followed `sG`
+  below `sGmax0` would see drainage where the column is in imbibition, and
+  Newton cycles across the switch (thin VE columns after injection).
 
 # Fields
 
 - `res_water`: residual brine saturation; `sGmax ≤ 1 − res_water`.
 - `res_gas`: residual CO2 saturation (0 without hysteresis); with hysteresis
   `sG ≥ sGmax·res_gas`.
+- `max0`: the step's starting `sGmax` per cell, set before each step
+  (hysteresis without dissolution); empty: no such bound.
 """
 struct MaxGasSaturation <: Jutul.ScalarVariable
-    res_water::Float64  # residual brine: sGmax ≤ 1 − res_water
-    res_gas::Float64    # residual CO2: sG ≥ sGmax·res_gas (hysteresis)
+    res_water::Float64      # residual brine: sGmax ≤ 1 − res_water
+    res_gas::Float64        # residual CO2: sG ≥ sGmax·res_gas (hysteresis)
+    max0::Vector{Float64}   # the step's starting sGmax (empty: no bound)
 end
-MaxGasSaturation(res_water) = MaxGasSaturation(res_water, 0.0)
+MaxGasSaturation(res_water, res_gas = 0.0) =
+    MaxGasSaturation(Float64(res_water), Float64(res_gas), Float64[])
 Jutul.default_value(model, ::MaxGasSaturation) = 0.0
 Jutul.minimum_value(::MaxGasSaturation) = 0.0
 Jutul.maximum_value(v::MaxGasSaturation) = 1 - v.res_water
@@ -261,16 +269,42 @@ function Jutul.update_primary_variable!(state, v::MaxGasSaturation, state_symbol
     haskey(model.primary_variables, :sG) || return smax
     sG, rw, rg = state.sG, v.res_water, v.res_gas
     val = Jutul.value
+    bounded = length(v.max0) == length(smax)
     for i in eachindex(smax)
-        # in co2lab's order: sG capped, sGmax into [sG, 1 − rw], sG above residual
+        # in co2lab's order: sG capped, sGmax into [sG, 1 − rw] (and not below
+        # the step's start), sG above residual
         sg = min(val(sG[i]), 1 - rw)
         m = max(min(val(smax[i]), 1 - rw), sg)
+        bounded && (m = max(m, v.max0[i]))
         smax[i] = replace_value(smax[i], m)
         sG[i] = replace_value(sG[i], max(sg, m * rg))
     end
     return smax
 end
 
+
+"""
+Jutul hook, before each step (hysteresis without dissolution): the step's
+starting `sGmax` into the unknown's `max0`, the lower bound of its
+projection (see [`MaxGasSaturation`](@ref)).
+
+Modifies: `model.primary_variables[:sGmax].max0`.
+"""
+function Jutul.update_before_step!(storage, sys::CO2LabSystem, model, dt, forces;
+                                   kwarg...)
+    v = get(model.primary_variables, :sGmax, nothing)
+    v isa MaxGasSaturation || return nothing
+    eq = get(model.equations, :hysteresis, nothing)
+    # dissolution consumes residual CO2: sGmax may then fall below sGmax0
+    if eq isa HysteresisEquation && isnothing(eq.dissolution)
+        s0 = storage.state0.sGmax
+        resize!(v.max0, length(s0))
+        v.max0 .= _plain.(s0)
+    else
+        empty!(v.max0)
+    end
+    return nothing
+end
 
 """
     _update_max_gas_saturation!(sGmax, v, sG)

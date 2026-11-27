@@ -520,10 +520,14 @@ function ve_boundary_sides(mesh::UnstructuredMesh, columns::VEColumns, domain)
         d, top = cs.direction[s], first(column_cells(columns, col))
         centroid = (cc[1, col], cc[2, col], cc[3, col])
         A, C, N, t = _side_aggregate(g, fs, perm[col], centroid)
-        # a fine cell's side: its faces' centroid, the depth its flux uses
-        depth, mid = columns.is_ve[col] ?
-                     _side_top_edge(g, bdir, _top_face_nodes(mesh, ijk, bdir, top), top,
-                                    d, col) : (C[3], (C[1], C[2]))
+        # a fine cell's side: its faces' centroid, the depth its flux uses; a
+        # column whose top cell does not reach the side: the side's shallowest
+        # node
+        edge = columns.is_ve[col] ?
+               _side_top_edge(g, bdir, _top_face_nodes(mesh, ijk, bdir, top), top, d, col) :
+               (C[3], (C[1], C[2]))
+        depth, mid = something(edge, (minimum(g.X[n][3] for f in fs for n in g.nodes[f]),
+                                      (C[1], C[2])))
 
         push!(out.column, col); push!(out.dir, d)
         push!(out.depth, depth); push!(out.mid, mid)
@@ -559,8 +563,9 @@ end
 Caprock edge of column `col`'s side in direction `d`: the two nodes shared by
 the top cell `top`'s top face (`top_nodes`: a boundary face, or for a column
 under another block the interior face to the cell above) and its boundary
-faces on that side. Returns their mean depth and (x, y) midpoint; throws if
-there are not exactly two such nodes.
+faces on that side. Returns their mean depth and (x, y) midpoint, or
+`nothing` if there are not exactly two such nodes (the top cell does not
+reach the side).
 """
 function _side_top_edge(g, bdir, top_nodes, top, d, col)
     side_nodes = Set{Int}()
@@ -569,9 +574,7 @@ function _side_top_edge(g, bdir, top_nodes, top, d, col)
     end
 
     shared = [n for n in top_nodes if n in side_nodes]
-    length(shared) == 2 ||
-        error("column $col, $(_DIRECTIONS[d]) side: top edge has " *
-              "$(length(shared)) nodes, expected 2")
+    length(shared) == 2 || return nothing
 
     Xa, Xb = g.X[shared[1]], g.X[shared[2]]
     return ((Xa[3] + Xb[3]) / 2, ((Xa[1] + Xb[1]) / 2, (Xa[2] + Xb[2]) / 2))
